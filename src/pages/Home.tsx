@@ -6,6 +6,8 @@ import {
   BookOpen,
   CalendarCheck,
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Crown,
   Gift,
@@ -108,25 +110,42 @@ const COMPANION_OUTFITS = [
     tone: 'from-white/20 to-[#B8C7FF]/20',
   },
   {
-    id: 'starlace',
-    name: '星纱礼装',
-    desc: 'LV.2 解锁',
-    image: '/avatar.png',
+    id: 'moon-oracle',
+    name: '月白神谕',
+    desc: 'LV.2 解锁 · 光羽礼服',
+    image: '/outfits/moon-oracle.png',
     minLevel: 2,
-    tone: 'from-[#F4CF83]/18 to-[#F7D7EA]/18',
+    tone: 'from-white/24 to-[#F4CF83]/14',
   },
   {
-    id: 'oracle',
-    name: '星环守护',
-    desc: 'LV.4 解锁',
-    image: '/avatar.png',
+    id: 'star-cloak',
+    name: '午夜星斗篷',
+    desc: 'LV.3 解锁 · 星图斗篷',
+    image: '/outfits/star-cloak.png',
+    minLevel: 3,
+    tone: 'from-[#7C9CFF]/22 to-[#17213A]/28',
+  },
+  {
+    id: 'academy-tarot',
+    name: '学院占星',
+    desc: 'LV.4 解锁 · 占星书包',
+    image: '/outfits/academy-tarot.png',
     minLevel: 4,
-    tone: 'from-[#7C9CFF]/20 to-[#B8F7D4]/18',
+    tone: 'from-[#F4CF83]/16 to-[#B8C7FF]/18',
+  },
+  {
+    id: 'glass-robe',
+    name: '液态玻璃礼装',
+    desc: 'LV.5 解锁 · 极光礼裙',
+    image: '/outfits/glass-robe.png',
+    minLevel: 5,
+    tone: 'from-[#B8F7D4]/16 to-[#B8C7FF]/22',
   },
 ];
 
 const getAutoCompanionOutfit = (level: number) =>
-  level >= 4 ? COMPANION_OUTFITS[3] : level >= 2 ? COMPANION_OUTFITS[2] : COMPANION_OUTFITS[1];
+  COMPANION_OUTFITS.filter((outfit) => outfit.id !== 'auto' && outfit.minLevel <= level)
+    .sort((a, b) => b.minLevel - a.minLevel)[0] ?? COMPANION_OUTFITS[1];
 
 const PET_MURMURS = [
   '你今天的心事有点吵，我先帮你把声音调小。',
@@ -161,6 +180,76 @@ const getDrawCount = (question: string) => {
   return 1;
 };
 
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+type SendMode = 'auto' | 'draw' | 'current';
+
+const NEW_READING_KEYWORDS = [
+  '抽',
+  '抽牌',
+  '今日运势',
+  '牌阵',
+  '圣三角',
+  '十字',
+  '岔路',
+  '占卜',
+  '塔罗',
+  '运势',
+  '感情指引',
+  '事业发展',
+  '最近的烦恼',
+  '感情',
+  '恋爱',
+  '爱情',
+  '复合',
+  '关系',
+  '事业',
+  '工作',
+  '财运',
+  '学业',
+  '考试',
+  '选择',
+  '要不要',
+  '该不该',
+  '会不会',
+  '能不能',
+  '适合',
+  '未来',
+  '桃花',
+  'draw',
+  'tarot',
+  'spread',
+];
+
+const CURRENT_READING_KEYWORDS = [
+  '解读',
+  '解释',
+  '展开',
+  '详细',
+  '继续',
+  '刚才',
+  '这张',
+  '这几张',
+  '当前',
+  '上一张',
+  '牌面',
+  '什么意思',
+  '为什么',
+  '怎么办',
+  '总结',
+  'reading',
+  'explain',
+];
+
+const includesKeyword = (text: string, keywords: string[]) =>
+  keywords.some((keyword) => text.toLowerCase().includes(keyword.toLowerCase()));
+
+const shouldCreateNewReading = (question: string, hasCurrentReading: boolean) => {
+  if (hasCurrentReading && includesKeyword(question, CURRENT_READING_KEYWORDS)) return false;
+  if (includesKeyword(question, NEW_READING_KEYWORDS)) return true;
+  return !hasCurrentReading;
+};
+
 const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boolean) => {
   const modeHint = isInternetMode
     ? '如果问题涉及现实信息，请提醒用户需要结合最新事实判断。'
@@ -169,9 +258,9 @@ const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boole
   return `用户问题：${question}
 抽到的塔罗牌：${formatCards(cards)}
 
-请用中文回答，语气克制、清醒、直接，不要废话。结构：
-1. 先一句话点破核心。
-2. 解释牌意和问题的关系。
+请用中文回答，语气客观但温柔，像一位塔罗少女在轻声陪伴用户，不吓人、不审判，也不堆玄学词。不要使用 Markdown 星号、加粗符号或井号标题。结构：
+1. 先用一句温柔但清醒的话说出核心。
+2. 解释牌意和问题的关系，注意给用户留一点余地。
 3. 给一个今天能执行的小建议。
 ${modeHint}`;
 };
@@ -179,6 +268,50 @@ ${modeHint}`;
 const fallbackAnswer = (question: string, cards: DrawnCard[]) => {
   const first = cards[0];
   return `一句话说：你现在真正卡住的不是答案，而是还没决定要承受哪一种代价。\n\n你抽到的是「${first.name}（${first.position}）」。这张牌提醒你，${question.includes('感情') ? '关系里最重要的不是猜对方，而是看自己有没有被稳定对待。' : '先把问题拆小，别试图一次解决整个人生。'}\n\n今天只做一件事：写下你最害怕的结果，再写下如果它发生了你能怎么收场。能收场，就没那么可怕。`;
+};
+
+const cleanTarotAnswer = (text: string) =>
+  text
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*[-•]\s+/gm, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const buildCurrentReadingPrompt = (
+  question: string,
+  currentReading: TarotReading | undefined,
+  currentCardImage: string,
+  isInternetMode: boolean,
+) => {
+  const currentContext = currentReading
+    ? `上一轮问题：${currentReading.question}
+已有牌面：${currentReading.cards}
+上一轮摘要：${currentReading.summary}`
+    : `当前牌图：${currentCardImage || '暂无明确牌图'}`;
+  const modeHint = isInternetMode
+    ? '如果用户追问涉及现实信息，请提醒需要结合最新事实判断。'
+    : '不需要联网，专注于已有牌面、情绪和选择。';
+
+  return `用户这次追问：${question}
+
+${currentContext}
+
+请不要重新抽牌，也不要假装出现了新牌。基于已有牌面继续解读，语气客观但温柔，像一位塔罗少女在轻声陪伴用户。不要使用 Markdown 星号、加粗符号或井号标题，回答要简洁、有行动建议。
+${modeHint}`;
+};
+
+const fallbackCurrentReadingAnswer = (question: string, currentReading?: TarotReading) => {
+  if (!currentReading) {
+    return '现在还没有可继续解读的牌。你可以先抽一张牌，我再沿着那张牌陪你往下看。';
+  }
+  return `我先不重新抽牌，就沿着刚才这组牌继续看。
+
+你问的是「${question}」。这组牌的核心不是给你一个立刻冲出去执行的答案，而是提醒你先把问题拆小：哪一部分是事实，哪一部分只是你害怕它会发生。
+
+今天先做一个动作：把刚才那张牌对应到一个现实选择上，只问自己“下一步最小的动作是什么”。`;
 };
 
 export default function Home() {
@@ -234,10 +367,21 @@ export default function Home() {
   const [floatingExp, setFloatingExp] = useState<number | null>(null);
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<'energy' | 'history' | 'weekly'>('energy');
+  const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const petDragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  } | null>(null);
 
   const todayKey = getLocalDateKey();
   const yesterdayKey = getLocalDateKey(new Date(Date.now() - 86400000));
@@ -289,6 +433,40 @@ export default function Home() {
       ? autoOutfit
       : selectedOutfit;
   const activeCompanionImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
+  const activePetImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
+  const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const baseLeft = rect.left - petOffset.x;
+    const baseTop = rect.top - petOffset.y;
+    const edge = 8;
+    petDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: petOffset.x,
+      originY: petOffset.y,
+      minX: edge - baseLeft,
+      maxX: window.innerWidth - edge - rect.width - baseLeft,
+      minY: edge - baseTop,
+      maxY: window.innerHeight - edge - rect.height - baseTop,
+    };
+  };
+  const handlePetPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!petDragRef.current) return;
+    const nextX = petDragRef.current.originX + event.clientX - petDragRef.current.startX;
+    const nextY = petDragRef.current.originY + event.clientY - petDragRef.current.startY;
+    setPetOffset({
+      x: clampNumber(nextX, petDragRef.current.minX, petDragRef.current.maxX),
+      y: clampNumber(nextY, petDragRef.current.minY, petDragRef.current.maxY),
+    });
+  };
+  const handlePetPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    petDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
   const isTarotImage = (image?: string) => Boolean(image && image.startsWith('/tarot/'));
   const cardStackImages = useMemo(() => {
     const images = [
@@ -414,7 +592,7 @@ export default function Home() {
     navigate(mission === 'diary' ? '/app/diary' : '/app/simulator');
   };
 
-  const handleSend = async (textOverride?: string) => {
+  const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
     if (!plusActive && energy <= 0) {
@@ -422,10 +600,22 @@ export default function Home() {
       return;
     }
 
-    const cards = drawCards(getDrawCount(question));
-    const cardsText = formatCards(cards);
-    const image = cards[0]?.image || '/default-card.png';
-    const images = cards.map((card) => card.image);
+    const currentReading = tarotReadings[0];
+    const hasCurrentReading = Boolean(currentReading || hasDrawnCard);
+    const mode = options.mode ?? 'auto';
+    const shouldDraw =
+      mode === 'draw' || (mode === 'auto' && shouldCreateNewReading(question, hasCurrentReading));
+    const cards = shouldDraw ? drawCards(getDrawCount(question)) : [];
+    const currentImages = currentReading?.cardImages?.length
+      ? currentReading.cardImages
+      : currentReading?.cardImage
+        ? [currentReading.cardImage]
+        : hasDrawnCard
+          ? [cardImage]
+          : [];
+    const cardsText = shouldDraw ? formatCards(cards) : currentReading?.cards ?? '当前牌面';
+    const image = shouldDraw ? cards[0]?.image || '/default-card.png' : currentImages[0] || cardImage || '/default-card.png';
+    const images = shouldDraw ? cards.map((card) => card.image) : currentImages;
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
@@ -436,17 +626,19 @@ export default function Home() {
 
     clearInputDraft('');
     setIsThinking(true);
-    setIsDrawingCards(true);
-    setDrawingCardImages(images);
+    setIsDrawingCards(shouldDraw);
+    setDrawingCardImages(shouldDraw ? images : []);
     setComposerFocused(false);
     setAutoScrollOnNextMessage(!textOverride);
     if (!plusActive) {
       setEnergy((value) => Math.max(0, value - 1));
     }
-    setCardImage(image);
+    if (shouldDraw) setCardImage(image);
     setMessages((prev) => [...prev, userMessage]);
 
-    let answer = fallbackAnswer(question, cards);
+    let answer = shouldDraw
+      ? fallbackAnswer(question, cards)
+      : fallbackCurrentReadingAnswer(question, currentReading);
     try {
       const response = await fetch('/api/deepseek/chat', {
         method: 'POST',
@@ -458,9 +650,14 @@ export default function Home() {
             {
               role: 'system',
               content:
-                '你是一个中文塔罗助手。回答要清醒、简洁、一针见血，不要玄乎堆词，不要长篇废话。',
+                '你是星轨里的中文塔罗少女。回答要客观但温柔，像在轻声陪伴用户看清问题；不要恐吓、不要审判、不要冷冰冰地下结论。不要使用 Markdown 星号、加粗符号或井号标题。没有明确要求抽牌时，不要重新抽牌，只基于当前上下文继续解读。',
             },
-            { role: 'user', content: buildPrompt(question, cards, isInternetMode) },
+            {
+              role: 'user',
+              content: shouldDraw
+                ? buildPrompt(question, cards, isInternetMode)
+                : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
+            },
           ],
         }),
       });
@@ -469,9 +666,10 @@ export default function Home() {
     } catch (error) {
       console.error('Tarot request failed:', error);
     }
+    answer = cleanTarotAnswer(answer);
 
     const drawingElapsed = Date.now() - drawingStartedAt;
-    if (drawingElapsed < 2600) {
+    if (shouldDraw && drawingElapsed < 2600) {
       await new Promise((resolve) => window.setTimeout(resolve, 2600 - drawingElapsed));
     }
 
@@ -480,35 +678,44 @@ export default function Home() {
       role: 'ai' as const,
       text: answer,
       timestamp: Date.now(),
-      cardImage: image,
-      cardImages: images,
+      ...(shouldDraw ? { cardImage: image, cardImages: images } : {}),
     };
 
     setMessages((prev) => [...prev, aiMessage]);
-    setTarotReadings((prev) => {
-      const nextReadings = [
-        {
-        id: crypto.randomUUID(),
-        date: new Date().toISOString(),
-        question,
-        cards: cardsText,
-        summary: answer.replace(/\s+/g, ' ').slice(0, 140),
-        cardImage: image,
-        cardImages: images,
-        },
-        ...prev,
-      ];
-      if (!plusActive && nextReadings.length > readingLimit) {
-        window.setTimeout(() => openUpgradePrompt('history'), 450);
-      }
-      return nextReadings.slice(0, readingLimit);
-    });
-    setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
-      spread: cards.length,
-      plus: plusActive,
-      energySpent: plusActive ? 0 : 1,
-    }));
-    addExp(Math.floor(Math.random() * 8) + 8);
+    if (shouldDraw) {
+      setTarotReadings((prev) => {
+        const nextReadings = [
+          {
+            id: crypto.randomUUID(),
+            date: new Date().toISOString(),
+            question,
+            cards: cardsText,
+            summary: answer.replace(/\s+/g, ' ').slice(0, 140),
+            cardImage: image,
+            cardImages: images,
+          },
+          ...prev,
+        ];
+        if (!plusActive && nextReadings.length > readingLimit) {
+          window.setTimeout(() => openUpgradePrompt('history'), 450);
+        }
+        return nextReadings.slice(0, readingLimit);
+      });
+      setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
+        spread: cards.length,
+        plus: plusActive,
+        energySpent: plusActive ? 0 : 1,
+      }));
+      addExp(Math.floor(Math.random() * 8) + 8);
+    } else {
+      setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
+        kind: 'followup',
+        hasCurrentReading,
+        plus: plusActive,
+        energySpent: plusActive ? 0 : 1,
+      }));
+      addExp(3);
+    }
     setIsThinking(false);
     setIsDrawingCards(false);
     setDrawingCardImages([]);
@@ -685,6 +892,34 @@ export default function Home() {
     </div>
   );
 
+  const companionPet = (wrapperClassName: string, docked = false) => (
+    <div className={wrapperClassName}>
+      <div
+        data-testid="companion-pet"
+        onPointerDown={handlePetPointerDown}
+        onPointerMove={handlePetPointerMove}
+        onPointerUp={handlePetPointerUp}
+        onPointerCancel={handlePetPointerUp}
+        style={{ transform: `translate3d(${petOffset.x}px, ${petOffset.y}px, 0)` }}
+        className={clsx(
+          'h-full w-full cursor-grab touch-none active:cursor-grabbing',
+          docked && 'drop-shadow-[0_18px_24px_rgba(0,0,0,0.22)]',
+        )}
+        aria-label="可拖动的星轨小桌宠"
+        role="img"
+      >
+        <motion.img
+          src={activePetImage}
+          alt="星轨引路人"
+          animate={{ y: [0, -8, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+          className="pointer-events-none h-full w-full select-none object-contain drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]"
+          draggable={false}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative h-full overflow-hidden bg-[#f2eadf] text-[#241c14] dark:bg-[#07080f] dark:text-[#f8f2e7]">
       <div className="pointer-events-none absolute inset-0">
@@ -788,10 +1023,15 @@ export default function Home() {
               <button
                 onClick={() => setShowDailyPanel((value) => !value)}
                 className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[18px] bg-[#f3e8d8]/82 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-transform active:scale-[0.98] dark:bg-white/[0.07]"
+                title={showDailyPanel ? '收起今日任务' : '展开今日任务'}
               >
                 <CalendarCheck size={15} className="shrink-0 text-[#b97b28] dark:text-[#f4cf83]" />
                 <span className="truncate text-[12px] font-semibold text-[#4c3b29] dark:text-white/78">
-                  今日 {missionCount}/3 · 连续 {checkInStreak} 天
+                  今日任务 {missionCount}/3 · 连续 {checkInStreak} 天
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-white/48 px-2 py-1 text-[10px] font-semibold text-[#7c674c] dark:bg-white/[0.08] dark:text-white/58">
+                  {showDailyPanel ? '收起' : '展开'}
+                  {showDailyPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </span>
               </button>
               <button
@@ -808,9 +1048,9 @@ export default function Home() {
               </button>
             </div>
 
-            <div className={clsx('relative z-10 mt-3', visibleMessages.length > 0 ? 'min-h-[74px]' : 'min-h-[300px]')}>
+            <div className={clsx('relative z-10 mt-2', visibleMessages.length > 0 ? 'min-h-[68px]' : 'min-h-[300px]')}>
               {visibleMessages.length > 0 && (
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
                   <div className="relative h-14 w-12">
                     <div className="absolute left-0 top-1 h-12 w-8 -rotate-6 rounded-[10px] bg-[#111827] shadow-[0_10px_20px_rgba(18,14,9,0.18)]" />
                     {(cardStackImages[0] || hasDrawnCard) && (
@@ -821,18 +1061,18 @@ export default function Home() {
                       />
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 rounded-[20px] border border-white/60 bg-white/56 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.045]">
                     <p className="text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">CURRENT READING</p>
-                    <p className="mt-1 truncate text-sm font-medium text-[#3b3024] dark:text-white/72">
+                    <p className="mt-1 line-clamp-2 break-words text-sm font-medium leading-snug text-[#3b3024] dark:text-white/72">
                       {isThinking ? 'Reading...' : companionBubbleText}
                     </p>
                   </div>
                   <button
-                    onClick={() => handleSend('????')}
+                    onClick={() => handleSend('解读当前牌面', { mode: 'current' })}
                     disabled={isThinking}
                     className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#17130f] text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                    aria-label="draw card"
-                    title="draw card"
+                    aria-label="解读当前牌面"
+                    title="解读当前牌面"
                   >
                     <Sparkles size={19} />
                   </button>
@@ -905,15 +1145,7 @@ export default function Home() {
                 </motion.div>
               )}
 
-              <motion.img
-                src={activeCompanionImage}
-                alt="星轨引路人"
-                animate={{ y: [0, -8, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                className="absolute left-1/2 top-[76px] z-20 h-[132px] w-[132px] -translate-x-1/2 object-contain drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]"
-              />
-
-              <div className="absolute bottom-[70px] left-[29%] right-0 z-30 rounded-[24px] border border-white/60 bg-[rgba(255,250,241,0.78)] px-4 py-3.5 shadow-[0_16px_34px_rgba(88,62,30,0.10),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[rgba(14,18,27,0.78)] dark:shadow-[0_18px_38px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)]">
+              <div className="pointer-events-none absolute bottom-[70px] left-[29%] right-0 z-30 rounded-[24px] border border-white/60 bg-[rgba(255,250,241,0.78)] px-4 py-3.5 shadow-[0_16px_34px_rgba(88,62,30,0.10),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[rgba(14,18,27,0.78)] dark:shadow-[0_18px_38px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)]">
                 <p className="text-[12px] font-semibold text-[#b97b28] dark:text-[#f4cf83]">星轨碎碎念</p>
                 <p className="mt-1 line-clamp-3 text-[14px] font-medium leading-relaxed">
                   {companionBubbleText}
@@ -1120,11 +1352,11 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                    {message.text}
+                    {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
                   </div>
                   {message.role === 'ai' && (
                     <div className="flex items-center gap-2 px-2">
-                      <button onClick={() => handleCopy(message.text)} className="p-1 text-apple-text-muted" title="复制">
+                      <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="p-1 text-apple-text-muted" title="复制">
                         <Copy size={13} />
                       </button>
                       <button onClick={handleRegenerate} disabled={isThinking} className="p-1 text-apple-text-muted disabled:opacity-30" title="重新生成">
@@ -1140,6 +1372,16 @@ export default function Home() {
         </div>
       </div>
 
+      {companionPet(
+        clsx(
+          'absolute z-40',
+          visibleMessages.length > 0
+            ? 'bottom-[104px] left-4 h-[88px] w-[88px] sm:left-6'
+            : 'left-1/2 top-[292px] h-[132px] w-[132px] -translate-x-1/2 sm:h-[150px] sm:w-[150px]',
+        ),
+        visibleMessages.length > 0,
+      )}
+
       <div className="absolute inset-x-0 bottom-[18px] z-50 px-4">
         {composerSuggestions}
         {composer}
@@ -1152,7 +1394,7 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
-            className="absolute bottom-[112px] right-5 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62"
+            className="absolute bottom-[112px] left-[calc(50%_-_20px)] z-40 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62"
             aria-label="滚动到底部"
             title="滚动到底部"
           >
@@ -1168,7 +1410,7 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="absolute bottom-[174px] right-5 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:bg-white/[0.08]"
+            className="absolute bottom-[164px] left-[calc(50%_-_20px)] z-40 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:bg-white/[0.08]"
             aria-label="回到顶部"
             title="回到顶部"
           >
@@ -1636,11 +1878,11 @@ export default function Home() {
                         className="mb-3 h-44 w-28 rounded-[22px] object-cover shadow-[0_12px_32px_rgba(0,0,0,0.25)]"
                       />
                     )}
-                    {message.text}
+                    {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
                   </div>
                   {message.role === 'ai' && (
                     <div className="flex items-center gap-2 px-2">
-                      <button onClick={() => handleCopy(message.text)} className="p-1 text-apple-text-muted" title="复制">
+                      <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="p-1 text-apple-text-muted" title="复制">
                         <Copy size={13} />
                       </button>
                       <button onClick={handleRegenerate} disabled={isThinking} className="p-1 text-apple-text-muted disabled:opacity-30" title="重新生成">
@@ -2102,7 +2344,7 @@ function WardrobeModal({
                 <X size={18} />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3 overflow-y-auto p-4 pb-7 no-scrollbar">
+            <div className="grid grid-cols-2 gap-2.5 overflow-y-auto p-3 pb-6 no-scrollbar sm:gap-3 sm:p-4 sm:pb-7">
               {COMPANION_OUTFITS.map((outfit) => {
                 const unlocked = bondLevel >= outfit.minLevel;
                 const active = selectedId === outfit.id;
@@ -2115,7 +2357,7 @@ function WardrobeModal({
                       onSelect(outfit.id);
                     }}
                     className={clsx(
-                      'relative overflow-hidden rounded-[28px] border p-3 text-left transition-all',
+                      'relative min-h-[214px] overflow-hidden rounded-[26px] border p-3 text-left transition-all sm:min-h-[232px] sm:rounded-[28px]',
                       active
                         ? 'border-[#F4CF83]/55 bg-[#F4CF83]/12 shadow-[0_16px_34px_rgba(244,207,131,0.16)]'
                         : 'border-apple-border bg-apple-surface-hover',
@@ -2123,13 +2365,23 @@ function WardrobeModal({
                     )}
                   >
                     <div className={clsx('absolute inset-0 bg-gradient-to-br opacity-80', outfit.tone)} />
-                    <div className="relative z-10 flex h-28 items-end justify-center">
-                      <img src={previewImage} alt={outfit.name} className="max-h-28 object-contain drop-shadow-[0_16px_20px_rgba(0,0,0,0.16)]" />
+                    <div className="relative z-10 flex h-36 items-end justify-center sm:h-40">
+                      {outfit.id === 'auto' ? (
+                        <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-[28px] border border-[#F4CF83]/42 bg-white/32 text-[#B97B28] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] backdrop-blur-xl dark:bg-white/[0.07] dark:text-[#F4CF83]">
+                          <Sparkles size={38} />
+                        </div>
+                      ) : (
+                        <img
+                          src={previewImage}
+                          alt={outfit.name}
+                          className="h-full max-w-[92%] object-contain drop-shadow-[0_16px_22px_rgba(0,0,0,0.18)]"
+                        />
+                      )}
                     </div>
                     <div className="relative z-10 mt-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-apple-text">{outfit.name}</div>
-                        <div className="mt-0.5 text-[11px] leading-relaxed text-apple-text-muted">{outfit.desc}</div>
+                        <div className="line-clamp-2 text-sm font-black leading-tight text-apple-text">{outfit.name}</div>
+                        <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-apple-text-muted">{outfit.desc}</div>
                       </div>
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-apple-border bg-apple-surface">
                         {active ? <Check size={14} className="text-[#B97B28] dark:text-[#F4CF83]" /> : unlocked ? <Shirt size={13} /> : <Lock size={13} />}
