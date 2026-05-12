@@ -1,0 +1,1 @@
+This folder is used to store tarot card images. (card-0.png to card-21.png)

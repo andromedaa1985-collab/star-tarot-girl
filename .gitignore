@@ -1,0 +1,20 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Local generated artifacts
+/codex-screenshots/
+/gemini-frontend-export/
+/app/
+/project/
+/*.png
+/gemini-complete-source.md
+/GEMINI_FRONTEND_HANDOFF.md
+/fix-colors.*
+/test*.js
+/test*.ts
