@@ -1,15 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAppContext, LEVEL_THRESHOLDS, LEVEL_TITLES } from '../store';
-import { User, Sparkles, Heart, Settings, ChevronRight, Volume2, Moon, Vibrate, Edit2, X, Check, Upload, Compass, Crown, CalendarCheck, Gift, ShieldCheck, WalletCards, Loader2 } from 'lucide-react';
+import { User, Sparkles, Heart, Settings, ChevronRight, Moon, Vibrate, Edit2, X, Check, Upload, Compass, Crown, CalendarCheck, Gift, ShieldCheck, WalletCards, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import clsx from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
+  activateTesterAccess,
   activatePlusDays,
+  addFeatureUnlock,
   getMembershipLabel,
   getPlusDaysLeft,
   isPlusActive,
+  isTesterActive,
   startPlusTrial,
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
@@ -22,6 +25,78 @@ const AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Leo&backgroundColor=ffd5dc',
 ];
 
+const SHOP_PLANS = [
+  {
+    id: 'tarot_deep_report',
+    label: '深度牌阵报告',
+    price: '3.9',
+    badge: '轻量入门',
+    title: '把这次卡住的事讲清楚',
+    desc: '适合心里反复打转、但还没办法落到纸面的时候。一次买断，不绑月卡。',
+    bullets: ['五张牌拆开现状、阻碍和建议', '把模糊情绪变成可复盘文字', '赠送 6 点能量，买完马上继续问'],
+  },
+  {
+    id: 'plus_monthly',
+    label: 'Plus 月卡',
+    price: '9.9',
+    badge: '最适合长期用',
+    title: '以后不用每次从头解释',
+    desc: '如果你会反复问同一段关系、工作或选择，Plus 会把牌迹和日记接成一条只属于你的长期线。',
+    bullets: ['周报整理你的高频问题和情绪趋势', '200 条牌迹长期保存', '让桌宠和解读更像认识你的人'],
+  },
+  {
+    id: 'relationship_report',
+    label: '双人关系合盘',
+    price: '6.9',
+    badge: '适合情侣',
+    title: '把“我们合不合”讲明白',
+    desc: '适合两个人一起看。解锁吸引点、冲突雷区、沟通方式和关系时间线。',
+    bullets: ['看见彼此最容易靠近的地方', '提前知道容易吵的雷区', '沉淀一条关系时间线'],
+  },
+  {
+    id: 'relationship_weekly',
+    label: '7 日关系陪伴',
+    price: '12.9',
+    badge: '更适合暧昧期',
+    title: '别只看合不合，看接下来怎么相处',
+    desc: '完整合盘加 7 天观察任务，每天给一个低压力行动，适合还没确定、正在磨合或想复盘的关系。',
+    bullets: ['包含完整关系合盘', '7 天相处任务和进度记录', '一周后更容易看清这段关系的稳定度'],
+  },
+  {
+    id: 'couple_plus_monthly',
+    label: '双人 Plus',
+    price: '16.9',
+    badge: '关系长期用',
+    title: '把这段关系留成长期档案',
+    desc: '适合反复问同一个人的用户。包含 Plus 长期记忆、完整关系合盘和 7 日关系陪伴。',
+    bullets: ['Plus 月卡权益', '解锁完整关系合盘和 7 日陪伴', '更适合情侣、暧昧和复合观察'],
+  },
+  {
+    id: 'bazi_full_archive',
+    label: '八字命理档案',
+    price: '19.9',
+    badge: '完整档案',
+    title: '把底层命盘先定下来',
+    desc: '适合想建立长期自我叙事的人。保存完整命理底稿后，后面的塔罗、日记和近期运势追问都会更有底色。',
+    bullets: ['八字、用神、流年提示', '近期运势可结合当前时间推断', '给长期陪伴一个稳定底盘'],
+  },
+];
+
+const PAY_METHODS = [
+  { id: 'alipay', label: '支付宝', desc: '支持支付宝余额、银行卡等常用方式' },
+  { id: 'wechat', label: '微信支付', desc: '支持微信扫码或手机支付' },
+] as const;
+
+const SPIRITUAL_ANCHORS = [
+  { title: '被记住', desc: '你的牌迹、日记和档案会持续沉淀，不用每次重新解释自己。' },
+  { title: '被理解', desc: '星轨会从反复出现的问题里整理出你的情绪模式和选择惯性。' },
+  { title: '被陪着走完', desc: '每周复盘和守护信件把一次占卜变成一段可回看的陪伴。' },
+];
+
+type PayMethodId = (typeof PAY_METHODS)[number]['id'];
+type PaymentStatus = 'idle' | 'creating' | 'opened' | 'checking' | 'waiting' | 'paid' | 'failed';
+const TESTER_REDEEM_CODE = 'ASTRORAIL-TEST-2026';
+
 export default function Profile() {
   const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
@@ -29,11 +104,14 @@ export default function Profile() {
   
   const [isEditing, setIsEditing] = useState(false);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState('plus_monthly');
+  const [selectedPlanId, setSelectedPlanId] = useState('tarot_deep_report');
+  const [selectedPayMethod, setSelectedPayMethod] = useState<PayMethodId>('alipay');
   const [guardianConsent, setGuardianConsent] = useState(false);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle');
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [redeemCode, setRedeemCode] = useState('');
   const [editName, setEditName] = useState(userName);
   const [editAvatar, setEditAvatar] = useState(userAvatar);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -44,11 +122,13 @@ export default function Profile() {
   const valueScore = Math.min(100, bondLevel * 10 + fragments.length * 5 + diaryEntries.length * 6 + tarotReadings.length * 3 + simulationHistory.length * 4 + checkInStreak * 4);
   const lastCheckInLabel = lastCheckInDate ? lastCheckInDate.replace(/-/g, '.') : '还没开始';
   const plusActive = isPlusActive(membership);
+  const testerActive = isTesterActive(membership);
   const membershipLabel = getMembershipLabel(membership);
   const plusDaysLeft = getPlusDaysLeft(membership);
   const paymentOrderId = searchParams.get('order') || '';
   const paymentReturnType = searchParams.get('payment') || '';
   const plusParam = searchParams.get('plus') || '';
+  const planParam = searchParams.get('plan') || '';
   const userSegment = getUserSegment({
     plusActive,
     activeDays: engagement.activeDays,
@@ -57,7 +137,19 @@ export default function Profile() {
     simulationHistory: simulationHistory.length,
     guardianMessages: guardianMessages.filter((message) => message.role === 'user').length,
   });
-  const upgradePromptCount = appEvents.filter((event) => event.type === 'upgrade_prompt').length;
+  const hasPlanParam = SHOP_PLANS.some((plan) => plan.id === planParam);
+  const recommendedPlanId = hasPlanParam
+    ? planParam
+    : tarotReadings.length >= 3 || diaryEntries.length >= 2 || simulationHistory.length >= 1
+      ? 'plus_monthly'
+      : 'tarot_deep_report';
+  const memorySeedCount = tarotReadings.length + diaryEntries.length + simulationHistory.length + profiles.length;
+  const purchaseContextLine =
+    memorySeedCount > 0
+      ? `你已经留下 ${memorySeedCount} 份线索。开通后，这些记录会变成可继续追问的上下文。`
+      : '先从一份报告或档案开始，后面每次追问都不用重新铺垫背景。';
+  const selectedPlan = SHOP_PLANS.find((plan) => plan.id === selectedPlanId) || SHOP_PLANS[0];
+  const selectedPayMethodMeta = PAY_METHODS.find((method) => method.id === selectedPayMethod) || PAY_METHODS[0];
 
   const toggleSetting = (key: keyof typeof settings) => {
     setSettings(prev => ({ ...prev, [key]: !prev[key] }));
@@ -104,11 +196,32 @@ export default function Profile() {
 
   const grantPaidPlan = (planId: string, orderId: string) => {
     if (hasGrantedOrder(orderId)) {
+      setPaymentStatus('paid');
       setPaymentMessage('这笔订单已经到账过了，不会重复加权益。');
       return;
     }
 
-    if (planId === 'energy_pack_30') {
+    if (planId === 'tarot_deep_report') {
+      setMembership((current) => addFeatureUnlock(current, 'tarot_deep_report'));
+      setEnergy((value) => value + 6);
+      setPaymentMessage('深度牌阵报告已解锁：已赠送 6 点能量，可以回到塔罗页开始一次深度解读。');
+    } else if (planId === 'relationship_report') {
+      setMembership((current) => addFeatureUnlock(current, 'relationship_report'));
+      setEnergy((value) => value + 8);
+      setPaymentMessage('双人关系合盘已解锁：已赠送 8 点能量，可以回到八字页查看完整关系报告。');
+    } else if (planId === 'relationship_weekly') {
+      setMembership((current) => addFeatureUnlock(addFeatureUnlock(current, 'relationship_report'), 'relationship_weekly'));
+      setEnergy((value) => value + 10);
+      setPaymentMessage('7 日关系陪伴已解锁：完整合盘和一周相处任务都已开启。');
+    } else if (planId === 'couple_plus_monthly') {
+      setMembership((current) => addFeatureUnlock(addFeatureUnlock(activatePlusDays(current), 'relationship_report'), 'relationship_weekly'));
+      setEnergy((value) => Math.max(value, 30));
+      setPaymentMessage('双人 Plus 已到账：Plus、完整合盘和 7 日关系陪伴都已开启。');
+    } else if (planId === 'bazi_full_archive') {
+      setMembership((current) => addFeatureUnlock(current, 'bazi'));
+      setEnergy((value) => value + 12);
+      setPaymentMessage('八字完整档案已解锁：已赠送 12 点能量，可以去八字页建立长期档案。');
+    } else if (planId === 'energy_pack_30') {
       setEnergy((value) => value + 30);
       setPaymentMessage('能量包已到账：+30 点星光能量。');
     } else {
@@ -117,15 +230,34 @@ export default function Profile() {
       setPaymentMessage('Plus 已到账：月卡已生效，能量补到至少 20 点。');
     }
     markOrderGranted(orderId);
+    setPaymentStatus('paid');
   };
 
-  const checkAlipayOrder = async (orderId: string) => {
+  const handleRedeemTesterCode = () => {
+    const normalizedCode = redeemCode.trim().toUpperCase();
+    if (!normalizedCode) {
+      setPaymentMessage('请输入兑换码。');
+      return;
+    }
+    if (normalizedCode !== TESTER_REDEEM_CODE) {
+      setPaymentMessage('兑换码无效，请检查后再试。');
+      return;
+    }
+
+    setMembership(activateTesterAccess());
+    setEnergy(999999);
+    setRedeemCode('');
+    setPaymentMessage('兑换成功：无限能量和全部完整功能已解锁。');
+  };
+
+  const checkPaymentOrder = async (orderId: string) => {
     if (!orderId) return;
 
     setPendingOrderId(orderId);
-    setPaymentMessage('正在确认支付宝订单状态...');
+    setPaymentStatus('checking');
+    setPaymentMessage('正在确认订单状态...');
     try {
-      const response = await fetch(`/api/payments/alipay/orders/${encodeURIComponent(orderId)}`);
+      const response = await fetch(`/api/payments/orders/${encodeURIComponent(orderId)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || '订单状态查询失败');
 
@@ -134,8 +266,10 @@ export default function Profile() {
         return;
       }
 
-      setPaymentMessage('订单已创建，但还没收到支付宝支付成功通知。完成付款后点“刷新权益”。');
+      setPaymentStatus('waiting');
+      setPaymentMessage('还没收到支付成功通知。完成付款后点“刷新到账状态”。');
     } catch (error: any) {
+      setPaymentStatus('failed');
       setPaymentMessage(error.message || '订单状态查询失败');
     }
   };
@@ -148,46 +282,78 @@ export default function Profile() {
   };
 
   useEffect(() => {
-    if (paymentReturnType !== 'alipay' || !paymentOrderId) return;
-    checkAlipayOrder(paymentOrderId);
+    if (!paymentReturnType || !paymentOrderId) return;
+    checkPaymentOrder(paymentOrderId);
   }, [paymentReturnType, paymentOrderId]);
 
   useEffect(() => {
+    if (hasPlanParam) setSelectedPlanId(planParam);
     if (plusParam === '1') setShowMembershipModal(true);
-  }, [plusParam]);
+  }, [hasPlanParam, planParam, plusParam]);
 
-  const handleCreateAlipayOrder = async () => {
+  const handleCreatePaymentOrder = async () => {
     setPaymentMessage(null);
+    setPaymentStatus('idle');
     if (!guardianConsent) {
       setPaymentMessage('请先确认价格规则；未成年人需要监护人同意。');
       return;
     }
 
     setIsCreatingPayment(true);
-    try {
-      const response = await fetch('/api/payments/alipay/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planId: selectedPlanId,
-          channel: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'wap' : 'page',
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || '支付宝订单创建失败');
+    setPaymentStatus('creating');
+    const paymentWindow = window.open('', '_blank');
+    if (!paymentWindow) {
+      setPaymentStatus('failed');
+      setPaymentMessage('浏览器拦截了支付窗口，请允许弹窗后再试一次。');
+      setIsCreatingPayment(false);
+      return;
+    }
+    paymentWindow.document.write('<!doctype html><title>正在打开支付</title><body style="font-family:system-ui;padding:24px;">正在打开支付收银台...</body>');
 
-      const paymentWindow = window.open('', '_blank');
-      if (!paymentWindow) {
-        setPaymentMessage('浏览器拦截了新窗口，请允许弹窗后再试一次。');
-        return;
+    try {
+      let orderData: any = null;
+      let lastGatewayError = '';
+      for (const gateway of ['xorpay', 'xunhupay']) {
+        try {
+          const response = await fetch(`/api/payments/${gateway}/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId: selectedPlanId,
+              channel: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'wap' : 'page',
+              payType: selectedPayMethod,
+            }),
+          });
+          const data = await response.json();
+          if (response.ok && (data.payUrl || data.formHtml)) {
+            orderData = data;
+            break;
+          }
+          lastGatewayError = data?.error?.message || 'payment gateway failed';
+        } catch (gatewayError: any) {
+          lastGatewayError = gatewayError?.message || 'payment gateway failed';
+        }
       }
-      paymentWindow.document.open();
-      paymentWindow.document.write(data.formHtml);
-      paymentWindow.document.close();
-      setPendingOrderId(data.orderId);
-      setPaymentMessage(`已打开支付宝收银台，订单号：${data.orderId}`);
+
+      if (!orderData) {
+        console.warn('Payment gateway unavailable:', lastGatewayError);
+        paymentWindow.close();
+        throw new Error('支付暂未开通或收银台暂时不可用，请稍后再试。');
+      }
+
+      if (orderData.formHtml) {
+        paymentWindow.document.open();
+        paymentWindow.document.write(orderData.formHtml);
+        paymentWindow.document.close();
+      } else {
+        paymentWindow.location.href = orderData.payUrl;
+      }
+      setPendingOrderId(orderData.orderId);
+      setPaymentStatus('opened');
+      setPaymentMessage(`已打开${selectedPayMethodMeta.label}收银台，订单号：${orderData.orderId}`);
     } catch (error: any) {
-      setPaymentMessage(error.message || '支付宝订单创建失败');
+      setPaymentStatus('failed');
+      setPaymentMessage(error.message || '支付创建失败，请稍后再试。');
     } finally {
       setIsCreatingPayment(false);
     }
@@ -196,12 +362,12 @@ export default function Profile() {
   return (
     <div className="relative h-full w-full overflow-y-auto overscroll-contain px-6 pt-4 pb-40 text-apple-text no-scrollbar">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="font-sans text-3xl font-bold tracking-widest text-[#6B8AFF]">我的</h1>
+        <h1 className="font-sans text-3xl font-bold tracking-widest text-apple-accent">我的</h1>
         <button 
           onClick={() => navigate('/app/settings')}
           className="p-2 rounded-full glass-panel hover:bg-apple-surface-hover transition-colors border-apple-border"
         >
-          <Settings size={20} className="text-[#6B8AFF]" />
+          <Settings size={20} className="text-apple-accent" />
         </button>
       </div>
 
@@ -211,23 +377,23 @@ export default function Profile() {
         className="bg-apple-surface backdrop-blur-xl rounded-3xl p-6 mb-8 flex items-center gap-6 relative overflow-hidden border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
       >
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 mix-blend-overlay pointer-events-none"></div>
-        <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-[#6B8AFF]/20 to-transparent rounded-bl-full pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-[#4F46E5]/20 blur-3xl rounded-full pointer-events-none"></div>
+        <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-apple-accent/14 to-transparent rounded-bl-full pointer-events-none"></div>
+        <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-apple-gold/12 blur-3xl rounded-full pointer-events-none"></div>
         
-        <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#6B8AFF] to-[#4F46E5] p-[2px] shadow-[0_0_20px_rgba(107,138,255,0.4)] shrink-0 relative z-10">
-          <div className="w-full h-full rounded-full bg-apple-surface flex items-center justify-center overflow-hidden border-2 border-[#141419]">
+        <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-apple-gold to-[#dcb66f] p-[2px] shadow-[0_14px_28px_rgba(185,123,40,0.18)] shrink-0 relative z-10 dark:from-[#6B8AFF] dark:to-[#4F46E5] dark:shadow-[0_0_20px_rgba(107,138,255,0.4)]">
+          <div className="w-full h-full rounded-full bg-apple-surface flex items-center justify-center overflow-hidden border-2 border-[#e1d1bc] dark:border-[#141419]">
             {userAvatar ? (
               <img src={userAvatar} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
-              <User size={32} className="text-[#6B8AFF]" />
+              <User size={32} className="text-apple-accent" />
             )}
           </div>
         </div>
         <div className="flex-1 z-10">
           <h2 className="font-sans text-2xl font-bold mb-1 tracking-wider text-apple-text drop-shadow-md">{userName}</h2>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#6B8AFF] animate-pulse shadow-[0_0_8px_rgba(107,138,255,0.8)]"></span>
-            <p className="text-xs text-[#6B8AFF] font-mono tracking-widest">ID: 88481234</p>
+            <span className="w-2 h-2 rounded-full bg-apple-accent animate-pulse shadow-[0_0_8px_rgba(185,123,40,0.35)] dark:shadow-[0_0_8px_rgba(107,138,255,0.8)]"></span>
+            <p className="text-xs text-apple-accent font-mono tracking-widest">ID: 88481234</p>
           </div>
         </div>
         <button 
@@ -271,7 +437,7 @@ export default function Profile() {
                   type="text" 
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-[#6B8AFF]/50 transition-all"
+                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-all"
                   placeholder="输入你的昵称"
                   maxLength={12}
                 />
@@ -297,7 +463,7 @@ export default function Profile() {
                     onClick={() => setEditAvatar(null)}
                     className={clsx(
                       "w-14 h-14 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
-                      editAvatar === null ? "border-[#6B8AFF] shadow-[0_4px_15px_rgba(107,138,255,0.3)] scale-110" : "border-transparent bg-apple-surface"
+                      editAvatar === null ? "border-apple-accent shadow-[0_8px_20px_rgba(185,123,40,0.16)] scale-110 dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)]" : "border-transparent bg-apple-surface"
                     )}
                   >
                     <User size={24} className="text-apple-text-muted" />
@@ -308,7 +474,7 @@ export default function Profile() {
                       onClick={() => setEditAvatar(avatar)}
                       className={clsx(
                         "w-14 h-14 rounded-full overflow-hidden shrink-0 border-2 transition-all",
-                        editAvatar === avatar ? "border-[#6B8AFF] shadow-[0_4px_15px_rgba(107,138,255,0.3)] scale-110" : "border-transparent bg-apple-surface"
+                        editAvatar === avatar ? "border-apple-accent shadow-[0_8px_20px_rgba(185,123,40,0.16)] scale-110 dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)]" : "border-transparent bg-apple-surface"
                       )}
                     >
                       <img src={avatar} alt={`Avatar ${idx}`} className="w-full h-full object-cover" />
@@ -319,7 +485,7 @@ export default function Profile() {
 
               <button 
                 onClick={handleSaveProfile}
-                className="w-full py-3 bg-[#6B8AFF] text-white rounded-xl font-medium shadow-[0_4px_20px_rgba(107,138,255,0.3)] flex items-center justify-center gap-2 hover:bg-[#4F46E5] transition-colors"
+                className="w-full py-3 bg-apple-gold text-[#17130f] rounded-xl font-bold shadow-[0_14px_28px_rgba(185,123,40,0.20)] flex items-center justify-center gap-2 hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_20px_rgba(107,138,255,0.3)] dark:hover:bg-[#4F46E5]"
               >
                 <Check size={18} />
                 保存修改
@@ -339,7 +505,7 @@ export default function Profile() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/70 backdrop-blur-xl"
+              className="absolute inset-0 bg-[#3b2a1d]/42 backdrop-blur-xl dark:bg-black/70"
               onClick={() => setShowMembershipModal(false)}
             />
             <motion.div
@@ -348,57 +514,147 @@ export default function Profile() {
               exit={{ opacity: 0, scale: 0.92, y: 18 }}
               className="relative z-10 max-h-[calc(100svh-32px)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-3xl border border-apple-border bg-apple-surface p-6 shadow-2xl no-scrollbar dark:border-[#F4CF83]/25 dark:bg-[#111722]"
             >
-              <button onClick={() => setShowMembershipModal(false)} className="absolute right-4 top-4 rounded-full p-2 text-apple-text-muted hover:bg-white/[0.06] hover:text-apple-text">
+              <button onClick={() => setShowMembershipModal(false)} className="absolute right-4 top-4 rounded-full p-2 text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text dark:hover:bg-white/[0.06]">
                 <X size={18} />
               </button>
-              <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F4CF83]/15 text-[#F4CF83]">
+              <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-apple-gold/15 text-apple-gold">
                 <Crown size={24} />
               </div>
-              <h3 className="text-2xl font-bold text-apple-text">{plusActive ? 'Plus 已生效' : 'Plus 权益预览'}</h3>
+              <h3 className="text-2xl font-bold text-apple-text">{testerActive ? '完整功能已解锁' : plusActive ? '权益已生效' : '让星轨继续记得你'}</h3>
               <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-                当前状态：{membershipLabel}。开通后，星轨会把你的提问、日记和陪伴记录整理成更清楚的成长线。
+                当前状态：{membershipLabel}。支付成功后权益会立即到账，可以回到刚刚的页面继续使用。
               </p>
+              <div className="mt-4 rounded-[24px] border border-apple-gold/25 bg-[linear-gradient(145deg,rgba(185,123,40,0.12),rgba(124,156,255,0.08))] p-4 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.14),rgba(124,156,255,0.08))]">
+                <div className="flex items-center gap-2 text-xs font-black text-apple-gold">
+                  <Sparkles size={14} />
+                  不用从头再讲一遍
+                </div>
+                <p className="mt-2 text-sm leading-relaxed text-apple-text">{purchaseContextLine}</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
+                    <div className="font-black text-apple-text">{tarotReadings.length}</div>
+                    <div>牌迹</div>
+                  </div>
+                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
+                    <div className="font-black text-apple-text">{diaryEntries.length}</div>
+                    <div>日记</div>
+                  </div>
+                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
+                    <div className="font-black text-apple-text">{profiles.length}</div>
+                    <div>档案</div>
+                  </div>
+                </div>
+              </div>
               {!plusActive && !membership.trialUsed && (
                 <button
                   onClick={handleStartTrial}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-[#F4CF83]/28 bg-[#F4CF83]/12 py-3 text-sm font-bold text-[#B97B28] dark:text-[#F4CF83]"
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-apple-gold/28 bg-apple-gold/12 py-3 text-sm font-bold text-apple-gold"
                 >
                   <Sparkles size={16} />
-                  先试用 24 小时
+                  先试用 24 小时 Plus
                 </button>
               )}
+              <div className="mt-4 rounded-[24px] border border-apple-border bg-apple-surface-hover/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                <div className="mb-2 text-xs font-bold text-apple-text-muted">兑换码</div>
+                <div className="flex gap-2">
+                  <input
+                    value={redeemCode}
+                    onChange={(event) => setRedeemCode(event.target.value)}
+                    placeholder="输入兑换码"
+                    className="min-w-0 flex-1 rounded-2xl border border-apple-border bg-apple-surface px-3 py-2 text-sm font-semibold text-apple-text outline-none placeholder:text-apple-text-muted/60 focus:border-apple-gold/50 dark:border-white/10 dark:bg-black/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRedeemTesterCode}
+                    className="shrink-0 rounded-2xl border border-apple-gold/24 bg-apple-gold/12 px-4 py-2 text-sm font-bold text-apple-gold transition-colors hover:bg-apple-gold/18 dark:border-white/10 dark:bg-white/[0.08] dark:text-apple-text dark:hover:bg-white/[0.12]"
+                  >
+                    兑换
+                  </button>
+                </div>
+              </div>
+              <div className="mt-5 rounded-[24px] border border-apple-gold/20 bg-apple-gold/10 p-4">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-apple-gold">开通后马上发生</div>
+                <div className="mt-2 text-sm leading-relaxed text-apple-text">
+                  选择单次报告，会立刻把这次问题讲完整；选择 Plus，会开始保存长期记忆、周报和更多牌迹。
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {SPIRITUAL_ANCHORS.map((item) => (
+                    <div key={item.title} className="rounded-2xl border border-apple-border bg-[#fff8ed]/70 p-3 dark:border-white/10 dark:bg-black/20">
+                      <div className="text-sm font-black text-apple-text">{item.title}</div>
+                      <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{item.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="mt-5 space-y-3">
-                <PlusBenefit title="每周成长报告" desc="自动整理一周提问、日记和情绪趋势。" />
-                <PlusBenefit title="专属牌面与语音" desc="解锁更有氛围感的牌面、声音和陪伴细节。" />
-                <PlusBenefit title="更多每日能量" desc="减少卡顿感，但保留免费路径，不做强迫付费。" />
+                {SHOP_PLANS.map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    onClick={() => setSelectedPlanId(plan.id)}
+                    className={clsx(
+                      'w-full rounded-[24px] border p-4 text-left transition-all',
+                      selectedPlanId === plan.id
+                        ? 'border-apple-gold/55 bg-apple-gold/12 text-apple-text shadow-[0_14px_34px_rgba(185,123,40,0.12)] dark:shadow-[0_14px_34px_rgba(244,207,131,0.10)]'
+                        : 'border-apple-border bg-apple-surface/70 text-apple-text-muted hover:border-apple-gold/26 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-white/18',
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-base font-black text-apple-text">{plan.label}</span>
+                          {plan.id === recommendedPlanId && (
+                            <span className="rounded-full bg-apple-gold px-2 py-0.5 text-[10px] font-black text-[#11131a]">
+                              更适合现在
+                            </span>
+                          )}
+                          <span className="rounded-full border border-apple-gold/24 bg-apple-gold/10 px-2 py-0.5 text-[10px] font-bold text-apple-gold">
+                            {plan.badge}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm font-bold text-apple-text">{plan.title}</div>
+                        <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">{plan.desc}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-xs text-apple-text-muted">¥</div>
+                        <div className="text-3xl font-black text-apple-gold">{plan.price}</div>
+                      </div>
+                    </div>
+                    {selectedPlanId === plan.id && (
+                      <div className="mt-3 grid gap-1.5 text-xs leading-relaxed text-apple-text-muted">
+                        {plan.bullets.map((item) => (
+                          <div key={item} className="flex items-center gap-2">
+                            <Check size={13} className="text-apple-gold" />
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                ))}
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setSelectedPlanId('plus_monthly')}
-                  className={clsx(
-                    "rounded-2xl border p-4 text-left transition-all",
-                    selectedPlanId === 'plus_monthly'
-                      ? "border-[#F4CF83]/55 bg-[#F4CF83]/12 text-apple-text"
-                      : "border-white/10 bg-white/[0.04] text-apple-text-muted"
-                  )}
-                >
-                  <div className="text-xs">Plus 月卡</div>
-                  <div className="mt-1 text-2xl font-bold">¥9.9</div>
-                </button>
-                <button
-                  onClick={() => setSelectedPlanId('energy_pack_30')}
-                  className={clsx(
-                    "rounded-2xl border p-4 text-left transition-all",
-                    selectedPlanId === 'energy_pack_30'
-                      ? "border-[#F4CF83]/55 bg-[#F4CF83]/12 text-apple-text"
-                      : "border-white/10 bg-white/[0.04] text-apple-text-muted"
-                  )}
-                >
-                  <div className="text-xs">能量包</div>
-                  <div className="mt-1 text-2xl font-bold">¥6</div>
-                </button>
+              <div className="mt-5">
+                <div className="mb-2 text-xs font-bold text-apple-text-muted">支付方式</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {PAY_METHODS.map((method) => (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setSelectedPayMethod(method.id)}
+                      className={clsx(
+                        'rounded-2xl border p-3 text-left transition-all',
+                        selectedPayMethod === method.id
+                          ? 'border-apple-gold/50 bg-apple-gold/12 text-apple-text'
+                          : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+                      )}
+                    >
+                      <div className="text-sm font-bold">{method.label}</div>
+                      <div className="mt-1 text-[11px] leading-relaxed text-apple-text-muted">{method.desc}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-xs leading-relaxed text-apple-text-muted">
+              <label className="mt-4 flex items-start gap-3 rounded-2xl border border-apple-border bg-apple-surface/70 p-3 text-xs leading-relaxed text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]">
                 <input
                   type="checkbox"
                   checked={guardianConsent}
@@ -407,35 +663,36 @@ export default function Profile() {
                 />
                 <span>我已确认价格和权益；如果我是未成年人，已获得监护人同意。</span>
               </label>
-              {paymentMessage && (
-                <div className="mt-3 rounded-2xl border border-[#F4CF83]/20 bg-[#F4CF83]/10 p-3 text-xs leading-relaxed text-[#F4CF83]">
+              {paymentStatus !== 'idle' || pendingOrderId ? (
+                <PaymentStatusPanel
+                  status={paymentStatus}
+                  message={paymentMessage}
+                  orderId={pendingOrderId}
+                  planLabel={selectedPlan.label}
+                  methodLabel={selectedPayMethodMeta.label}
+                  onRefresh={() => pendingOrderId && checkPaymentOrder(pendingOrderId)}
+                />
+              ) : paymentMessage && (
+                <div className="mt-3 rounded-2xl border border-apple-gold/20 bg-apple-gold/10 p-3 text-xs leading-relaxed text-apple-gold">
                   {paymentMessage}
                 </div>
               )}
-              {pendingOrderId && (
-                <button
-                  onClick={() => checkAlipayOrder(pendingOrderId)}
-                  className="mt-3 w-full rounded-full border border-[#F4CF83]/24 bg-white/[0.04] py-3 text-sm font-bold text-apple-text"
-                >
-                  刷新权益
-                </button>
-              )}
               <button
-                onClick={handleCreateAlipayOrder}
+                onClick={handleCreatePaymentOrder}
                 disabled={isCreatingPayment || !guardianConsent}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-[#F4CF83] to-[#7C9CFF] py-3 font-bold text-[#080a11] disabled:opacity-50"
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-apple-gold to-[#dcb66f] py-3 font-bold text-[#080a11] disabled:opacity-50 dark:to-[#7C9CFF]"
               >
                 {isCreatingPayment ? <Loader2 size={18} className="animate-spin" /> : <WalletCards size={18} />}
-                用支付宝付款
+                解锁 {selectedPlan.label} · ¥{selectedPlan.price}
               </button>
               <button
                 onClick={() => setShowMembershipModal(false)}
-                className="mt-3 w-full rounded-full border border-white/10 bg-white/[0.04] py-3 font-bold text-apple-text-muted"
+                className="mt-3 w-full rounded-full border border-apple-border bg-apple-surface/70 py-3 font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]"
               >
-                先了解这些权益
+                暂时不用
               </button>
               <p className="mt-3 text-center text-[11px] leading-relaxed text-apple-text-muted">
-                这是权益预览页。正式支付前会清楚展示价格与规则，未成年人付费必须先征得监护人同意。
+                正式支付前会清楚展示价格与规则。未成年人付费必须先征得监护人同意。
               </p>
             </motion.div>
           </div>
@@ -447,14 +704,14 @@ export default function Profile() {
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-4 mb-8">
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="bg-apple-surface backdrop-blur-xl rounded-2xl p-5 flex flex-col gap-3 border border-apple-border shadow-[0_12px_30px_rgba(117,82,42,0.11)] dark:shadow-[0_8px_20px_rgba(0,0,0,0.3)] relative overflow-hidden">
-          <div className="absolute -right-4 -top-4 w-16 h-16 bg-[#6B8AFF]/10 rounded-full blur-xl pointer-events-none"></div>
+          <div className="absolute -right-4 -top-4 w-16 h-16 bg-apple-accent/10 rounded-full blur-xl pointer-events-none"></div>
           <div className="flex items-center gap-2 text-apple-text-muted relative z-10">
-            <div className="p-1.5 rounded-lg bg-[#6B8AFF]/10 border border-[#6B8AFF]/20">
-              <Sparkles size={14} className="text-[#6B8AFF]" />
+            <div className="p-1.5 rounded-lg bg-apple-accent/10 border border-apple-accent/20">
+              <Sparkles size={14} className="text-apple-accent" />
             </div>
             <span className="text-xs font-medium tracking-widest">剩余能量</span>
           </div>
-          <div className="text-3xl font-sans font-bold text-apple-text relative z-10 drop-shadow-md">{energy}</div>
+          <div className="text-3xl font-sans font-bold text-apple-text relative z-10 drop-shadow-md">{testerActive ? '∞' : energy}</div>
         </motion.div>
         <motion.div 
           initial={{ opacity: 0, x: 20 }} 
@@ -481,23 +738,23 @@ export default function Profile() {
         transition={{ delay: 0.22 }}
         className="mb-8 rounded-3xl border border-[#D8B26B]/35 bg-[linear-gradient(145deg,rgba(255,252,246,0.96),rgba(244,235,221,0.88))] p-5 shadow-[0_18px_52px_rgba(117,82,42,0.14)] relative overflow-hidden dark:border-[#F4CF83]/25 dark:bg-[linear-gradient(145deg,rgb(27,32,48),rgb(18,23,34),rgb(11,14,21))] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)]"
       >
-        <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-[#F4CF83]/12 blur-3xl" />
+        <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-apple-gold/12 blur-3xl" />
         <div className="relative z-10 flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-[#F4CF83]">
+            <div className="flex items-center gap-2 text-apple-gold">
               <Crown size={18} />
-              <span className="text-sm font-bold tracking-wide">{plusActive ? 'Plus 已开通' : '星轨 Plus'}</span>
+              <span className="text-sm font-bold tracking-wide">{testerActive ? '完整权限' : plusActive ? 'Plus 已开通' : '星轨 Plus'}</span>
             </div>
-            <h3 className="mt-2 text-2xl font-bold text-apple-text">{plusActive ? `还剩约 ${plusDaysLeft} 天权益` : '把一次占卜变成长期陪伴'}</h3>
+            <h3 className="mt-2 text-2xl font-bold text-apple-text">{testerActive ? '完整功能已解锁' : plusActive ? `还剩约 ${plusDaysLeft} 天权益` : '把零散问题变成长期档案'}</h3>
             <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-              {membershipLabel}。每周成长报告、专属牌面、更多能量、长线记忆，都在这里慢慢解锁。
+              {membershipLabel}。你留下的牌迹、日记和档案越多，星轨越能接住你的上下文；开通后不用每次重新解释自己。
             </p>
           </div>
           <button
             onClick={() => setShowMembershipModal(true)}
-            className="shrink-0 rounded-full bg-[#F4CF83] px-4 py-2 text-xs font-bold text-[#080a11] shadow-[0_10px_28px_rgba(244,207,131,0.25)]"
+            className="shrink-0 rounded-full bg-apple-gold px-4 py-2 text-xs font-bold text-[#080a11] shadow-[0_10px_28px_rgba(185,123,40,0.22)] dark:shadow-[0_10px_28px_rgba(244,207,131,0.25)]"
           >
-            {plusActive ? '管理权益' : '查看权益'}
+            {testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}
           </button>
         </div>
 
@@ -508,7 +765,8 @@ export default function Profile() {
           <GrowthMetric icon={<ShieldCheck size={15} />} label="沙盘推演" value={`${simulationHistory.length} 次`} />
         </div>
         <div className="relative z-10 mt-3 rounded-2xl border border-apple-border bg-apple-surface/70 p-3 text-xs leading-relaxed text-apple-text-muted dark:border-white/10 dark:bg-white/[0.045]">
-          用户分层：<span className="font-bold text-apple-text">{userSegment}</span> · 活跃 {engagement.activeDays} 天 · 已触发 {upgradePromptCount} 次付费提示
+          当前状态：<span className="font-bold text-apple-text">{userSegment}</span> · 已陪伴 {engagement.activeDays} 天 · 已沉淀 {memorySeedCount} 份线索
+          <div className="mt-1 text-[11px]">每一次记录都会让星轨更接近你的语言，而不只是给你一次性的答案。</div>
         </div>
 
         <div className="relative z-10 mt-4">
@@ -518,7 +776,7 @@ export default function Profile() {
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
             <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-[#F4CF83] to-[#7C9CFF]"
+              className="h-full rounded-full bg-gradient-to-r from-apple-gold to-[#dcb66f] dark:to-[#7C9CFF]"
               initial={{ width: 0 }}
               animate={{ width: `${valueScore}%` }}
               transition={{ duration: 1, ease: "easeOut" }}
@@ -573,7 +831,7 @@ export default function Profile() {
                   <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-apple-gold/20 to-transparent rounded-bl-full pointer-events-none"></div>
                 )}
                 <div className="flex justify-between items-start mb-3 relative z-10">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2A2A35] to-[#141419] flex items-center justify-center text-lg shadow-inner border border-apple-border group-hover:border-apple-border transition-colors">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#fff7ea] to-[#ead8bd] flex items-center justify-center text-lg shadow-inner border border-apple-border group-hover:border-apple-border transition-colors dark:from-[#2A2A35] dark:to-[#141419]">
                     {profile.gender === 'male' ? '👨' : '👩'}
                   </div>
                   {activeProfileId === profile.id && (
@@ -605,28 +863,28 @@ export default function Profile() {
 
       {/* Bond Level Section */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-apple-surface backdrop-blur-xl rounded-3xl p-6 mb-8 border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-[#6B8AFF]/10 to-transparent pointer-events-none"></div>
-        <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#6B8AFF]/20 blur-3xl rounded-full pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-apple-accent/8 to-transparent pointer-events-none"></div>
+        <div className="absolute -top-10 -right-10 w-40 h-40 bg-apple-accent/12 blur-3xl rounded-full pointer-events-none"></div>
         <div className="relative z-10">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-[#6B8AFF]/10 border border-[#6B8AFF]/20">
-                <Heart size={16} className="text-[#6B8AFF]" />
+              <div className="p-1.5 rounded-lg bg-apple-accent/10 border border-apple-accent/20">
+                <Heart size={16} className="text-apple-accent" />
               </div>
               <span className="font-sans font-semibold text-lg tracking-widest text-apple-text">羁绊等级</span>
             </div>
-            <span className="text-[#6B8AFF] font-bold font-mono bg-[#6B8AFF]/10 px-3 py-1 rounded-full border border-[#6B8AFF]/20 shadow-[0_0_10px_rgba(107,138,255,0.2)]">LV.{bondLevel}</span>
+            <span className="text-apple-accent font-bold font-mono bg-apple-accent/10 px-3 py-1 rounded-full border border-apple-accent/20 shadow-[0_8px_18px_rgba(185,123,40,0.12)] dark:shadow-[0_0_10px_rgba(107,138,255,0.2)]">LV.{bondLevel}</span>
           </div>
           
           <div className="text-center mb-6">
-            <span className="text-2xl font-sans font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-[#6B8AFF] to-[#4F46E5] drop-shadow-sm">
+            <span className="text-2xl font-sans font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-apple-accent to-apple-gold drop-shadow-sm dark:from-[#6B8AFF] dark:to-[#4F46E5]">
               {LEVEL_TITLES[bondLevel - 1]}
             </span>
           </div>
 
           <div className="w-full h-2.5 bg-apple-surface rounded-full overflow-hidden mb-3 border border-apple-border shadow-inner">
             <motion.div 
-              className="h-full bg-gradient-to-r from-[#6B8AFF]/80 to-[#6B8AFF] shadow-[0_0_10px_rgba(107,138,255,0.8)]"
+              className="h-full bg-gradient-to-r from-apple-gold to-apple-accent shadow-[0_0_10px_rgba(185,123,40,0.28)] dark:from-[#6B8AFF]/80 dark:to-[#6B8AFF] dark:shadow-[0_0_10px_rgba(107,138,255,0.8)]"
               initial={{ width: 0 }}
               animate={{ width: `${progressPercent}%` }}
               transition={{ duration: 1.5, ease: "easeOut" }}
@@ -641,12 +899,6 @@ export default function Profile() {
 
       {/* Settings List */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-        <SettingToggle 
-          icon={<Volume2 size={18} />} 
-          title="语音播报" 
-          checked={settings.voiceEnabled} 
-          onChange={() => toggleSetting('voiceEnabled')} 
-        />
         <SettingToggle 
           icon={<Moon size={18} />} 
           title="背景音乐" 
@@ -668,7 +920,7 @@ export default function Profile() {
 function GrowthMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-white/[0.045]">
-      <div className="mb-2 flex items-center gap-2 text-[#F4CF83]">
+      <div className="mb-2 flex items-center gap-2 text-apple-gold">
         {icon}
         <span className="text-[11px] text-apple-text-muted">{label}</span>
       </div>
@@ -677,11 +929,88 @@ function GrowthMetric({ icon, label, value }: { icon: React.ReactNode; label: st
   );
 }
 
-function PlusBenefit({ title, desc }: { title: string; desc: string }) {
+function PaymentStatusPanel({
+  status,
+  message,
+  orderId,
+  planLabel,
+  methodLabel,
+  onRefresh,
+}: {
+  status: PaymentStatus;
+  message: string | null;
+  orderId: string | null;
+  planLabel: string;
+  methodLabel: string;
+  onRefresh: () => void;
+}) {
+  const steps = [
+    { id: 'creating', label: '创建订单' },
+    { id: 'opened', label: `打开${methodLabel}` },
+    { id: 'paid', label: '权益到账' },
+  ];
+  const statusIndex =
+    status === 'paid'
+      ? 2
+      : status === 'opened' || status === 'checking' || status === 'waiting'
+        ? 1
+        : status === 'creating'
+          ? 0
+          : -1;
+  const title =
+    status === 'paid'
+      ? '权益已到账'
+      : status === 'failed'
+        ? '支付暂未完成'
+        : status === 'waiting'
+          ? '等待支付确认'
+          : status === 'checking'
+            ? '正在确认支付'
+            : status === 'opened'
+              ? '收银台已打开'
+              : '正在创建订单';
+
   return (
-    <div className="rounded-2xl border border-apple-border bg-apple-surface/70 p-4 dark:border-white/10 dark:bg-white/[0.045]">
-      <div className="font-bold text-apple-text">{title}</div>
-      <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{desc}</div>
+    <div className="mt-3 rounded-[24px] border border-apple-gold/22 bg-apple-gold/10 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-apple-text">{title}</div>
+          <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+            {message || `正在处理 ${planLabel}。`}
+          </div>
+        </div>
+        {status === 'checking' || status === 'creating' ? (
+          <Loader2 size={18} className="mt-0.5 shrink-0 animate-spin text-apple-gold" />
+        ) : status === 'paid' ? (
+          <Check size={18} className="mt-0.5 shrink-0 text-apple-gold" />
+        ) : (
+          <WalletCards size={18} className="mt-0.5 shrink-0 text-apple-gold" />
+        )}
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {steps.map((step, index) => (
+          <div
+            key={step.id}
+            className={clsx(
+              'rounded-2xl border px-2 py-2 text-center text-[10px] font-black',
+              index <= statusIndex
+                ? 'border-apple-gold/30 bg-apple-gold/14 text-apple-gold'
+                : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+            )}
+          >
+            {step.label}
+          </div>
+        ))}
+      </div>
+      {orderId && status !== 'paid' && (
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="mt-3 w-full rounded-full border border-apple-gold/24 bg-apple-surface/70 py-2.5 text-xs font-black text-apple-text dark:bg-white/[0.04]"
+        >
+          刷新到账状态
+        </button>
+      )}
     </div>
   );
 }
@@ -708,7 +1037,7 @@ function SettingToggle({ icon, title, checked, onChange }: { icon: React.ReactNo
         onClick={onChange}
         className={clsx(
           "w-12 h-6 rounded-full transition-colors relative",
-          checked ? "bg-[#6B8AFF]" : "bg-apple-surface-hover"
+          checked ? "bg-apple-accent" : "bg-apple-surface-hover"
         )}
       >
         <motion.div 

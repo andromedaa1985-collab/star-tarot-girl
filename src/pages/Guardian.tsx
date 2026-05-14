@@ -6,46 +6,10 @@ import clsx from 'clsx';
 import { recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 
-const playVoiceMiniMax = async (text: string, audioElement: HTMLAudioElement | null) => {
-  try {
-    const res = await fetch(`/api/minimax/tts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'speech-01-turbo',
-        text: text,
-        stream: false,
-        voice_setting: {
-          voice_id: 'female-tianmei',
-          speed: 0.9,
-          vol: 1,
-          pitch: 0
-        }
-      })
-    });
-    const data = await res.json();
-    if (data.data && data.data.audio && audioElement) {
-      const audioData = data.data.audio;
-      const byteCharacters = atob(audioData);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'audio/mp3' });
-      const url = URL.createObjectURL(blob);
-      audioElement.src = url;
-      audioElement.play();
-    }
-  } catch (e) {
-    console.error("MiniMax TTS Error:", e);
-  }
-};
-
 export default function Guardian() {
   const { 
     userName, bondLevel, bondExp, setBondExp, 
-    diaryEntries, baziResult, settings,
+    diaryEntries, baziResult,
     guardianMessages, setGuardianMessages,
     dailyLetter, setDailyLetter,
     dailyLetterDate, setDailyLetterDate,
@@ -57,7 +21,6 @@ export default function Guardian() {
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
 
   const todayStr = new Date().toLocaleDateString('zh-CN');
   const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
@@ -216,10 +179,6 @@ export default function Guardian() {
         timestamp: Date.now()
       }]);
 
-      if (settings.voiceEnabled) {
-        playVoiceMiniMax(cleanedText, audioRef.current);
-      }
-
     } catch (error) {
       console.error("Guardian Chat Error:", error);
       setGuardianMessages(prev => [...prev, {
@@ -235,8 +194,6 @@ export default function Guardian() {
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-y-auto overscroll-contain text-apple-text no-scrollbar">
-      <audio ref={audioRef} className="hidden" />
-      
       {/* Background */}
       <div className="absolute inset-0 z-0 pointer-events-none">
         <picture>
@@ -250,21 +207,21 @@ export default function Guardian() {
       
       {/* Header & Guardian Orb */}
       <div className="pt-12 pb-6 px-6 flex flex-col items-center relative shrink-0">
-        <h1 className="font-serif text-2xl font-bold tracking-widest text-[#6B8AFF] mb-6 relative z-10">星轨守护</h1>
+        <h1 className="font-serif text-2xl font-bold tracking-widest text-apple-accent mb-6 relative z-10 dark:text-[#6B8AFF]">星轨守护</h1>
         
         {/* The "Guardian" Orb */}
         <div className="relative w-32 h-32 flex items-center justify-center mb-6">
           <motion.div 
             animate={{ scale: isTyping ? [1, 1.1, 1] : [1, 1.05, 1], opacity: 0.4 }}
             transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute inset-0 bg-[#6B8AFF] rounded-full blur-2xl"
+            className="absolute inset-0 bg-apple-gold rounded-full blur-2xl dark:bg-[#6B8AFF]"
           />
           <motion.div 
             animate={{ scale: isTyping ? [1, 1.05, 1] : [1, 1.02, 1] }}
             transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="relative w-20 h-20 bg-gradient-to-tr from-[#6B8AFF] to-[#8BA4FF] rounded-full shadow-[0_0_30px_rgba(107,138,255,0.6)] flex items-center justify-center overflow-hidden border border-apple-border"
+            className="relative w-20 h-20 bg-gradient-to-tr from-apple-gold to-[#dcb66f] rounded-full shadow-[0_18px_38px_rgba(185,123,40,0.26)] flex items-center justify-center overflow-hidden border border-apple-border dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:shadow-[0_0_30px_rgba(107,138,255,0.6)]"
           >
-            <Moon size={32} className="text-apple-text-muted/90 drop-shadow-md" fill="currentColor" />
+            <Moon size={32} className="text-white/90 drop-shadow-md" fill="currentColor" />
           </motion.div>
         </div>
 
@@ -277,7 +234,7 @@ export default function Guardian() {
               className="w-full bg-apple-surface backdrop-blur-xl p-4 rounded-2xl border border-apple-border hover:bg-apple-surface-hover transition-all flex items-center justify-between shadow-sm group"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[#6B8AFF]/10 flex items-center justify-center text-[#6B8AFF]">
+                <div className="w-10 h-10 rounded-full bg-apple-accent/10 flex items-center justify-center text-apple-accent">
                   {isGeneratingLetter ? <Loader2 size={20} className="animate-spin" /> : <Mail size={20} />}
                 </div>
                 <div className="text-left">
@@ -285,12 +242,12 @@ export default function Guardian() {
                   <div className="text-xs text-apple-text-muted">基于你的命理与昨日心境生成</div>
                 </div>
               </div>
-              <Sparkles size={16} className="text-[#6B8AFF] opacity-50 group-hover:opacity-100 transition-opacity" />
+              <Sparkles size={16} className="text-apple-accent opacity-50 group-hover:opacity-100 transition-opacity" />
             </button>
           ) : (
             <button 
               onClick={() => setShowLetter(true)}
-              className="w-full bg-gradient-to-r from-[#6B8AFF] to-[#8BA4FF] p-4 rounded-2xl text-white transition-all flex items-center justify-between shadow-lg shadow-[#6B8AFF]/20"
+              className="w-full bg-gradient-to-r from-apple-gold to-[#dcb66f] p-4 rounded-2xl text-[#17130f] transition-all flex items-center justify-between shadow-lg shadow-[rgba(185,123,40,0.18)] dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:text-white dark:shadow-[#6B8AFF]/20"
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
@@ -298,7 +255,7 @@ export default function Guardian() {
                 </div>
                 <div className="text-left">
                   <div className="font-medium">查看今日寄语</div>
-                  <div className="text-xs text-apple-text-muted/80">已生成，随时可以重温</div>
+                  <div className="text-xs text-white/75">已生成，随时可以重温</div>
                 </div>
               </div>
             </button>
@@ -322,7 +279,7 @@ export default function Guardian() {
               <div className={clsx(
                 "max-w-[80%] rounded-3xl px-5 py-3.5 text-[15px] leading-relaxed shadow-sm",
                 msg.role === 'user' 
-                  ? "bg-[#6B8AFF] text-white rounded-tr-sm" 
+                  ? "bg-apple-gold text-[#17130f] rounded-tr-sm dark:bg-[#6B8AFF] dark:text-white" 
                   : "bg-apple-surface backdrop-blur-xl border border-apple-border rounded-tl-sm text-apple-text"
               )}>
                 {msg.text}
@@ -336,9 +293,9 @@ export default function Guardian() {
               className="flex justify-start"
             >
               <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-3xl rounded-tl-sm px-5 py-4 flex gap-1.5 shadow-sm">
-                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} className="w-2 h-2 bg-[#6B8AFF]/50 rounded-full" />
-                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-2 h-2 bg-[#6B8AFF]/50 rounded-full" />
-                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} className="w-2 h-2 bg-[#6B8AFF]/50 rounded-full" />
+                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
+                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
+                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
               </div>
             </motion.div>
           )}
@@ -355,12 +312,12 @@ export default function Guardian() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="向守护灵倾诉..."
-            className="w-full bg-apple-surface backdrop-blur-xl border border-apple-border rounded-full pl-6 pr-14 py-4 text-[15px] focus:outline-none focus:ring-2 focus:ring-[#6B8AFF]/50 shadow-[0_12px_34px_rgba(117,82,42,0.13)] text-apple-text placeholder:text-apple-text-muted/55 dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
+            className="w-full bg-apple-surface backdrop-blur-xl border border-apple-border rounded-full pl-6 pr-14 py-4 text-[15px] focus:outline-none focus:ring-2 focus:ring-apple-accent/35 shadow-[0_12px_34px_rgba(117,82,42,0.13)] text-apple-text placeholder:text-apple-text-muted/55 dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-[#6B8AFF] text-white rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(107,138,255,0.4)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#5A75E6]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-apple-gold text-[#17130f] rounded-full flex items-center justify-center shadow-[0_12px_24px_rgba(185,123,40,0.20)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#c88a34] dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_0_15px_rgba(107,138,255,0.4)] dark:hover:bg-[#5A75E6]"
           >
             <Send size={18} className="ml-0.5" />
           </button>
@@ -382,11 +339,11 @@ export default function Guardian() {
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               className="w-full max-w-sm max-h-[85vh] flex flex-col bg-apple-surface backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 border border-apple-border"
             >
-              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-[#6B8AFF]/10 to-transparent rounded-t-3xl pointer-events-none shrink-0"></div>
+              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-apple-accent/10 to-transparent rounded-t-3xl pointer-events-none shrink-0"></div>
               
               <div className="flex justify-center mb-4 relative z-10 shrink-0">
-                <div className="w-12 h-12 rounded-full bg-[#6B8AFF]/10 flex items-center justify-center">
-                  <Moon size={24} className="text-[#6B8AFF]" />
+                <div className="w-12 h-12 rounded-full bg-apple-accent/10 flex items-center justify-center">
+                  <Moon size={24} className="text-apple-accent" />
                 </div>
               </div>
               
@@ -401,7 +358,7 @@ export default function Guardian() {
               <div className="mt-6 flex justify-center relative z-10 shrink-0 pt-2">
                 <button 
                   onClick={() => setShowLetter(false)}
-                  className="px-8 py-3 bg-[#6B8AFF] text-white rounded-full font-medium shadow-[0_4px_15px_rgba(107,138,255,0.3)] hover:bg-[#5A75E6] transition-colors"
+                  className="px-8 py-3 bg-apple-gold text-[#17130f] rounded-full font-bold shadow-[0_12px_24px_rgba(185,123,40,0.20)] hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)] dark:hover:bg-[#5A75E6]"
                 >
                   收下寄语
                 </button>

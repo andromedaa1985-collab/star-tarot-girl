@@ -94,6 +94,11 @@ export interface ReviewEntry {
   id: string;
   date: string;
   content: string;
+  rangeLabel?: string;
+  startDate?: string;
+  endDate?: string;
+  entryCount?: number;
+  entryIds?: string[];
 }
 
 export interface CompanionMessage {
@@ -104,7 +109,6 @@ export interface CompanionMessage {
 }
 
 export interface AppSettings {
-  voiceEnabled: boolean;
   hapticsEnabled: boolean;
   darkMode: boolean;
   bgmEnabled: boolean;
@@ -216,7 +220,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('settings');
     return saved ? JSON.parse(saved) : {
-      voiceEnabled: true,
       hapticsEnabled: true,
       darkMode: false,
       bgmEnabled: false

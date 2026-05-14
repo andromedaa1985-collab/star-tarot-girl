@@ -40,10 +40,12 @@ import {
   getMembershipLabel,
   getReadingLimit,
   isPlusActive,
+  isTesterActive,
   startPlusTrial,
 } from '../lib/membership';
 import { getNextBestAction, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 type DrawnCard = {
   name: string;
@@ -75,6 +77,35 @@ const TAROT_CARDS = [
   { name: '审判', file: '20-审判_4.png' },
   { name: '世界', file: '21-世界_4.png' },
 ];
+
+const TAROT_IMAGE_PATHS = TAROT_CARDS.map((card) => `/tarot/${card.file}`);
+const preloadedImages = new Set<string>();
+
+const preloadImage = (src: string) =>
+  new Promise<void>((resolve) => {
+    if (!src || preloadedImages.has(src) || typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+
+    const image = new Image();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      preloadedImages.add(src);
+      resolve();
+    };
+
+    image.onload = finish;
+    image.onerror = finish;
+    image.decoding = 'async';
+    image.src = src;
+    if (image.complete) finish();
+  });
+
+const preloadImages = (sources: string[]) =>
+  Promise.all(Array.from(new Set(sources)).map((src) => preloadImage(src))).then(() => undefined);
 
 const QUICK_PROMPTS = ['今日运势', '感情指引', '事业发展', '最近的烦恼'];
 
@@ -142,6 +173,18 @@ const COMPANION_OUTFITS = [
     tone: 'from-[#B8F7D4]/16 to-[#B8C7FF]/22',
   },
 ];
+
+const PRELOAD_IMAGE_PATHS = Array.from(
+  new Set([
+    '/default-card.png',
+    '/default-pet.png',
+    '/avatar.png',
+    ...TAROT_IMAGE_PATHS,
+    ...COMPANION_OUTFITS.map((outfit) => outfit.image).filter(Boolean),
+  ]),
+);
+
+const DRAW_ANIMATION_MIN_MS = 4800;
 
 const getAutoCompanionOutfit = (level: number) =>
   COMPANION_OUTFITS.filter((outfit) => outfit.id !== 'auto' && outfit.minLevel <= level)
@@ -361,7 +404,7 @@ export default function Home() {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [isDrawingCards, setIsDrawingCards] = useState(false);
-  const [drawingCardImages, setDrawingCardImages] = useState<string[]>([]);
+  const [drawingCards, setDrawingCards] = useState<DrawnCard[]>([]);
   const [composerFocused, setComposerFocused] = useState(false);
   const [autoScrollOnNextMessage, setAutoScrollOnNextMessage] = useState(false);
   const [floatingExp, setFloatingExp] = useState<number | null>(null);
@@ -400,6 +443,7 @@ export default function Home() {
   const canClaimDailyReward = missionCount >= 3 && !hasClaimedDailyReward;
   const canClaimReturnReward = engagement.activeDays >= 2 && engagement.returnRewardDate !== todayKey;
   const plusActive = isPlusActive(membership);
+  const testerActive = isTesterActive(membership);
   const readingLimit = getReadingLimit(membership);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
@@ -434,6 +478,13 @@ export default function Home() {
       : selectedOutfit;
   const activeCompanionImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
   const activePetImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
+  const isFullBodyPet = activeOutfit.id !== 'moon';
+  const petStageClass = isFullBodyPet
+    ? 'left-1/2 top-[248px] h-[190px] w-[190px] -translate-x-1/2 sm:top-[236px] sm:h-[220px] sm:w-[220px]'
+    : 'left-1/2 top-[292px] h-[132px] w-[132px] -translate-x-1/2 sm:h-[150px] sm:w-[150px]';
+  const petDockClass = isFullBodyPet
+    ? 'bottom-[104px] left-2 h-[124px] w-[124px] sm:left-6 sm:h-[136px] sm:w-[136px]'
+    : 'bottom-[104px] left-4 h-[88px] w-[88px] sm:left-6';
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -513,9 +564,35 @@ export default function Home() {
     return `这周你更常问「${topTheme?.count ? topTheme.label : '自我状态'}」，代表牌是「${topCard}」。`;
   }, [weekReadings, plusActive]);
 
+  const scrollConversationToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const run = () => {
+      endRef.current?.scrollIntoView({ behavior, block: 'end' });
+      const scrollNode = scrollRef.current;
+      if (scrollNode) {
+        scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior });
+      }
+    };
+
+    window.requestAnimationFrame(run);
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 320);
+  };
+
+  useEffect(() => {
+    const timers = PRELOAD_IMAGE_PATHS.map((src, index) =>
+      window.setTimeout(() => {
+        void preloadImage(src);
+      }, index < 8 ? 0 : index * 42),
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
+
   useEffect(() => {
     if (!autoScrollOnNextMessage) return;
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollConversationToBottom();
     if (!isThinking) setAutoScrollOnNextMessage(false);
   }, [messages.length, isThinking, autoScrollOnNextMessage]);
 
@@ -622,19 +699,24 @@ export default function Home() {
       text: question,
       timestamp: Date.now(),
     };
-    const drawingStartedAt = Date.now();
+    let drawingStartedAt = Date.now();
 
     clearInputDraft('');
     setIsThinking(true);
-    setIsDrawingCards(shouldDraw);
-    setDrawingCardImages(shouldDraw ? images : []);
+    setIsDrawingCards(false);
+    setDrawingCards(shouldDraw ? cards : []);
     setComposerFocused(false);
-    setAutoScrollOnNextMessage(!textOverride);
+    setAutoScrollOnNextMessage(true);
     if (!plusActive) {
       setEnergy((value) => Math.max(0, value - 1));
     }
     if (shouldDraw) setCardImage(image);
     setMessages((prev) => [...prev, userMessage]);
+    if (shouldDraw) {
+      await preloadImages(images);
+      drawingStartedAt = Date.now();
+      setIsDrawingCards(true);
+    }
 
     let answer = shouldDraw
       ? fallbackAnswer(question, cards)
@@ -669,8 +751,8 @@ export default function Home() {
     answer = cleanTarotAnswer(answer);
 
     const drawingElapsed = Date.now() - drawingStartedAt;
-    if (shouldDraw && drawingElapsed < 2600) {
-      await new Promise((resolve) => window.setTimeout(resolve, 2600 - drawingElapsed));
+    if (shouldDraw && drawingElapsed < DRAW_ANIMATION_MIN_MS) {
+      await new Promise((resolve) => window.setTimeout(resolve, DRAW_ANIMATION_MIN_MS - drawingElapsed));
     }
 
     const aiMessage = {
@@ -718,7 +800,7 @@ export default function Home() {
     }
     setIsThinking(false);
     setIsDrawingCards(false);
-    setDrawingCardImages([]);
+    setDrawingCards([]);
   };
 
   const handleRegenerate = () => {
@@ -727,7 +809,7 @@ export default function Home() {
   };
 
   const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
+    await copyTextToClipboard(text);
   };
 
   const handleClearHistory = () => {
@@ -825,7 +907,7 @@ export default function Home() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className="mx-auto mb-2 flex w-full max-w-[540px] gap-2 overflow-x-auto rounded-[22px] border border-[#efe3cf]/72 bg-[#fffaf2]/72 p-2 shadow-[0_16px_44px_rgba(84,55,24,0.11),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl no-scrollbar dark:border-white/[0.08] dark:bg-[#111522]/74 dark:shadow-[0_18px_48px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.07)]"
+          className="mx-auto mb-1.5 flex w-full max-w-[min(540px,calc(100vw-28px))] gap-1.5 overflow-x-auto rounded-[18px] border border-[#efe3cf]/72 bg-[#fffaf2]/72 p-1.5 shadow-[0_16px_44px_rgba(84,55,24,0.11),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl no-scrollbar dark:border-white/[0.08] dark:bg-[#111522]/74 dark:shadow-[0_18px_48px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.07)] sm:mb-2 sm:gap-2 sm:rounded-[22px] sm:p-2"
         >
           {COMPOSER_SUGGESTIONS.map((item) => (
             <button
@@ -833,7 +915,7 @@ export default function Home() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => handleSend(item.prompt)}
-              className="shrink-0 rounded-[16px] border border-[#eadcc8]/64 bg-white/52 px-3 py-2 text-[12px] font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64"
+              className="shrink-0 rounded-[14px] border border-[#eadcc8]/64 bg-white/52 px-2.5 py-1.5 text-[11px] font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64 sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
             >
               {item.label}
             </button>
@@ -981,7 +1063,7 @@ export default function Home() {
                 title={membershipLabel}
               >
                 <Sparkles size={15} />
-                <span className="text-[13px] font-semibold">{plusActive ? 'Plus' : energy}</span>
+                <span className="text-[13px] font-semibold">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
               </button>
               <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -1016,7 +1098,7 @@ export default function Home() {
             <DrawCardAnimation
               active={isDrawingCards}
               image={cardImage}
-              images={drawingCardImages}
+              cards={drawingCards}
               compact={visibleMessages.length > 0}
             />
             <div className="relative z-10 flex min-w-0 items-center justify-between gap-2">
@@ -1056,15 +1138,15 @@ export default function Home() {
                     {(cardStackImages[0] || hasDrawnCard) && (
                       <img
                         src={cardStackImages[0] || cardImage}
-                        alt="tarot card"
+                        alt="当前牌面"
                         className="absolute right-0 top-0 h-14 w-9 rotate-6 rounded-[10px] object-cover object-top shadow-[0_10px_20px_rgba(18,14,9,0.18)] ring-1 ring-black/5"
                       />
                     )}
                   </div>
                   <div className="min-w-0 rounded-[20px] border border-white/60 bg-white/56 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.045]">
-                    <p className="text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">CURRENT READING</p>
+                    <p className="text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">当前牌面</p>
                     <p className="mt-1 line-clamp-2 break-words text-sm font-medium leading-snug text-[#3b3024] dark:text-white/72">
-                      {isThinking ? 'Reading...' : companionBubbleText}
+                      {isThinking ? '解读中...' : companionBubbleText}
                     </p>
                   </div>
                   <button
@@ -1375,9 +1457,7 @@ export default function Home() {
       {companionPet(
         clsx(
           'absolute z-40',
-          visibleMessages.length > 0
-            ? 'bottom-[104px] left-4 h-[88px] w-[88px] sm:left-6'
-            : 'left-1/2 top-[292px] h-[132px] w-[132px] -translate-x-1/2 sm:h-[150px] sm:w-[150px]',
+          visibleMessages.length > 0 ? petDockClass : petStageClass,
         ),
         visibleMessages.length > 0,
       )}
@@ -1536,7 +1616,7 @@ export default function Home() {
             <div className="flex shrink-0 items-center gap-2">
               <div className="flex h-9 items-center gap-1.5 rounded-full bg-[#F4CF83]/18 px-2.5 text-[#B97B28] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] dark:bg-[#F4CF83]/10 dark:text-[#F4CF83]">
                 <Sparkles size={15} />
-                <span className="text-sm font-bold" title={membershipLabel}>{plusActive ? 'Plus' : energy}</span>
+                <span className="text-sm font-bold" title={membershipLabel}>{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
               </div>
               <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -2072,20 +2152,30 @@ function DailyMission({
 function DrawCardAnimation({
   active,
   image,
-  images,
+  images = [],
+  cards = [],
   compact,
 }: {
   active: boolean;
   image: string;
-  images: string[];
+  images?: string[];
+  cards?: DrawnCard[];
   compact: boolean;
 }) {
   if (typeof document === 'undefined') return null;
 
   const fallbackCard = image && image !== 'default-card.png' ? image : '/default-card.png';
-  const drawImages = (images.length > 0 ? images : [fallbackCard]).slice(0, 5);
-  const drawCount = Math.max(1, drawImages.length);
+  const animatedCards =
+    cards.length > 0
+      ? cards.slice(0, 5)
+      : (images.length > 0 ? images : [fallbackCard]).slice(0, 5).map((cardSrc, index) => ({
+          name: index === 0 ? '星轨牌面' : `第 ${index + 1} 张`,
+          position: '正位' as const,
+          image: cardSrc,
+        }));
+  const drawCount = Math.max(1, animatedCards.length);
   const singleCard = drawCount === 1;
+  const spreadTitle = singleCard ? '单张指引' : drawCount === 3 ? '圣三角牌阵' : drawCount === 5 ? '五张牌阵' : `${drawCount} 张牌阵`;
   const cardSize = singleCard
     ? compact
       ? 'h-[188px] w-[122px] rounded-[24px]'
@@ -2108,18 +2198,30 @@ function DrawCardAnimation({
       {active && (
         <motion.div
           initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 1, 1, 0] }}
+          animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 2.35, times: [0, 0.1, 0.9, 1], ease: 'easeInOut' }}
+          transition={{ duration: 0.36, ease: 'easeOut' }}
           className="pointer-events-none fixed inset-0 z-[220] flex items-center justify-center"
         >
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.38, 0.26, 0] }}
-            transition={{ duration: 2.35, times: [0, 0.18, 0.8, 1], ease: 'easeInOut' }}
+            animate={{ opacity: [0, 0.38, 0.3] }}
+            transition={{ duration: 1.2, times: [0, 0.55, 1], ease: 'easeOut' }}
             className="absolute inset-0 bg-black/38 backdrop-blur-[2px]"
           />
           <div className={clsx('relative -mt-24 flex items-center justify-center', frameSize)}>
+            <motion.div
+              animate={{ opacity: [0, 1, 1], y: [12, 0, 0] }}
+              transition={{ duration: 3.8, times: [0, 0.12, 1], ease: 'easeOut' }}
+              className="absolute -top-12 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+            >
+              <span className="font-serif text-[18px] font-semibold tracking-[0.08em] text-[#fff7e8] drop-shadow-[0_10px_26px_rgba(0,0,0,0.42)]">
+                {spreadTitle}
+              </span>
+              <span className="rounded-full border border-[#f4cf83]/24 bg-[#111621]/62 px-3 py-1 text-[10px] font-semibold tracking-[0.22em] text-[#f4cf83] shadow-[0_12px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+                ARCANA REVEAL
+              </span>
+            </motion.div>
             {Array.from({ length: Math.min(5, drawCount + 1) }).map((_, item) => (
               <motion.div
                 key={item}
@@ -2131,7 +2233,7 @@ function DrawCardAnimation({
                   rotate: [-8 + item * 8, -22 + item * 22, -26 + item * 26, -30 + item * 30],
                   scale: [0.78, 0.92, 0.9, 0.82],
                 }}
-                transition={{ duration: 1.18, delay: item * 0.04, ease: 'easeInOut' }}
+                transition={{ duration: 1.7, delay: item * 0.07, ease: 'easeInOut' }}
                 className={clsx(
                   'absolute bg-[linear-gradient(145deg,#182035,#05070e)] shadow-[0_22px_46px_rgba(0,0,0,0.32)] ring-1 ring-white/12',
                   compact ? 'h-[150px] w-[96px] rounded-[20px]' : 'h-[172px] w-[110px] rounded-[22px]',
@@ -2143,7 +2245,8 @@ function DrawCardAnimation({
                 </div>
               </motion.div>
             ))}
-            {drawImages.map((cardSrc, index) => {
+            {animatedCards.map((card, index) => {
+              const cardSrc = card.image;
               const spread = index - fanCenter;
               const settleX = singleCard ? -4 : spread * fanOffset;
               const settleY = singleCard ? 8 : Math.abs(spread) * 12 + 4;
@@ -2159,16 +2262,43 @@ function DrawCardAnimation({
                     scale: [0.56, 1.03, 1.06, 1],
                   }}
                   transition={{
-                    duration: 1.92,
-                    delay: index * 0.08,
-                    times: [0, 0.24, 0.54, 1],
+                    duration: 3.15,
+                    delay: index * 0.14,
+                    times: [0, 0.26, 0.58, 1],
                     ease: 'easeInOut',
                   }}
                   className={clsx('absolute preserve-3d', cardSize)}
                 >
                   <motion.div
+                    animate={{ opacity: [0, 0, 1, 1], y: [-8, -8, 0, 0] }}
+                    transition={{ duration: 3.05, delay: index * 0.14, times: [0, 0.42, 0.6, 1], ease: 'easeInOut' }}
+                    className={clsx(
+                      'absolute left-1/2 z-30 flex -translate-x-1/2 flex-col items-center whitespace-nowrap rounded-[16px] border border-white/12 bg-[#111621]/78 px-2.5 py-1 text-center shadow-[0_12px_28px_rgba(0,0,0,0.30)] backdrop-blur-xl',
+                      singleCard ? '-top-[58px] min-w-[118px]' : compact ? '-top-[46px] min-w-[82px]' : '-top-[50px] min-w-[90px]',
+                    )}
+                  >
+                    <span
+                      className={clsx(
+                        'max-w-[108px] truncate font-serif font-semibold leading-none text-[#fff7e8]',
+                        singleCard ? 'text-[12px]' : 'text-[10px]',
+                      )}
+                    >
+                      {card.name}
+                    </span>
+                    <span
+                      className={clsx(
+                        'mt-1 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-[0.16em]',
+                        card.position === '逆位'
+                          ? 'border-[#b8c7ff]/30 bg-[#b8c7ff]/12 text-[#cbd5ff]'
+                          : 'border-[#f4cf83]/34 bg-[#f4cf83]/12 text-[#f4cf83]',
+                      )}
+                    >
+                      {card.position}
+                    </span>
+                  </motion.div>
+                  <motion.div
                     animate={{ opacity: [1, 1, 0, 0] }}
-                    transition={{ duration: 1.64, delay: index * 0.08, times: [0, 0.44, 0.6, 1], ease: 'easeInOut' }}
+                    transition={{ duration: 2.6, delay: index * 0.14, times: [0, 0.44, 0.66, 1], ease: 'easeInOut' }}
                     className={clsx(
                       'absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[linear-gradient(145deg,#182035,#05070e)] text-[#f4cf83] shadow-[0_22px_46px_rgba(0,0,0,0.34)] ring-1 ring-white/12',
                       cardSize,
@@ -2179,9 +2309,9 @@ function DrawCardAnimation({
                   </motion.div>
                   <motion.img
                     src={cardSrc}
-                    alt="tarot draw"
+                    alt={`${card.name}${card.position}`}
                     animate={{ opacity: [0, 0, 1, 1], scaleX: [0.18, 0.18, 1, 1] }}
-                    transition={{ duration: 1.7, delay: index * 0.08, times: [0, 0.48, 0.64, 1], ease: 'easeInOut' }}
+                    transition={{ duration: 2.9, delay: index * 0.14, times: [0, 0.38, 0.56, 1], ease: 'easeInOut' }}
                     className={clsx(
                       'absolute inset-0 object-cover object-top shadow-[0_22px_46px_rgba(0,0,0,0.34)] ring-1 ring-black/10 dark:ring-white/12',
                       cardSize,
@@ -2189,23 +2319,23 @@ function DrawCardAnimation({
                   />
                   <motion.span
                     animate={{ opacity: [0, 0.72, 0], scale: [0.64, 1.35, 1.9] }}
-                    transition={{ duration: 0.9, delay: 0.36 + index * 0.06, ease: 'easeOut' }}
+                    transition={{ duration: 1.35, delay: 0.78 + index * 0.12, ease: 'easeOut' }}
                     className="absolute inset-[-14px] rounded-[34px] border border-[#f4cf83]/42"
                   />
                   <motion.span
                     animate={{ opacity: [0, 1, 0], x: [-62, 142] }}
-                    transition={{ duration: 0.74, delay: 0.24 + index * 0.05, ease: 'easeOut' }}
+                    transition={{ duration: 1.15, delay: 0.62 + index * 0.11, ease: 'easeOut' }}
                     className="absolute left-0 top-1/2 h-px w-24 -rotate-12 bg-gradient-to-r from-transparent via-[#f4cf83] to-transparent"
                   />
                 </motion.div>
               );
             })}
             <motion.div
-              animate={{ opacity: [0, 1, 1, 0], y: [8, 0, 0, -4] }}
-              transition={{ duration: 2.18, times: [0, 0.16, 0.82, 1], ease: 'easeInOut' }}
+              animate={{ opacity: [0, 1, 1], y: [8, 0, 0] }}
+              transition={{ duration: 3.8, times: [0, 0.12, 1], ease: 'easeOut' }}
               className="absolute bottom-0 rounded-full border border-[#f4cf83]/22 bg-[#111621]/74 px-4 py-2 text-xs font-semibold text-[#f4cf83] shadow-[0_14px_38px_rgba(0,0,0,0.32)] backdrop-blur-xl"
             >
-              {drawCount > 1 ? `正在抽 ${drawCount} 张牌` : '正在抽牌'}
+              {drawCount > 1 ? `正在翻开 ${drawCount} 张牌` : `${animatedCards[0]?.name || '星轨牌面'} · ${animatedCards[0]?.position || '正位'}`}
             </motion.div>
           </div>
         </motion.div>
@@ -2234,16 +2364,19 @@ function UpgradePromptModal({
 
   const copy = {
     energy: {
-      title: '今天的免费能量用完了',
-      desc: '现在开 Plus 可以继续抽牌，试用会立刻补到 12 点能量；不开通也可以明天再来。',
+      title: '这条问题线刚刚打开',
+      desc: '现在停下也可以，但这次整理出来的线索最清楚。Plus 可以继续追问，先试用会立刻补到 12 点能量。',
+      cta: '继续这条线',
     },
     history: {
-      title: '牌迹快要装满了',
-      desc: '免费版只保留最近 30 次。Plus 会扩展到 200 次，并继续沉淀你的长期问题线。',
+      title: '旧牌迹快被新的覆盖了',
+      desc: '免费版只保留最近 30 次。Plus 会扩展到 200 次，把反复出现的问题和代表牌留下来。',
+      cta: '留下我的牌迹',
     },
     weekly: {
-      title: '完整周报是 Plus 权益',
-      desc: '你已经有足够牌迹做趋势分析了。Plus 会整理高频问题、代表牌和本周行动建议。',
+      title: '你已经有材料做复盘了',
+      desc: 'Plus 会整理高频问题、代表牌和本周行动建议，让你看到自己到底卡在哪里。',
+      cta: '生成完整周报',
     },
   }[reason];
 
@@ -2272,11 +2405,28 @@ function UpgradePromptModal({
                 <div className="min-w-0">
                   <div className="text-base font-black text-apple-text">{copy.title}</div>
                   <p className="mt-1 text-sm leading-relaxed text-apple-text-muted">{copy.desc}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-apple-text-muted">
+                    星轨不是只给一次答案，而是把你反复出现的情绪、问题和选择慢慢记下来。
+                  </p>
                 </div>
               </div>
               <button onClick={onClose} className="rounded-full bg-apple-surface-hover p-2 text-apple-text-muted">
                 <X size={17} />
               </button>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+              <div className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
+                <div className="font-black text-apple-text">继续问</div>
+                <div>不打断</div>
+              </div>
+              <div className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
+                <div className="font-black text-apple-text">留牌迹</div>
+                <div>可复盘</div>
+              </div>
+              <div className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
+                <div className="font-black text-apple-text">更懂你</div>
+                <div>少解释</div>
+              </div>
             </div>
             <div className="mt-5 grid gap-2">
               {trialAvailable && (
@@ -2292,7 +2442,7 @@ function UpgradePromptModal({
                 onClick={onGoPlus}
                 className="rounded-full border border-apple-border bg-apple-surface-hover py-3 text-sm font-bold text-apple-text"
               >
-                看 Plus 月卡
+                {copy.cta}
               </button>
             </div>
           </motion.div>

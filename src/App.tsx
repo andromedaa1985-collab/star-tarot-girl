@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './store';
 import Layout from './components/Layout';
+import { FeatureGate } from './components/FeatureGate';
 import Home from './pages/Home';
 import Landing from './pages/Landing';
 import Collection from './pages/Collection';
@@ -25,9 +26,9 @@ function App() {
           <Route path="/app" element={<Layout />}>
             <Route index element={<Home />} />
             <Route path="bazi" element={<Bazi />} />
-            <Route path="simulator" element={<Simulator />} />
+            <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
             <Route path="diary" element={<Diary />} />
-            <Route path="guardian" element={<Guardian />} />
+            <Route path="guardian" element={<FeatureGate feature="guardian"><Guardian /></FeatureGate>} />
             <Route path="collection" element={<Collection />} />
             <Route path="profile" element={<Profile />} />
             <Route path="settings" element={<Settings />} />

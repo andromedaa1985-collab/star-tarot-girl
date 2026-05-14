@@ -1,11 +1,15 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library } from 'lucide-react';
+import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, type UserProfile } from '../store';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Solar } from 'lunar-javascript';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
+import { hasFeatureAccess, isPlusActive } from '../lib/membership';
+import { copyTextToClipboard } from '../lib/clipboard';
+import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -27,7 +31,7 @@ function getProfileBranch(profile: UserProfile) {
 
 function getProfileAge(profile: UserProfile) {
   const year = Number(profile.birthDate.split('-')[0]);
-  return year ? new Date().getFullYear() - year : 0;
+  return year ? Number(getAppDateKey(getTrustedNow()).slice(0, 4)) - year : 0;
 }
 
 function calculateRelationshipMatch(a?: UserProfile, b?: UserProfile) {
@@ -75,53 +79,96 @@ function calculateRelationshipMatch(a?: UserProfile, b?: UserProfile) {
   const advice = score >= 68
     ? '适合从轻松、持续的小互动开始，别一上来就逼对方给答案。'
     : '可以先看沟通成本，别把偶然的心动误判成长久的稳定。';
+  const communicationCost = Math.max(18, Math.min(92, 106 - score + (reasons.some((item) => item.includes('刺激')) ? 12 : 0)));
+  const stablePotential = Math.max(38, Math.min(96, score + (ageDiff <= 6 ? 6 : -4)));
 
   return {
     score,
     label,
     reasons: reasons.slice(0, 3),
     advice,
-    branches: branchA && branchB ? `${branchA} × ${branchB}` : '资料不足'
+    branches: branchA && branchB ? `${branchA} × ${branchB}` : '资料不足',
+    metrics: [
+      { label: '吸引力', value: Math.min(96, score + 7), hint: score >= 68 ? '容易靠近' : '慢慢升温' },
+      { label: '沟通成本', value: communicationCost, hint: communicationCost >= 62 ? '需要约定边界' : '相对轻松' },
+      { label: '稳定潜力', value: stablePotential, hint: stablePotential >= 72 ? '适合长期观察' : '先看回应' },
+    ],
+    report: buildRelationshipReport(score, reasons, a, b),
   };
 }
 
-const playVoiceMiniMax = async (text: string, audioElement: HTMLAudioElement | null) => {
+function buildRelationshipReport(score: number, reasons: string[], a?: UserProfile, b?: UserProfile) {
+  const names = `${a?.name || '你'} 和 ${b?.name || 'TA'}`;
+  const high = score >= 72;
+  const tense = reasons.some((item) => item.includes('刺激') || item.includes('差异'));
+
+  return {
+    sweetSpot: high
+      ? `${names} 的吸引力不只在新鲜感，而在于彼此容易看见对方的优点。适合把关系推进到稳定陪伴，而不是只靠情绪起伏维持热度。`
+      : `${names} 的关系更像慢慢试探型。不要急着用“合不合”下结论，先观察对方是否愿意在小事上持续回应。`,
+    conflict: tense
+      ? '雷区在于节奏和控制感：一个人想快点确定，一个人可能需要空间。吵架时不要逼问态度，先约定冷静后的复盘时间。'
+      : '主要雷区不是大冲突，而是把“我以为你懂”当成默认。越熟越要把需求说清楚，别让沉默变成误会。',
+    language: high
+      ? '相处语言适合“肯定 + 具体行动”。少说抽象承诺，多说今天能做什么、什么时候见、下一步怎么安排。'
+      : '相处语言适合“轻问 + 慢确认”。不要一次谈太重，先用低压力的问题确认彼此边界。',
+    task: high
+      ? '7 日小任务：一起定一个很小的共同仪式，比如睡前互发一句今天最想被理解的事，连续 7 天。'
+      : '7 日小任务：先不逼关系定义，每两天做一次轻量互动，观察对方是否稳定回应。',
+  };
+}
+
+const RELATIONSHIP_WEEK_TASKS = [
+  { day: 1, title: '观察回应速度', desc: '今天只看一个信号：你发出轻量互动后，对方是否愿意稳定回应。' },
+  { day: 2, title: '安排一次低压力互动', desc: '选择一件很小的事一起做，重点不是结果，而是看相处时是否放松。' },
+  { day: 3, title: '识别一个舒服边界', desc: '记录你们在哪个话题上最自然，哪个话题一碰就容易紧张。' },
+  { day: 4, title: '看行动是否一致', desc: '少听承诺，多看对方是否把小安排落到实际行动里。' },
+  { day: 5, title: '复盘一次小摩擦', desc: '如果最近有不舒服，先写下事实和感受，不急着给关系定性。' },
+  { day: 6, title: '确认关系里的能量流向', desc: '看看是彼此补能，还是其中一方长期在迁就和消耗。' },
+  { day: 7, title: '做一次清醒判断', desc: '回看这一周，对方是否让你更安稳、更真实，还是更焦虑。' },
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function getRelationshipWeekDay(startDate?: string, now = getTrustedNow()) {
+  if (!startDate) return 1;
+  const start = new Date(`${startDate}T00:00:00`).getTime();
+  if (!Number.isFinite(start)) return 1;
+  const today = new Date(`${getAppDateKey(now)}T00:00:00`).getTime();
+  return Math.max(1, Math.min(7, Math.floor((today - start) / DAY_MS) + 1));
+}
+
+function getRelationshipPairKey(a?: UserProfile, b?: UserProfile) {
+  if (!a || !b) return '';
+  return [`${a.name}-${a.birthDate}-${a.birthTime}`, `${b.name}-${b.birthDate}-${b.birthTime}`].sort().join('__');
+}
+
+function getRelationshipPreview(text: string) {
+  return text.length > 44 ? `${text.slice(0, 44)}...` : text;
+}
+
+function isLocalHostName(hostname: string) {
+  return hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '::1' || hostname === '[::1]' || hostname.startsWith('127.');
+}
+
+function isLocalUrl(url: string) {
   try {
-    const res = await fetch(`/api/minimax/tts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'speech-01-turbo',
-        text: text,
-        stream: false,
-        voice_setting: {
-          voice_id: 'female-tianmei',
-          speed: 1,
-          vol: 1,
-          pitch: 0
-        }
-      })
-    });
-    const data = await res.json();
-    if (data.data && data.data.audio && audioElement) {
-      const audioData = data.data.audio;
-      const byteCharacters = atob(audioData);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'audio/mp3' });
-      const url = URL.createObjectURL(blob);
-      audioElement.src = url;
-      audioElement.play();
-    }
-  } catch (e) {
-    console.error("MiniMax TTS Error:", e);
+    return isLocalHostName(new URL(url).hostname);
+  } catch {
+    return false;
   }
-};
+}
+
+function pickShareProfile(profile: UserProfile) {
+  return {
+    name: profile.name,
+    gender: profile.gender,
+    birthDate: profile.birthDate,
+    birthTime: profile.birthTime,
+    birthLocation: profile.birthLocation,
+    currentLocation: profile.currentLocation,
+  };
+}
 
 interface BaziResult {
   bazi: {
@@ -161,11 +208,36 @@ interface BaziResult {
     summary: string;
     luckyHours: string;
   };
-  readingText: string;
   personality: string;
   career: string;
   romance: string;
 }
+
+const buildRecentFortuneContext = (formData: any, now = getTrustedNow()) => {
+  const base = [
+    `当前时间：${formatAppDateTime(now)}（${getAppWeekday(now)}，北京时间）`,
+    `现居地：${formData.currentLocation || '未填写'}`,
+  ];
+
+  try {
+    const solar = Solar.fromYmdHms(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      now.getDate(),
+      now.getHours(),
+      now.getMinutes(),
+      0,
+    );
+    const currentEightChar = solar.getLunar().getEightChar();
+    base.push(
+      `近期推运参考：${currentEightChar.getYear()}年、${currentEightChar.getMonth()}月、${currentEightChar.getDay()}日、${currentEightChar.getTime()}时`,
+    );
+  } catch (error) {
+    console.warn('Recent fortune context failed:', error);
+  }
+
+  return `${base.join('；')}。若用户询问最近、今日、本周、本月或今年运势，请结合命主原局与当前流年、流月、流日、流时来推断；若问题与近期运势无关，不要生硬提时间。`;
+};
 
 // ShenSha Calculation Helper
 function calculateShenSha(bazi: { yearGan: string, yearZhi: string, monthGan: string, monthZhi: string, dayGan: string, dayZhi: string, timeGan: string, timeZhi: string }) {
@@ -246,16 +318,42 @@ function calculateShenSha(bazi: { yearGan: string, yearZhi: string, monthGan: st
 }
 
 export default function Bazi() {
-  const { settings, energy, setEnergy, baziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId } = useAppContext();
+  useTrustedTime();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { energy, setEnergy, membership, baziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId } = useAppContext();
+  const plusActive = isPlusActive(membership);
+  const baziUnlocked = hasFeatureAccess(membership, 'bazi');
+  const relationshipUnlocked = hasFeatureAccess(membership, 'relationship_report');
+  const relationshipWeekUnlocked = hasFeatureAccess(membership, 'relationship_weekly');
   
   const [isCalculating, setIsCalculating] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const [chatInput, setChatInput, clearChatDraft] = usePersistentDraft('draft:bazi:chat', '');
   const [isChatting, setIsChatting] = useState(false);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+  const [useRecentFortuneContext, setUseRecentFortuneContext] = useState(true);
+  const [recentFortuneStatus, setRecentFortuneStatus] = useState<string | null>(null);
   const [matchAId, setMatchAId] = useState('');
   const [matchBId, setMatchBId] = useState('');
+  const [relationshipShareStatus, setRelationshipShareStatus] = useState<string | null>(null);
+  const [isCreatingInviteLink, setIsCreatingInviteLink] = useState(false);
+  const [invitedProfileName, setInvitedProfileName] = useState<string | null>(null);
+  const [relationshipTaskDone, setRelationshipTaskDone] = useState<Record<string, number[]>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('relationshipTaskDone') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [relationshipWeekStartedAt, setRelationshipWeekStartedAt] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('relationshipWeekStartedAt') || '{}');
+    } catch {
+      return {};
+    }
+  });
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const processedInviteRef = useRef<string | null>(null);
 
   const prevActiveProfileIdRef = useRef<string | null>(activeProfileId);
 
@@ -266,9 +364,211 @@ export default function Bazi() {
     }
   }, [profiles]);
 
+  React.useEffect(() => {
+    localStorage.setItem('relationshipTaskDone', JSON.stringify(relationshipTaskDone));
+  }, [relationshipTaskDone]);
+
+  React.useEffect(() => {
+    localStorage.setItem('relationshipWeekStartedAt', JSON.stringify(relationshipWeekStartedAt));
+  }, [relationshipWeekStartedAt]);
+
+  React.useEffect(() => {
+    const legacyPair = searchParams.get('pair');
+    if (legacyPair) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('pair');
+      setSearchParams(next, { replace: true });
+      setRelationshipShareStatus('旧版邀请链接已升级保护隐私，请让对方重新生成一次。');
+      return;
+    }
+
+    const inviteToken = searchParams.get('invite');
+    if (!inviteToken || processedInviteRef.current === inviteToken) return;
+    processedInviteRef.current = inviteToken;
+
+    let cancelled = false;
+    const importInvite = async () => {
+      try {
+        setRelationshipShareStatus('正在读取邀请档案...');
+        const response = await fetch(`/api/relationship/invites/${encodeURIComponent(inviteToken)}`, {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error?.message || '邀请链接已失效。');
+
+        const incomingProfile = data.profile as Omit<UserProfile, 'id'>;
+        if (!incomingProfile?.name || !incomingProfile?.birthDate || !incomingProfile?.birthTime) {
+          throw new Error('邀请档案不完整，请让对方重新生成一次。');
+        }
+        if (cancelled) return;
+
+        const existing = profiles.find(profile =>
+          profile.name === incomingProfile.name &&
+          profile.birthDate === incomingProfile.birthDate &&
+          profile.birthTime === incomingProfile.birthTime,
+        );
+
+        if (existing) {
+          setMatchAId(existing.id);
+          setInvitedProfileName(existing.name);
+          setRelationshipShareStatus(`${existing.name} 的档案已在这里。现在填写或选择你的档案，点“生成合盘”就能加入。`);
+        } else {
+          const importedProfile = {
+            id: `invite-${Date.now()}`,
+            ...incomingProfile,
+          };
+          setProfiles(prev => [...prev, importedProfile]);
+          setMatchAId(importedProfile.id);
+          setInvitedProfileName(incomingProfile.name);
+          setRelationshipShareStatus(`${incomingProfile.name} 的档案已带入。现在填写或选择你的档案，点“生成合盘”就能加入。`);
+        }
+
+        const next = new URLSearchParams(searchParams);
+        next.delete('invite');
+        setSearchParams(next, { replace: true });
+      } catch (error: any) {
+        if (!cancelled) setRelationshipShareStatus(error.message || '邀请链接已失效，请让对方重新生成一次。');
+      }
+    };
+
+    importInvite();
+    return () => {
+      cancelled = true;
+    };
+  }, [profiles, searchParams, setProfiles, setSearchParams]);
+
   const matchA = profiles.find(profile => profile.id === matchAId);
   const matchB = profiles.find(profile => profile.id === matchBId);
   const relationshipMatch = calculateRelationshipMatch(matchA, matchB);
+  const relationshipPairKey = getRelationshipPairKey(matchA, matchB);
+  const completedRelationshipTasks = relationshipPairKey ? relationshipTaskDone[relationshipPairKey] || [] : [];
+  const relationshipWeekStartDate = relationshipPairKey ? relationshipWeekStartedAt[relationshipPairKey] : '';
+  const relationshipWeekDay = getRelationshipWeekDay(relationshipWeekStartDate, getTrustedNow());
+  const nextRelationshipTask = RELATIONSHIP_WEEK_TASKS.find(task => task.day === Math.min(7, relationshipWeekDay + 1));
+  const relationshipFlowSteps = [
+    { label: invitedProfileName ? `${invitedProfileName} 已带入` : '先建一份档案', done: profiles.length >= 1 },
+    { label: profiles.length >= 2 ? '两份档案已就绪' : '补上第二个人', done: profiles.length >= 2 },
+    { label: relationshipMatch ? '查看默契分' : '生成合盘', done: Boolean(relationshipMatch) },
+  ];
+  const handleCopyRelationshipLink = async () => {
+    const sourceProfile = matchA || profiles.find(profile => profile.id === activeProfileId) || profiles[0];
+    if (!sourceProfile) {
+      setRelationshipShareStatus('先保存一个档案，再生成邀请链接。');
+      scrollToProfileForm();
+      return;
+    }
+    setIsCreatingInviteLink(true);
+    try {
+      const response = await fetch('/api/relationship/invites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: pickShareProfile(sourceProfile) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error('邀请链接生成失败，请稍后再试。');
+      const inviteUrl = data.inviteUrl || `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(data.token)}`;
+
+      if (isLocalUrl(inviteUrl)) {
+        setRelationshipShareStatus('邀请功能暂不可用，请稍后再试。');
+        return;
+      }
+
+      const copied = await copyTextToClipboard(inviteUrl);
+      setRelationshipShareStatus(
+        copied
+          ? '邀请链接已复制。下一步：发给 TA。TA 打开后填写自己的出生资料，就能加入这次合盘。'
+          : `浏览器暂时不允许自动复制，请手动复制这段链接发给 TA：${inviteUrl}`,
+      );
+    } catch (error: any) {
+      const message = typeof error?.message === 'string' && /[\u4e00-\u9fff]/.test(error.message)
+        ? error.message
+        : '邀请链接生成失败，请稍后再试。';
+      setRelationshipShareStatus(message);
+    } finally {
+      setIsCreatingInviteLink(false);
+    }
+  };
+
+  const openRelationshipPayment = () => {
+    navigate('/app/profile?plus=1&plan=relationship_report');
+  };
+
+  const openRelationshipWeekPayment = () => {
+    navigate('/app/profile?plus=1&plan=relationship_weekly');
+  };
+
+  const openCouplePlusPayment = () => {
+    navigate('/app/profile?plus=1&plan=couple_plus_monthly');
+  };
+
+  const toggleRelationshipTask = (day: number) => {
+    if (!relationshipPairKey || !relationshipWeekUnlocked) return;
+    if (day > relationshipWeekDay) return;
+    setRelationshipTaskDone(prev => {
+      const current = prev[relationshipPairKey] || [];
+      const next = current.includes(day) ? current.filter(item => item !== day) : [...current, day];
+      return { ...prev, [relationshipPairKey]: next };
+    });
+  };
+
+  React.useEffect(() => {
+    if (!relationshipWeekUnlocked || !relationshipPairKey || relationshipWeekStartedAt[relationshipPairKey]) return;
+    setRelationshipWeekStartedAt(prev => ({ ...prev, [relationshipPairKey]: getAppDateKey(getTrustedNow()) }));
+  }, [relationshipWeekUnlocked, relationshipPairKey, relationshipWeekStartedAt]);
+
+  const openBaziPayment = () => {
+    navigate('/app/profile?plus=1&plan=bazi_full_archive');
+  };
+
+  const scrollToProfileForm = () => {
+    document.getElementById('bazi-profile-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const isBaziFormComplete = Boolean(
+    baziFormData.name &&
+    baziFormData.birthDate &&
+    baziFormData.birthTime &&
+    baziFormData.birthLocation &&
+    baziFormData.currentLocation,
+  );
+
+  const upsertProfileFromForm = (silent = false) => {
+    if (!isBaziFormComplete) {
+      setFormNotice("资料还没填完整。姓名、生日、时间、出生地和现居地都要有。");
+      return null;
+    }
+
+    const payload = {
+      name: baziFormData.name.trim(),
+      gender: baziFormData.gender,
+      birthDate: baziFormData.birthDate,
+      birthTime: baziFormData.birthTime,
+      birthLocation: baziFormData.birthLocation.trim(),
+      currentLocation: baziFormData.currentLocation.trim(),
+    };
+    const currentProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) : null;
+    const existingProfile = currentProfile || profiles.find(p => p.name === payload.name && p.birthDate === payload.birthDate);
+
+    if (existingProfile) {
+      setProfiles(prev => prev.map(profile => profile.id === existingProfile.id ? { ...profile, ...payload } : profile));
+      setActiveProfileId(existingProfile.id);
+      if (!silent) setFormNotice(`${payload.name} 的档案已更新，可以拿去做关系合盘。`);
+      return existingProfile.id;
+    }
+
+    const newProfile = {
+      id: Date.now().toString(),
+      ...payload,
+    };
+    setProfiles(prev => [...prev, newProfile]);
+    setActiveProfileId(newProfile.id);
+    if (!silent) setFormNotice(`${payload.name} 的档案已保存。再保存一个人的档案，就能看双人关系合盘。`);
+    return newProfile.id;
+  };
+
+  const handleSaveProfileOnly = () => {
+    upsertProfileFromForm(false);
+  };
 
   React.useEffect(() => {
     if (activeProfileId) {
@@ -300,38 +600,28 @@ export default function Bazi() {
   }, [baziMessages]);
 
   const handleCalculate = async () => {
-    if (!baziFormData.name || !baziFormData.birthDate || !baziFormData.birthTime || !baziFormData.birthLocation || !baziFormData.currentLocation) {
+    if (!isBaziFormComplete) {
       setFormNotice("资料还没填完整。姓名、生日、时间、出生地和现居地都要有。");
       return;
     }
-    if (energy <= 0) {
+    if (!baziUnlocked) {
+      setFormNotice("完整八字推演需要先解锁命理档案。你也可以先保存两个人档案，免费看看关系默契分。");
+      return;
+    }
+    if (!plusActive && energy <= 0) {
       setFormNotice("能量不够了。先补充能量再推演，已经填写的资料不会丢。");
       return;
     }
     setFormNotice(null);
 
-    // Auto-save to profiles
-    const existingProfile = profiles.find(p => p.name === baziFormData.name && p.birthDate === baziFormData.birthDate);
-    if (!existingProfile) {
-      const newProfile = {
-        id: Date.now().toString(),
-        name: baziFormData.name,
-        gender: baziFormData.gender,
-        birthDate: baziFormData.birthDate,
-        birthTime: baziFormData.birthTime,
-        birthLocation: baziFormData.birthLocation,
-        currentLocation: baziFormData.currentLocation
-      };
-      setProfiles(prev => [...prev, newProfile]);
-      setActiveProfileId(newProfile.id);
-    } else {
-      setActiveProfileId(existingProfile.id);
-    }
+    upsertProfileFromForm(true);
 
     setIsCalculating(true);
     setBaziResult(null);
     setBaziMessages([]);
-    setEnergy(prev => prev - 1);
+    if (!plusActive) {
+      setEnergy(prev => prev - 1);
+    }
 
     try {
       const [yearStr, monthStr, dayStr] = baziFormData.birthDate.split('-');
@@ -459,7 +749,6 @@ ${exactBaziStr}
     "summary": "今日运势简述（50字左右）",
     "luckyHours": "吉时（如：辰时 07:00-09:00）"
   },
-  "readingText": "一段用于语音播报的口语化总结，语气要专业、神秘、温和，像大师面对面解惑（约200字）",
   "personality": "性格特质分析（100字左右）",
   "career": "近期事业/学业运势预测（100字左右）",
   "romance": "感情运势预测（100字左右）"
@@ -509,7 +798,6 @@ ${exactBaziStr}
         tenGods: exactTenGods,
         shensha: parsedResult.shensha,
         dailyLuck: parsedResult.dailyLuck,
-        readingText: parsedResult.readingText,
         personality: parsedResult.personality,
         career: parsedResult.career,
         romance: parsedResult.romance
@@ -522,11 +810,6 @@ ${exactBaziStr}
         text: `你好，${baziFormData.name}。我已经为你排好了八字。关于你的命理，有什么想进一步了解的吗？`,
         timestamp: Date.now()
       }]);
-
-      if (settings.voiceEnabled) {
-        playVoiceMiniMax(finalResult.readingText, audioRef.current);
-      }
-
     } catch (error: any) {
       console.error("Bazi Calculation Error:", error);
       setFormNotice(`推演暂时失败：${error.message || "稍后再试"}。你填的资料已经自动保存。`);
@@ -548,17 +831,25 @@ ${exactBaziStr}
     setBaziMessages(prev => [...prev, newUserMsg]);
     clearChatDraft('');
     setIsChatting(true);
+    const recentFortuneContext = useRecentFortuneContext ? buildRecentFortuneContext(baziFormData) : '未启用近期时间参考，只按命主原局和既有排盘回答。';
+    setRecentFortuneStatus(
+      useRecentFortuneContext ? '本次会参考当前日期、现居地与流年流月流日来推最近运势。' : null,
+    );
 
     try {
       const contextPrompt = `你是一位精通八字命理的国学大师，正在与缘主面对面交流。
 用户八字排盘结果如下：
 ${JSON.stringify(baziResult, null, 2)}
 
+提问时的近期时间参考：
+${recentFortuneContext}
+
 请根据上述八字信息，回答用户的提问。
 【重要要求】：
 1. 语气要专业、神秘、温和，充满人文关怀，就像一位真正的国学大师在面对面解惑。
 2. 绝对不要使用任何 Markdown 格式（如 **加粗**、# 标题、* 列表等），请使用纯文本格式，段落之间用换行分隔即可。
 3. 绝对不要说“作为AI”、“根据提供的数据”等暴露人工智能身份的词语，要完全沉浸在大师的角色中。
+4. 如果用户问“最近运势”“今天如何”“这个月怎么样”“近期事业/感情”等问题，请重点结合近期时间参考与命主原局推断未来 7 到 30 天的走势，并给出可执行建议。
 
 用户的问题是：${chatInput}`;
 
@@ -571,6 +862,7 @@ ${JSON.stringify(baziResult, null, 2)}
           },
           body: JSON.stringify({
             model: 'deepseek-reasoner',
+            isInternetMode: useRecentFortuneContext,
             messages: [
               { role: 'system', content: '你是一位精通八字命理的国学大师。' },
               ...baziMessages.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text })),
@@ -611,8 +903,6 @@ ${JSON.stringify(baziResult, null, 2)}
 
   return (
     <div className="relative h-full w-full overflow-y-auto overscroll-contain px-4 pt-6 pb-40 text-apple-text no-scrollbar">
-      <audio ref={audioRef} className="hidden" />
-      
       {/* Decorative Background Elements */}
       <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-apple-gold/10 to-transparent pointer-events-none"></div>
       
@@ -625,22 +915,41 @@ ${JSON.stringify(baziResult, null, 2)}
       </div>
 
       <div className="max-w-md mx-auto space-y-6 relative z-10">
-        <section className="rounded-[2rem] border border-apple-border bg-apple-surface/70 p-4 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:border-white/10 dark:bg-white/[0.045] dark:shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <section className="overflow-hidden rounded-[2rem] border border-rose-300/18 bg-[linear-gradient(145deg,rgba(255,245,248,0.92),rgba(255,255,255,0.72))] p-4 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:border-rose-300/12 dark:bg-[linear-gradient(145deg,rgba(40,24,38,0.62),rgba(15,18,28,0.76))] dark:shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-400/12 text-rose-200">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-400/14 text-rose-300">
                 <Heart size={18} />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-apple-text">关系速配</h2>
-                <p className="text-[11px] text-apple-text-muted">两个档案就能测默契，仅供娱乐参考。</p>
+                <h2 className="text-sm font-bold text-apple-text">双人关系合盘</h2>
+                <p className="text-[11px] text-apple-text-muted">免费先看默契分，完整报告适合两个人一起看。</p>
               </div>
             </div>
             {relationshipMatch && (
-              <div className="rounded-full border border-[#F4CF83]/18 bg-[#F4CF83]/10 px-3 py-1 text-sm font-black text-[#F4CF83]">
-                {relationshipMatch.score}
+              <div className="rounded-full border border-apple-gold/18 bg-apple-gold/10 px-3 py-1 text-xs font-black text-apple-gold">
+                {relationshipMatch.score} 分
               </div>
             )}
+          </div>
+
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            {relationshipFlowSteps.map((step, index) => (
+              <div
+                key={step.label}
+                className={cn(
+                  'rounded-2xl border px-2 py-2 text-center text-[10px] font-black leading-tight',
+                  step.done
+                    ? 'border-apple-gold/24 bg-apple-gold/12 text-apple-gold'
+                    : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+                )}
+              >
+                <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-surface-hover dark:bg-black/15">
+                  {step.done ? <Check size={12} /> : index + 1}
+                </div>
+                <div className="min-h-[24px]">{step.label}</div>
+              </div>
+            ))}
           </div>
 
           {profiles.length >= 2 ? (
@@ -649,7 +958,7 @@ ${JSON.stringify(baziResult, null, 2)}
                 <select
                   value={matchAId}
                   onChange={event => setMatchAId(event.target.value)}
-                  className="min-w-0 rounded-2xl border border-white/10 bg-[#080b13] px-3 py-3 text-sm font-semibold text-apple-text outline-none"
+                  className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-3 text-sm font-semibold text-apple-text outline-none dark:border-white/10 dark:bg-[#080b13]"
                 >
                   {profiles.map(profile => (
                     <option key={profile.id} value={profile.id}>{profile.name}</option>
@@ -658,7 +967,7 @@ ${JSON.stringify(baziResult, null, 2)}
                 <select
                   value={matchBId}
                   onChange={event => setMatchBId(event.target.value)}
-                  className="min-w-0 rounded-2xl border border-white/10 bg-[#080b13] px-3 py-3 text-sm font-semibold text-apple-text outline-none"
+                  className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-3 text-sm font-semibold text-apple-text outline-none dark:border-white/10 dark:bg-[#080b13]"
                 >
                   {profiles.map(profile => (
                     <option key={profile.id} value={profile.id}>{profile.name}</option>
@@ -667,38 +976,309 @@ ${JSON.stringify(baziResult, null, 2)}
               </div>
 
               {relationshipMatch ? (
-                <div className="rounded-[26px] border border-white/10 bg-black/18 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-lg font-black text-white">{relationshipMatch.label}</div>
-                      <div className="mt-1 text-xs text-[#F4CF83]/80">{relationshipMatch.branches}</div>
+                <div className="rounded-[28px] border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/18">
+                  <div className="grid grid-cols-[96px_1fr] gap-3">
+                    <div
+                      className="relative h-24 w-24 rounded-full p-1 shadow-[0_12px_34px_rgba(244,207,131,0.14)]"
+                      style={{ background: `conic-gradient(var(--app-gold) ${relationshipMatch.score * 3.6}deg, rgba(116,105,94,0.18) 0deg)` }}
+                    >
+                      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface dark:bg-[#111722]">
+                        <div className="text-2xl font-black text-apple-gold">{relationshipMatch.score}</div>
+                        <div className="text-[10px] font-bold text-apple-text-muted">默契分</div>
+                      </div>
                     </div>
-                    <div className="text-right text-xs text-apple-text-muted">
-                      {relationshipMatch.reasons.join(' / ')}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-lg font-black text-apple-text">{relationshipMatch.label}</div>
+                        <div className="rounded-full bg-apple-gold/10 px-2 py-0.5 text-[10px] font-black text-apple-gold">
+                          {relationshipMatch.branches}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {relationshipMatch.reasons.map((reason) => (
+                          <span key={reason} className="rounded-full border border-apple-border bg-apple-surface/80 px-2 py-1 text-[10px] font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]">
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{relationshipMatch.advice}</p>
                     </div>
                   </div>
-                  <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{relationshipMatch.advice}</p>
+                  <div className="mt-4 grid gap-2">
+                    {relationshipMatch.metrics.map((item) => (
+                      <div key={item.label} className="rounded-2xl border border-apple-border bg-apple-surface/70 px-3 py-2 dark:border-transparent dark:bg-white/[0.05]">
+                        <div className="mb-1 flex items-center justify-between text-[11px]">
+                          <span className="font-black text-apple-text">{item.label}</span>
+                          <span className="text-apple-text-muted">{item.hint}</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
+                          <div className="h-full rounded-full bg-apple-gold" style={{ width: `${item.value}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-xs text-apple-text-muted">
+                <div className="rounded-2xl border border-apple-border bg-apple-surface/72 p-3 text-xs text-apple-text-muted dark:border-white/10 dark:bg-black/18">
                   请选择两个不同档案。
+                </div>
+              )}
+              {relationshipMatch && (
+                <div className="rounded-[26px] border border-apple-gold/18 bg-apple-gold/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-black text-apple-text">完整关系报告</div>
+                      <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                        吸引点、冲突雷区、沟通方式和关系时间线。
+                      </div>
+                    </div>
+                    {!relationshipUnlocked && (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-apple-surface-hover text-apple-gold dark:bg-black/20">
+                        <LockKeyhole size={17} />
+                      </div>
+                    )}
+                  </div>
+
+                  {relationshipUnlocked ? (
+                    <div className="mt-3 grid gap-2">
+                      {[
+                        ['相处甜点', relationshipMatch.report.sweetSpot],
+                        ['冲突雷区', relationshipMatch.report.conflict],
+                        ['沟通方式', relationshipMatch.report.language],
+                        ['7 日小任务', relationshipMatch.report.task],
+                      ].map(([title, content]) => (
+                        <div key={title} className="rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
+                          <div className="text-xs font-black text-apple-gold">{title}</div>
+                          <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{content}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 overflow-hidden rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
+                      <div className="mb-3 rounded-2xl border border-apple-gold/16 bg-apple-gold/10 p-3">
+                        <div className="text-[11px] font-black text-apple-gold">免费预览</div>
+                        <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                          {getRelationshipPreview(relationshipMatch.report.sweetSpot)}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+                        {['TA 的安全感', '吵架雷区', '7 日任务'].map((item) => (
+                          <div key={item} className="rounded-2xl border border-apple-border bg-apple-surface/70 px-2 py-2 dark:border-transparent dark:bg-white/[0.05]">
+                            <div className="font-black text-apple-text">{item}</div>
+                            <div>待解锁</div>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={openRelationshipPayment}
+                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-3 text-sm font-black text-[#11131a] shadow-[0_12px_30px_rgba(185,123,40,0.22)] dark:shadow-[0_12px_30px_rgba(244,207,131,0.22)]"
+                      >
+                        <Sparkles size={16} />
+                        解锁完整关系合盘 ¥6.9
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleCopyRelationshipLink}
+                    disabled={isCreatingInviteLink}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-apple-border bg-apple-surface/70 py-2.5 text-xs font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]"
+                  >
+                    <Link2 size={14} />
+                    {isCreatingInviteLink ? '正在生成...' : '邀请 TA 加入这次合盘'}
+                  </button>
+                  <RelationshipInviteGuide compact />
+                  {relationshipShareStatus && (
+                    <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[11px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
+                  )}
+                </div>
+              )}
+              {relationshipMatch && (
+                <div className="rounded-[26px] border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/18">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-black text-apple-text">关系时间线</div>
+                      <div className="mt-1 text-xs text-apple-text-muted">把这段关系从一次心动变成可回看的记录。</div>
+                    </div>
+                    {!relationshipUnlocked && <LockKeyhole size={16} className="text-apple-text-muted" />}
+                  </div>
+                  <div className="space-y-2">
+                    {[
+                      ['已建双人档案', `${matchA?.name || '你'} × ${matchB?.name || 'TA'}`],
+                      ['完成默契速配', `${relationshipMatch.score} 分 · ${relationshipMatch.label}`],
+                      ['下一步观察', relationshipUnlocked ? relationshipMatch.report.language : getRelationshipPreview(relationshipMatch.report.language)],
+                    ].map(([title, content], index) => (
+                      <div key={title} className="grid grid-cols-[24px_1fr] gap-2">
+                        <div className="flex flex-col items-center">
+                          <div className={cn(
+                            'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black',
+                            index < 2 || relationshipUnlocked ? 'bg-apple-gold text-[#11131a]' : 'bg-apple-surface-hover text-apple-text-muted dark:bg-white/10',
+                          )}>
+                            {index < 2 || relationshipUnlocked ? <Check size={12} /> : <LockKeyhole size={11} />}
+                          </div>
+                          {index < 2 && <div className="mt-1 h-8 w-px bg-apple-border dark:bg-white/10" />}
+                        </div>
+                        <div className="pb-2">
+                          <div className="text-xs font-black text-apple-text">{title}</div>
+                          <div className={cn('mt-0.5 text-xs leading-relaxed', index < 2 || relationshipUnlocked ? 'text-apple-text-muted' : 'text-apple-text-muted/70')}>
+                            {content}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!relationshipUnlocked && (
+                    <button
+                      type="button"
+                      onClick={openRelationshipPayment}
+                      className="mt-2 w-full rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-xs font-black text-apple-gold"
+                    >
+                      解锁完整时间线
+                    </button>
+                  )}
+                </div>
+              )}
+              {relationshipMatch && (
+                <div className="rounded-[26px] border border-apple-border bg-[linear-gradient(145deg,rgba(185,123,40,0.12),rgba(124,156,255,0.08))] p-3 dark:border-white/10 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.12),rgba(124,156,255,0.08))]">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-black text-apple-text">7 日关系陪伴</div>
+                      <div className="mt-1 text-xs text-apple-text-muted">
+                        {relationshipWeekUnlocked ? `第 ${relationshipWeekDay} 天 · 已完成 ${completedRelationshipTasks.length}/7 天` : '每天一个低压力观察任务，适合暧昧期和磨合期。'}
+                      </div>
+                    </div>
+                    {!relationshipWeekUnlocked && (
+                      <div className="rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-black text-apple-gold">¥12.9</div>
+                    )}
+                  </div>
+                  {relationshipWeekUnlocked && (
+                    <div className="mb-3 rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
+                      <div className="mb-2 flex items-center justify-between text-[11px] text-apple-text-muted">
+                        <span>陪伴进度</span>
+                        <span>{completedRelationshipTasks.length}/7</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-apple-gold transition-all"
+                          style={{ width: `${Math.round((completedRelationshipTasks.length / 7) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 text-xs leading-relaxed text-apple-text-muted">
+                        {completedRelationshipTasks.length >= 7
+                          ? '一周观察已完成，可以回看任务记录，判断这段关系是否让你更稳定。'
+                          : nextRelationshipTask
+                            ? `明天继续看「${nextRelationshipTask.title}」。`
+                            : '今天先完成当前任务，别急着给关系下结论。'}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid gap-2">
+                    {RELATIONSHIP_WEEK_TASKS.map((task) => {
+                      const visible = relationshipWeekUnlocked ? task.day <= relationshipWeekDay : task.day <= 2;
+                      const done = completedRelationshipTasks.includes(task.day);
+                      return (
+                        <button
+                          key={task.day}
+                          type="button"
+                          onClick={() => toggleRelationshipTask(task.day)}
+                          className={cn(
+                            'rounded-2xl border p-3 text-left transition-all',
+                            visible ? 'border-apple-border bg-apple-surface/72 dark:border-white/10 dark:bg-black/15' : 'border-apple-border bg-apple-surface/55 opacity-55 dark:border-white/8 dark:bg-black/10',
+                            done && 'border-apple-gold/35 bg-apple-gold/10',
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className={cn(
+                              'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black',
+                              done ? 'bg-apple-gold text-[#11131a]' : 'bg-apple-surface-hover text-apple-text-muted dark:bg-white/10',
+                            )}>
+                              {visible ? (done ? <Check size={13} /> : task.day) : <LockKeyhole size={12} />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-black text-apple-text">
+                                {visible ? task.title : relationshipWeekUnlocked ? `第 ${task.day} 天后解锁` : `第 ${task.day} 天任务`}
+                              </div>
+                              <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                                {visible ? task.desc : relationshipWeekUnlocked ? '按天慢慢观察，不一次性把关系推到结论。' : '解锁后继续查看。'}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!relationshipWeekUnlocked && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={openRelationshipWeekPayment}
+                        className="rounded-full bg-apple-gold py-2.5 text-xs font-black text-[#11131a]"
+                      >
+                        解锁 7 日陪伴
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openCouplePlusPayment}
+                        className="rounded-full border border-apple-border bg-apple-surface/70 py-2.5 text-xs font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]"
+                      >
+                        看双人 Plus
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-white/12 bg-black/18 p-4 text-xs leading-relaxed text-apple-text-muted">
-              先给自己和想看的那个人各建一个档案，之后这里会自动出现匹配结果。
+            <div className="rounded-[28px] border border-dashed border-apple-border bg-apple-surface/72 p-4 text-xs leading-relaxed text-apple-text-muted dark:border-white/12 dark:bg-black/18">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
+                <div className="rounded-2xl border border-apple-border bg-apple-surface/70 px-3 py-3 dark:border-transparent dark:bg-white/[0.05]">
+                  <div className="text-sm font-black text-apple-text">{profiles[0]?.name || '你'}</div>
+                  <div className="mt-1">已准备</div>
+                </div>
+                <Heart size={16} className="text-apple-gold" />
+                <div className="rounded-2xl border border-dashed border-apple-border bg-apple-surface/55 px-3 py-3 dark:border-white/12 dark:bg-white/[0.03]">
+                  <div className="text-sm font-black text-apple-text-muted">TA</div>
+                  <div className="mt-1">待建档</div>
+                </div>
+              </div>
+              <p className="mt-3">先给自己和想看的那个人各建一个档案。情侣、暧昧对象、前任复盘都适合从这里开始。</p>
+              <RelationshipInviteGuide />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={scrollToProfileForm}
+                  className="flex items-center justify-center gap-2 rounded-full bg-apple-gold py-2.5 text-xs font-black text-[#11131a]"
+                >
+                  <Sparkles size={14} />
+                  去建档案
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyRelationshipLink}
+                  disabled={isCreatingInviteLink}
+                  className="flex items-center justify-center gap-2 rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-xs font-bold text-apple-gold"
+                >
+                  <Link2 size={14} />
+                  {isCreatingInviteLink ? '生成中' : '复制给 TA 填资料'}
+                </button>
+              </div>
+              {relationshipShareStatus && (
+                <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[11px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
+              )}
             </div>
           )}
         </section>
 
         {!baziResult && !isCalculating && (
           <motion.div 
+            id="bazi-profile-form"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
+            className="mb-8 overflow-hidden rounded-[2rem] border border-apple-border bg-apple-surface p-4 shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] sm:mb-0 sm:p-6"
           >
-            <div className="space-y-5">
+            <div className="min-w-0 space-y-5">
               {profiles.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
@@ -750,17 +1330,17 @@ ${JSON.stringify(baziResult, null, 2)}
                   value={baziFormData.name}
                   onChange={e => setBaziFormData({...baziFormData, name: e.target.value})}
                   placeholder="输入你的名字"
-                  className="w-full bg-apple-surface border border-apple-border rounded-2xl px-5 py-3.5 text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all"
+                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-apple-gold mb-2 ml-1">性别</label>
-                <div className="flex gap-3">
+                <div className="flex min-w-0 gap-3">
                   <button 
                     onClick={() => setBaziFormData({...baziFormData, gender: 'male'})}
                     className={cn(
-                      "flex-1 py-3.5 rounded-2xl border transition-all font-medium",
+                      "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
                       baziFormData.gender === 'male' 
                         ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]" 
                         : "bg-apple-surface border-apple-border text-apple-text-muted"
@@ -771,7 +1351,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   <button 
                     onClick={() => setBaziFormData({...baziFormData, gender: 'female'})}
                     className={cn(
-                      "flex-1 py-3.5 rounded-2xl border transition-all font-medium",
+                      "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
                       baziFormData.gender === 'female' 
                         ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]" 
                         : "bg-apple-surface border-apple-border text-apple-text-muted"
@@ -790,7 +1370,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   type="date" 
                   value={baziFormData.birthDate}
                   onChange={e => setBaziFormData({...baziFormData, birthDate: e.target.value})}
-                  className="w-full bg-apple-surface border border-apple-border rounded-2xl px-5 py-3.5 text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all"
+                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
@@ -802,7 +1382,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   type="time" 
                   value={baziFormData.birthTime}
                   onChange={e => setBaziFormData({...baziFormData, birthTime: e.target.value})}
-                  className="w-full bg-apple-surface border border-apple-border rounded-2xl px-5 py-3.5 text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all"
+                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
@@ -815,7 +1395,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   value={baziFormData.birthLocation}
                   onChange={e => setBaziFormData({...baziFormData, birthLocation: e.target.value})}
                   placeholder="如：北京市朝阳区"
-                  className="w-full bg-apple-surface border border-apple-border rounded-2xl px-5 py-3.5 text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all"
+                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
@@ -828,7 +1408,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   value={baziFormData.currentLocation}
                   onChange={e => setBaziFormData({...baziFormData, currentLocation: e.target.value})}
                   placeholder="如：上海市浦东新区"
-                  className="w-full bg-apple-surface border border-apple-border rounded-2xl px-5 py-3.5 text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all"
+                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
@@ -838,13 +1418,32 @@ ${JSON.stringify(baziResult, null, 2)}
                 </div>
               )}
 
-              {energy <= 0 ? (
+              <button
+                type="button"
+                onClick={handleSaveProfileOnly}
+                disabled={!isBaziFormComplete}
+                className="mt-8 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/10 px-3 py-3.5 text-sm font-bold text-apple-gold transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Library size={18} />
+                保存档案，用于关系合盘
+              </button>
+
+              {!baziUnlocked ? (
+                <button
+                  type="button"
+                  onClick={openBaziPayment}
+                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_4px_20px_rgba(212,175,55,0.3)] transition-all active:scale-95"
+                >
+                  <Sparkles size={18} />
+                  解锁完整八字档案 ¥19.9
+                </button>
+              ) : !plusActive && energy <= 0 ? (
                 <button 
                   onClick={() => {
                     setEnergy(5);
                     setFormNotice(null);
                   }}
-                  className="w-full mt-8 bg-gradient-to-r from-blue-500 to-blue-600 text-white py-4 rounded-2xl font-medium shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_25px_rgba(59,130,246,0.5)] transition-all active:scale-95 flex items-center justify-center gap-2"
+                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_14px_28px_rgba(185,123,40,0.20)] transition-all active:scale-95 hover:shadow-[0_16px_34px_rgba(185,123,40,0.24)] dark:from-blue-500 dark:to-blue-600 dark:text-white dark:shadow-[0_4px_20px_rgba(59,130,246,0.3)] dark:hover:shadow-[0_4px_25px_rgba(59,130,246,0.5)]"
                 >
                   <Zap size={18} />
                   能量不足，点击补充能量
@@ -852,8 +1451,8 @@ ${JSON.stringify(baziResult, null, 2)}
               ) : (
                 <button 
                   onClick={handleCalculate}
-                  disabled={!baziFormData.name || !baziFormData.birthDate || !baziFormData.birthTime || !baziFormData.birthLocation || !baziFormData.currentLocation}
-                  className="w-full mt-8 bg-gradient-to-r from-apple-gold to-[#B8860B] text-black py-4 rounded-2xl font-bold shadow-[0_4px_20px_rgba(212,175,55,0.3)] hover:shadow-[0_4px_25px_rgba(212,175,55,0.5)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  disabled={!isBaziFormComplete}
+                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_4px_20px_rgba(212,175,55,0.3)] transition-all active:scale-95 hover:shadow-[0_4px_25px_rgba(212,175,55,0.5)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Sparkles size={18} />
                   开始推演 (消耗 1 能量)
@@ -1119,6 +1718,50 @@ ${JSON.stringify(baziResult, null, 2)}
                 <Sparkles size={20} />
                 大师解惑
               </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseRecentFortuneContext((value) => {
+                    const next = !value;
+                    if (!next) setRecentFortuneStatus(null);
+                    return next;
+                  });
+                }}
+                className={cn(
+                  'mb-4 flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition-all',
+                  useRecentFortuneContext
+                    ? 'border-apple-gold/45 bg-apple-gold/12 text-apple-text'
+                    : 'border-apple-border bg-apple-surface text-apple-text-muted',
+                )}
+              >
+                <span className="flex min-w-0 items-start gap-3">
+                  <Clock size={17} className="mt-0.5 shrink-0 text-apple-gold" />
+                  <span>
+                    <span className="block text-sm font-bold">近期运势参考</span>
+                    <span className="mt-1 block text-xs leading-relaxed text-apple-text-muted">
+                      问最近、今日、本月运势时，大师会结合当前日期、现居地、流年流月流日推断。
+                    </span>
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    'relative h-7 w-12 shrink-0 rounded-full border transition-colors',
+                    useRecentFortuneContext ? 'border-apple-gold/60 bg-apple-gold/35' : 'border-apple-border bg-apple-surface-hover dark:border-white/10 dark:bg-white/[0.06]',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform',
+                      useRecentFortuneContext ? 'translate-x-5' : 'translate-x-1',
+                    )}
+                  />
+                </span>
+              </button>
+              {recentFortuneStatus && (
+                <div className="mb-4 rounded-2xl border border-apple-accent/20 bg-apple-accent/10 p-3 text-xs leading-relaxed text-apple-text-muted">
+                  {recentFortuneStatus}
+                </div>
+              )}
               
               <div 
                 ref={chatContainerRef}
@@ -1152,7 +1795,7 @@ ${JSON.stringify(baziResult, null, 2)}
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="关于八字，你还有什么想问的？"
+                  placeholder="比如：我最近事业运怎么样？"
                   className="flex-1 bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all placeholder:text-apple-text-muted"
                 />
                 <button 
@@ -1174,7 +1817,7 @@ ${JSON.stringify(baziResult, null, 2)}
 
 function AnalysisCard({ icon, title, content }: { icon: React.ReactNode, title: string, content: string }) {
   return (
-    <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+    <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
       <div className="flex items-center gap-3 mb-3">
         <div className="p-2 rounded-xl bg-apple-surface border border-apple-border">
           {icon}
@@ -1184,6 +1827,39 @@ function AnalysisCard({ icon, title, content }: { icon: React.ReactNode, title: 
       <p className="text-sm text-apple-text-muted leading-relaxed">
         {content}
       </p>
+    </div>
+  );
+}
+
+function RelationshipInviteGuide({ compact = false }: { compact?: boolean }) {
+  const steps = compact
+    ? ['复制', '发给 TA', 'TA 打开加入']
+    : ['复制链接', '微信发给 TA', 'TA 打开后补资料'];
+
+  return (
+    <div className={cn(
+      'mt-3 rounded-2xl border border-apple-gold/18 bg-apple-gold/[0.07] text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+      compact ? 'p-2.5' : 'p-3',
+    )}>
+      <div className="flex items-center gap-2 text-[11px] font-black text-apple-gold">
+        <Link2 size={13} />
+        邀请加入方式
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        {steps.map((step, index) => (
+          <div key={step} className="rounded-xl border border-apple-border bg-apple-surface/70 px-2 py-2 text-center dark:border-white/10 dark:bg-black/15">
+            <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-gold text-[10px] font-black text-[#11131a]">
+              {index + 1}
+            </div>
+            <div className="text-[10px] font-bold leading-snug text-apple-text">{step}</div>
+          </div>
+        ))}
+      </div>
+      {!compact && (
+        <p className="mt-2 text-[11px] leading-relaxed">
+          TA 打开链接后，会自动带入你的档案；如果微信里打不开，让 TA 点右上角用浏览器打开。
+        </p>
+      )}
     </div>
   );
 }

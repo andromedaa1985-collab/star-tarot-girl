@@ -8,26 +8,65 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const PAYMENT_PLANS = [
   {
+    id: "tarot_deep_report",
+    name: "星轨深度牌阵报告",
+    amount: "3.90",
+    description: "一次五张牌阵、温柔解读、可追问与报告沉淀",
+    entitlement: { type: "report", report: "tarot", energyBonus: 6 },
+    limits: { tarotReadings: 1, followups: 5 },
+    features: ["五张牌阵深度解读", "本次牌面可连续追问", "沉淀为一张可复盘报告"],
+  },
+  {
     id: "plus_monthly",
     name: "星轨 Plus 月卡",
     amount: "9.90",
-    description: "每周成长报告、专属牌面与更多每日能量",
+    description: "长期记忆、每周复盘、无限追问当前牌面与陪伴成长",
     entitlement: { type: "membership", plan: "plus", days: 31, energyFloor: 20 },
     limits: { tarotReadings: 200, dailyCheckInEnergy: 2, dailyMissionEnergy: 6 },
-    features: ["完整周报", "200 条牌迹", "Plus 期间抽牌不扣能量", "专属牌面与陪伴细节"],
+    features: ["每周情绪与牌面复盘", "200 条牌迹长期保存", "Plus 期间抽牌不扣能量", "专属牌面与陪伴细节"],
   },
   {
-    id: "energy_pack_30",
-    name: "30 点星光能量包",
-    amount: "6.00",
-    description: "补充占卜与陪伴能量",
-    entitlement: { type: "energy", amount: 30 },
-    limits: { tarotReadings: 30, dailyCheckInEnergy: 1, dailyMissionEnergy: 3 },
-    features: ["立即补充 30 点能量", "适合临时多抽几次"],
+    id: "relationship_report",
+    name: "双人关系合盘报告",
+    amount: "6.90",
+    description: "吸引点、冲突雷区、沟通方式与 7 日相处任务",
+    entitlement: { type: "report", report: "relationship", energyBonus: 8 },
+    limits: { profiles: 2, followups: 6 },
+    features: ["双人关系合盘", "冲突雷区与沟通建议", "关系时间线"],
+  },
+  {
+    id: "relationship_weekly",
+    name: "7 日关系陪伴包",
+    amount: "12.90",
+    description: "完整合盘、每日观察任务与一周复盘",
+    entitlement: { type: "report", report: "relationship_weekly", energyBonus: 10 },
+    limits: { profiles: 2, days: 7, followups: 8 },
+    features: ["完整关系合盘", "7 日相处任务", "一周后关系复盘"],
+  },
+  {
+    id: "couple_plus_monthly",
+    name: "双人 Plus 月卡",
+    amount: "16.90",
+    description: "长期记忆、关系陪伴、完整合盘与 Plus 权益",
+    entitlement: { type: "membership", plan: "plus", days: 31, energyFloor: 30 },
+    limits: { tarotReadings: 260, relationshipReports: 6, dailyMissionEnergy: 8 },
+    features: ["Plus 月卡权益", "完整关系合盘", "7 日关系陪伴", "更多关系复盘次数"],
+  },
+  {
+    id: "bazi_full_archive",
+    name: "八字完整命理档案",
+    amount: "19.90",
+    description: "八字排盘、用神、近期运势参考与长期档案",
+    entitlement: { type: "report", report: "bazi", energyBonus: 12 },
+    limits: { profiles: 1, followups: 10 },
+    features: ["完整命理档案", "近期运势参考", "适合长期复盘和提问"],
   },
 ];
 
 const alipayOrders = new Map<string, any>();
+const paymentOrders = alipayOrders;
+const relationshipInvites = new Map<string, { profile: any; createdAt: string; expiresAt: number }>();
+const RELATIONSHIP_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ALIPAY_GATEWAYS = {
   sandbox: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
@@ -44,6 +83,110 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function getPlan(planId?: string) {
+  return PAYMENT_PLANS.find((item) => item.id === planId) || PAYMENT_PLANS[0];
+}
+
+function getPublicBaseUrl(req: express.Request) {
+  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
+  return process.env.PUBLIC_BASE_URL || `${forwardedProto || req.protocol}://${forwardedHost || req.get("host")}`;
+}
+
+function buildRelationshipInviteUrl(req: express.Request, token: string) {
+  const baseUrl = getPublicBaseUrl(req).replace(/\/$/, "");
+  return `${baseUrl}/app/bazi?invite=${encodeURIComponent(token)}`;
+}
+
+function md5(value: string) {
+  return crypto.createHash("md5").update(value, "utf8").digest("hex");
+}
+
+function createOrder(plan: (typeof PAYMENT_PLANS)[number], provider: string) {
+  const orderId = `AR${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  paymentOrders.set(orderId, {
+    id: orderId,
+    provider,
+    planId: plan.id,
+    amount: plan.amount,
+    status: "created",
+    createdAt: new Date().toISOString(),
+  });
+  return orderId;
+}
+
+function pruneRelationshipInvites() {
+  const now = Date.now();
+  for (const [token, invite] of relationshipInvites.entries()) {
+    if (invite.expiresAt <= now) relationshipInvites.delete(token);
+  }
+}
+
+function sanitizeRelationshipProfile(input: any) {
+  const profile = input && typeof input === "object" ? input : {};
+  const name = typeof profile.name === "string" ? profile.name.trim().slice(0, 24) : "";
+  const birthDate = typeof profile.birthDate === "string" ? profile.birthDate.trim().slice(0, 10) : "";
+  const birthTime = typeof profile.birthTime === "string" ? profile.birthTime.trim().slice(0, 5) : "";
+  if (!name || !birthDate || !birthTime) return null;
+  return {
+    name,
+    gender: profile.gender === "female" ? "female" : "male",
+    birthDate,
+    birthTime,
+    birthLocation: typeof profile.birthLocation === "string" ? profile.birthLocation.trim().slice(0, 48) : "",
+    currentLocation: typeof profile.currentLocation === "string" ? profile.currentLocation.trim().slice(0, 48) : "",
+  };
+}
+
+function getXorPayConfig(req: express.Request) {
+  const publicBaseUrl = getPublicBaseUrl(req);
+  return {
+    aid: process.env.XORPAY_AID,
+    secret: process.env.XORPAY_APP_SECRET,
+    gateway: process.env.XORPAY_GATEWAY || "https://xorpay.com/api/pay",
+    notifyUrl: process.env.XORPAY_NOTIFY_URL || `${publicBaseUrl}/api/payments/xorpay/notify`,
+    returnUrl: process.env.XORPAY_RETURN_URL || `${publicBaseUrl}/app/profile`,
+  };
+}
+
+function getXorPayMissing(config: ReturnType<typeof getXorPayConfig>) {
+  const missing = [];
+  if (!config.aid) missing.push("XORPAY_AID");
+  if (!config.secret) missing.push("XORPAY_APP_SECRET");
+  return missing;
+}
+
+function signXorPayPay(params: { name: string; payType: string; price: string; orderId: string; notifyUrl: string }, secret: string) {
+  return md5(`${params.name}${params.payType}${params.price}${params.orderId}${params.notifyUrl}${secret}`);
+}
+
+function getXunhuPayConfig(req: express.Request) {
+  const publicBaseUrl = getPublicBaseUrl(req);
+  return {
+    appId: process.env.XUNHUPAY_APPID,
+    appSecret: process.env.XUNHUPAY_APPSECRET,
+    gateway: process.env.XUNHUPAY_GATEWAY || "https://api.xunhupay.com/payment/do.html",
+    notifyUrl: process.env.XUNHUPAY_NOTIFY_URL || `${publicBaseUrl}/api/payments/xunhupay/notify`,
+    returnUrl: process.env.XUNHUPAY_RETURN_URL || `${publicBaseUrl}/app/profile`,
+  };
+}
+
+function getXunhuPayMissing(config: ReturnType<typeof getXunhuPayConfig>) {
+  const missing = [];
+  if (!config.appId) missing.push("XUNHUPAY_APPID");
+  if (!config.appSecret) missing.push("XUNHUPAY_APPSECRET");
+  return missing;
+}
+
+function signXunhuPay(params: Record<string, any>, secret: string) {
+  const content = Object.keys(params)
+    .filter((key) => key !== "hash" && params[key] !== undefined && params[key] !== null && params[key] !== "")
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+  return md5(`${content}${secret}`);
 }
 
 function alipayTimestamp() {
@@ -92,7 +235,7 @@ function buildAlipayForm(gateway: string, params: Record<string, any>) {
 
 function getAlipayConfig(req: express.Request) {
   const mode = process.env.ALIPAY_GATEWAY_MODE === "production" ? "production" : "sandbox";
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+  const publicBaseUrl = getPublicBaseUrl(req);
   return {
     mode,
     gateway: ALIPAY_GATEWAYS[mode],
@@ -124,14 +267,74 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  app.get("/api/time", (req, res) => {
+    const now = new Date();
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      now: now.toISOString(),
+      timestampMs: now.getTime(),
+      timezone: "Asia/Shanghai",
+    });
+  });
+
+  app.post("/api/relationship/invites", (req, res) => {
+    try {
+      pruneRelationshipInvites();
+      const profile = sanitizeRelationshipProfile(req.body?.profile);
+      if (!profile) {
+        return res.status(400).json({ error: { message: "请先保存一份完整档案，再生成邀请链接。" } });
+      }
+
+      const token = crypto.randomBytes(18).toString("base64url");
+      const expiresAt = Date.now() + RELATIONSHIP_INVITE_TTL_MS;
+      relationshipInvites.set(token, {
+        profile,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        token,
+        inviteUrl: buildRelationshipInviteUrl(req, token),
+        expiresAt: new Date(expiresAt).toISOString(),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: { message: error.message || "邀请链接生成失败" } });
+    }
+  });
+
+  app.get("/api/relationship/invites/:token", (req, res) => {
+    pruneRelationshipInvites();
+    const token = req.params.token;
+    const invite = relationshipInvites.get(token);
+    res.setHeader("Cache-Control", "no-store");
+    if (!invite) {
+      return res.status(404).json({ error: { message: "邀请链接已失效，请让对方重新生成一次。" } });
+    }
+    res.json({
+      profile: invite.profile,
+      expiresAt: new Date(invite.expiresAt).toISOString(),
+    });
+  });
+
   app.get("/api/payments/plans", (req, res) => {
     const config = getAlipayConfig(req);
     const missing = getMissingAlipayConfig(config);
+    const xorpayConfig = getXorPayConfig(req);
+    const xunhuPayConfig = getXunhuPayConfig(req);
+    const xorpayMissing = getXorPayMissing(xorpayConfig);
+    const xunhuPayMissing = getXunhuPayMissing(xunhuPayConfig);
     res.json({
-      provider: "alipay",
-      enabled: missing.length === 0,
+      provider: xorpayMissing.length === 0 ? "xorpay" : xunhuPayMissing.length === 0 ? "xunhupay" : "xorpay",
+      enabled: xorpayMissing.length === 0 || xunhuPayMissing.length === 0 || missing.length === 0,
       mode: config.mode,
       missing,
+      providers: [
+        { id: "xorpay", name: "XorPay", enabled: xorpayMissing.length === 0, missing: xorpayMissing },
+        { id: "xunhupay", name: "虎皮椒", enabled: xunhuPayMissing.length === 0, missing: xunhuPayMissing },
+        { id: "alipay", name: "支付宝直连调试", enabled: missing.length === 0, missing },
+      ],
       plans: PAYMENT_PLANS,
     });
   });
@@ -151,7 +354,7 @@ async function startServer() {
 
       const plan = PAYMENT_PLANS.find((item) => item.id === req.body.planId) || PAYMENT_PLANS[0];
       const channel = req.body.channel === "wap" ? "wap" : "page";
-      const orderId = `AR${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const orderId = createOrder(plan, "alipay");
       const method = channel === "wap" ? "alipay.trade.wap.pay" : "alipay.trade.page.pay";
       const bizContent: Record<string, any> = {
         out_trade_no: orderId,
@@ -180,14 +383,6 @@ async function startServer() {
       };
 
       params.sign = signAlipayParams(params, config.privateKey!);
-      alipayOrders.set(orderId, {
-        id: orderId,
-        planId: plan.id,
-        amount: plan.amount,
-        status: "created",
-        createdAt: new Date().toISOString(),
-      });
-
       res.json({
         orderId,
         plan,
@@ -197,6 +392,119 @@ async function startServer() {
     } catch (error: any) {
       console.error("Alipay Create Error:", error);
       res.status(500).json({ error: { message: error.message } });
+    }
+  });
+
+  app.post("/api/payments/xorpay/create", async (req, res) => {
+    try {
+      const plan = getPlan(req.body.planId);
+      const config = getXorPayConfig(req);
+      const missing = getXorPayMissing(config);
+      if (missing.length > 0) {
+        return res.status(400).json({
+          error: { message: `XorPay 还没配置好：${missing.join(", ")}`, missing },
+        });
+      }
+
+      const orderId = createOrder(plan, "xorpay");
+      const payType = req.body.payType === "wechat" ? "native" : "alipay";
+      const params = {
+        name: plan.name,
+        pay_type: payType,
+        price: plan.amount,
+        order_id: orderId,
+        notify_url: config.notifyUrl,
+        return_url: config.returnUrl,
+        order_uid: req.body.userId || "astro_guest",
+        more: plan.description,
+        sign: signXorPayPay(
+          { name: plan.name, payType, price: plan.amount, orderId, notifyUrl: config.notifyUrl },
+          config.secret!,
+        ),
+      };
+      const response = await fetch(`${config.gateway}/${config.aid}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(params).toString(),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok") {
+        paymentOrders.set(orderId, { ...paymentOrders.get(orderId), status: "failed", providerResponse: data });
+        return res.status(502).json({ error: { message: data.info || data.message || "XorPay 下单失败" } });
+      }
+
+      paymentOrders.set(orderId, {
+        ...paymentOrders.get(orderId),
+        providerOrderId: data.aoid,
+        providerResponse: data,
+      });
+      res.json({
+        orderId,
+        plan,
+        provider: "xorpay",
+        payUrl: data?.info?.qr || data?.url || data?.qrcode,
+        providerResponse: data,
+      });
+    } catch (error: any) {
+      console.error("XorPay Create Error:", error);
+      res.status(500).json({ error: { message: error.message || "XorPay 下单失败" } });
+    }
+  });
+
+  app.post("/api/payments/xunhupay/create", async (req, res) => {
+    try {
+      const plan = getPlan(req.body.planId);
+      const config = getXunhuPayConfig(req);
+      const missing = getXunhuPayMissing(config);
+      if (missing.length > 0) {
+        return res.status(400).json({
+          error: { message: `虎皮椒还没配置好：${missing.join(", ")}`, missing },
+        });
+      }
+
+      const orderId = createOrder(plan, "xunhupay");
+      const tradeType = req.body.payType === "wechat" ? "WAP" : "WAP_ALIPAY";
+      const params: Record<string, any> = {
+        version: "1.1",
+        appid: config.appId,
+        trade_order_id: orderId,
+        payment: tradeType,
+        total_fee: plan.amount,
+        title: plan.name,
+        time: Math.floor(Date.now() / 1000),
+        notify_url: config.notifyUrl,
+        return_url: config.returnUrl,
+        nonce_str: crypto.randomBytes(12).toString("hex"),
+        plugins: "astro-rail",
+      };
+      params.hash = signXunhuPay(params, config.appSecret!);
+      const response = await fetch(config.gateway, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      const data = await response.json();
+      if (!response.ok || data.errcode !== 0) {
+        paymentOrders.set(orderId, { ...paymentOrders.get(orderId), status: "failed", providerResponse: data });
+        return res.status(502).json({ error: { message: data.errmsg || "虎皮椒下单失败" } });
+      }
+
+      paymentOrders.set(orderId, {
+        ...paymentOrders.get(orderId),
+        providerOrderId: data.open_order_id,
+        providerResponse: data,
+      });
+      res.json({
+        orderId,
+        plan,
+        provider: "xunhupay",
+        payUrl: data.url || data.url_qrcode,
+        qrUrl: data.url_qrcode,
+        providerResponse: data,
+      });
+    } catch (error: any) {
+      console.error("XunhuPay Create Error:", error);
+      res.status(500).json({ error: { message: error.message || "虎皮椒下单失败" } });
     }
   });
 
@@ -231,6 +539,57 @@ async function startServer() {
     }
   });
 
+  app.post("/api/payments/xorpay/notify", (req, res) => {
+    try {
+      const config = getXorPayConfig(req);
+      const params = { ...req.body, ...req.query } as Record<string, string>;
+      const order = paymentOrders.get(params.order_id);
+      if (!order || !config.secret) return res.send("fail");
+      const expected = md5(`${params.aoid || ""}${params.order_id || ""}${params.pay_price || ""}${params.pay_time || ""}${config.secret}`);
+      const amountMatches = String(order.amount) === String(params.pay_price);
+      if (!params.sign || params.sign !== expected) return res.send("fail");
+      if (!amountMatches) return res.send("fail");
+
+      paymentOrders.set(params.order_id, {
+        ...order,
+        status: "paid",
+        providerOrderId: params.aoid,
+        paidAt: new Date().toISOString(),
+        providerResponse: params,
+      });
+      res.send("success");
+    } catch (error) {
+      console.error("XorPay Notify Error:", error);
+      res.send("fail");
+    }
+  });
+
+  app.post("/api/payments/xunhupay/notify", (req, res) => {
+    try {
+      const config = getXunhuPayConfig(req);
+      const params = { ...req.body } as Record<string, any>;
+      const orderId = params.trade_order_id;
+      const order = paymentOrders.get(orderId);
+      if (!order || !config.appSecret) return res.send("fail");
+      const expected = signXunhuPay(params, config.appSecret);
+      const amountMatches = String(order.amount) === String(params.total_fee);
+      if (!params.hash || params.hash !== expected) return res.send("fail");
+      if (!amountMatches) return res.send("fail");
+
+      paymentOrders.set(orderId, {
+        ...order,
+        status: "paid",
+        providerOrderId: params.open_order_id,
+        paidAt: new Date().toISOString(),
+        providerResponse: params,
+      });
+      res.send("success");
+    } catch (error) {
+      console.error("XunhuPay Notify Error:", error);
+      res.send("fail");
+    }
+  });
+
   app.get("/api/payments/alipay/return", (req, res) => {
     const orderId = typeof req.query.out_trade_no === "string" ? req.query.out_trade_no : "";
     res.redirect(`/app/profile?payment=alipay&order=${encodeURIComponent(orderId)}`);
@@ -238,6 +597,14 @@ async function startServer() {
 
   app.get("/api/payments/alipay/orders/:orderId", (req, res) => {
     const order = alipayOrders.get(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ error: { message: "订单不存在或服务已重启，请重新下单。" } });
+    }
+    res.json({ order });
+  });
+
+  app.get("/api/payments/orders/:orderId", (req, res) => {
+    const order = paymentOrders.get(req.params.orderId);
     if (!order) {
       return res.status(404).json({ error: { message: "订单不存在或服务已重启，请重新下单。" } });
     }
@@ -299,27 +666,6 @@ async function startServer() {
       res.json(data);
     } catch (error: any) {
       console.error("DeepSeek Proxy Error:", error);
-      res.status(500).json({ error: { message: error.message } });
-    }
-  });
-
-  // MiniMax TTS Proxy
-  app.post("/api/minimax/tts", async (req, res) => {
-    try {
-      const groupId = process.env.MINIMAX_GROUP_ID;
-      const apiKey = process.env.MINIMAX_API_KEY;
-      if (!groupId || !apiKey) throw new Error("Missing MiniMax Credentials");
-      const response = await fetch(`https://api.minimax.chat/v1/t2a_v2?GroupId=${groupId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(req.body)
-      });
-      const data = await response.json();
-      res.json(data);
-    } catch (error: any) {
       res.status(500).json({ error: { message: error.message } });
     }
   });

@@ -1,8 +1,10 @@
 import React from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { Sparkles, User, Compass, Book, Moon, X } from 'lucide-react';
+import { Sparkles, User, Compass, Book, Moon, X, LockKeyhole } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import clsx from 'clsx';
+import { useAppContext } from '../store';
+import { hasFeatureAccess, type PremiumFeature } from '../lib/membership';
 
 const SimulatorIcon = ({ size = 20 }: { size?: number }) => (
   <svg
@@ -35,9 +37,9 @@ const SimulatorIcon = ({ size = 20 }: { size?: number }) => (
 const navItems = [
   { to: '/app', label: '塔罗', icon: <Sparkles size={20} />, end: true },
   { to: '/app/bazi', label: '八字', icon: <Compass size={20} /> },
-  { to: '/app/simulator', label: '沙盘', icon: <SimulatorIcon /> },
+  { to: '/app/simulator', label: '沙盘', icon: <SimulatorIcon />, feature: 'simulator' as PremiumFeature },
   { to: '/app/diary', label: '日记', icon: <Book size={20} /> },
-  { to: '/app/guardian', label: '守护', icon: <Moon size={20} /> },
+  { to: '/app/guardian', label: '守护', icon: <Moon size={20} />, feature: 'guardian' as PremiumFeature },
   { to: '/app/profile', label: '我的', icon: <User size={20} /> },
 ];
 
@@ -87,6 +89,7 @@ export default function Layout() {
 }
 
 function BottomDock() {
+  const { membership } = useAppContext();
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 isolate px-3 pb-[max(env(safe-area-inset-bottom),10px)]">
       <div
@@ -101,6 +104,7 @@ function BottomDock() {
               icon={item.icon}
               label={item.label}
               end={item.end}
+              locked={Boolean(item.feature && !hasFeatureAccess(membership, item.feature))}
             />
           </React.Fragment>
         ))}
@@ -110,6 +114,7 @@ function BottomDock() {
 }
 
 function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { membership } = useAppContext();
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-[86px] z-50 flex justify-center px-4">
       <AnimatePresence initial={false}>
@@ -120,7 +125,7 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-            className="pointer-events-auto flex h-12 max-w-[calc(100vw-32px)] items-center gap-1 rounded-[24px] border border-white/10 bg-[#111621]/88 px-1.5 shadow-[0_18px_52px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl"
+            className="pointer-events-auto flex h-12 max-w-[calc(100vw-32px)] items-center gap-1 rounded-[24px] border border-[#e2cfb5]/85 bg-[#fff8ec]/90 px-1.5 shadow-[0_18px_52px_rgba(117,82,42,0.16),inset_0_1px_0_rgba(255,255,255,0.82)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111621]/88 dark:shadow-[0_18px_52px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]"
           >
             {navItems.map((item) => (
               <React.Fragment key={item.to}>
@@ -129,13 +134,14 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
                   icon={item.icon}
                   label={item.label}
                   end={item.end}
+                  locked={Boolean(item.feature && !hasFeatureAccess(membership, item.feature))}
                 />
               </React.Fragment>
             ))}
             <button
               type="button"
               onClick={onToggle}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-[#f4cf83] transition-transform active:scale-95"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#dcc7aa]/85 bg-[#f5e7d3]/80 text-[#9a641c] transition-transform active:scale-95 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#f4cf83]"
               aria-label="close navigation"
               title="close navigation"
             >
@@ -150,7 +156,7 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
             exit={{ opacity: 0, x: 14 }}
             type="button"
             onClick={onToggle}
-            className="pointer-events-auto fixed bottom-[98px] right-0 flex h-12 w-9 items-center justify-start rounded-l-[22px] border border-r-0 border-white/12 bg-[#111621]/78 pl-2 text-[#f4cf83] opacity-90 shadow-[0_16px_44px_rgba(0,0,0,0.32)] backdrop-blur-2xl transition-transform active:scale-95"
+            className="pointer-events-auto fixed bottom-[98px] right-0 flex h-12 w-9 items-center justify-start rounded-l-[22px] border border-r-0 border-[#d7c1a2]/90 bg-[#fff6e8]/90 pl-2 text-[#9a641c] opacity-95 shadow-[0_16px_44px_rgba(117,82,42,0.16)] backdrop-blur-2xl transition-transform active:scale-95 dark:border-white/12 dark:bg-[#111621]/78 dark:text-[#f4cf83] dark:shadow-[0_16px_44px_rgba(0,0,0,0.32)]"
             aria-label="open navigation"
             title="open navigation"
           >
@@ -167,11 +173,13 @@ function FloatingNavItem({
   icon,
   label,
   end,
+  locked,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   end?: boolean;
+  locked?: boolean;
 }) {
   return (
     <NavLink
@@ -179,16 +187,21 @@ function FloatingNavItem({
       end={end}
       className={({ isActive }) =>
         clsx(
-          'group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border backdrop-blur-2xl transition-all',
+          'group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border backdrop-blur-2xl transition-all',
           isActive
-            ? 'border-[#f4cf83]/40 bg-[#f4cf83] text-[#16130f] shadow-[0_10px_24px_rgba(244,207,131,0.24)]'
-            : 'border-white/10 bg-[#111621]/70 text-white/62 shadow-[0_10px_24px_rgba(0,0,0,0.26)] hover:bg-[#182033] hover:text-white'
+            ? 'border-[#b97b28]/35 bg-[#f0d28e] text-[#2c1d0d] shadow-[0_10px_24px_rgba(185,123,40,0.18)] dark:border-[#f4cf83]/40 dark:bg-[#f4cf83] dark:text-[#16130f] dark:shadow-[0_10px_24px_rgba(244,207,131,0.24)]'
+            : 'border-[#dfccb2]/85 bg-[#fffaf2]/76 text-[#74695e] shadow-[0_10px_24px_rgba(117,82,42,0.12)] hover:bg-[#f3e5d1] hover:text-[#352719] dark:border-white/10 dark:bg-[#111621]/70 dark:text-white/62 dark:shadow-[0_10px_24px_rgba(0,0,0,0.26)] dark:hover:bg-[#182033] dark:hover:text-white'
         )
       }
       aria-label={label}
       title={label}
     >
       <span className="scale-90">{icon}</span>
+      {locked && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-apple-gold text-[#14110e]">
+          <LockKeyhole size={9} />
+        </span>
+      )}
     </NavLink>
   );
 }
@@ -198,11 +211,13 @@ function NavItem({
   icon,
   label,
   end,
+  locked,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   end?: boolean;
+  locked?: boolean;
 }) {
   return (
     <NavLink
@@ -212,7 +227,7 @@ function NavItem({
         clsx(
           'relative flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[22px] px-1 transition-colors duration-300',
           isActive
-            ? 'text-[#f4cf83]'
+            ? 'text-apple-gold'
             : 'text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text'
         )
       }
@@ -232,6 +247,11 @@ function NavItem({
             transition={{ type: 'spring', stiffness: 360, damping: 24 }}
           >
             {icon}
+            {locked && (
+              <span className="absolute -right-2 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-apple-gold text-[#14110e]">
+                <LockKeyhole size={9} />
+              </span>
+            )}
           </motion.div>
           <span className="relative z-10 text-[9px] font-medium">
             {label}

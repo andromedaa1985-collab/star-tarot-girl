@@ -227,10 +227,10 @@ function CompanionLooks() {
               星轨衣柜预览
             </div>
             <h2 className="text-3xl font-black leading-tight text-[#fffaf0] sm:text-4xl">
-              同一个小人，多几种陪伴状态。
+              同一位星轨少女，多种陪伴形态。
             </h2>
             <p className="mt-4 text-base leading-7 text-[#cfc6b5]">
-              先放四套方向：月白神谕、午夜星斗篷、学院占星、液态玻璃礼装。后面可以把喜欢的形象拆出来做成可切换皮肤。
+              从光羽礼服到星斗斗篷，她会随着羁绊成长解锁新的样子。每套形象都保留熟悉的温柔，只换一种靠近你的方式。
             </p>
           </div>
           <div className="mt-6 grid grid-cols-2 gap-2 text-xs font-bold text-[#eadfcc]">
