@@ -19,6 +19,7 @@ export const PLUS_TRIAL_HOURS = 24;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const PREMIUM_FEATURES: PremiumFeature[] = ['bazi', 'simulator', 'guardian', 'tarot_deep_report', 'relationship_report', 'relationship_weekly'];
+const PLUS_INCLUDED_FEATURES: PremiumFeature[] = ['simulator', 'guardian'];
 
 export const defaultMembership: MembershipState = {
   plan: 'free',
@@ -60,7 +61,10 @@ export function isTesterActive(membership: MembershipState) {
 }
 
 export function hasFeatureAccess(membership: MembershipState, feature: PremiumFeature) {
-  return isPlusActive(membership) || normalizeUnlocks(membership.unlocks).includes(feature);
+  if (membership.plan === 'tester') return true;
+  const unlocks = normalizeUnlocks(membership.unlocks);
+  if (unlocks.includes(feature)) return true;
+  return isPlusActive(membership) && PLUS_INCLUDED_FEATURES.includes(feature);
 }
 
 export function getPlusDaysLeft(membership: MembershipState, now = new Date()) {

@@ -820,6 +820,11 @@ ${exactBaziStr}
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !baziResult) return;
+    if (!baziUnlocked) {
+      setFormNotice('完整八字档案需要先解锁。解锁后可以继续查看排盘，并向大师追问近期运势。');
+      openBaziPayment();
+      return;
+    }
     
     const newUserMsg = {
       id: Date.now().toString(),
@@ -1271,7 +1276,31 @@ ${recentFortuneContext}
           )}
         </section>
 
-        {!baziResult && !isCalculating && (
+        {baziResult && !baziUnlocked && !isCalculating && (
+          <div className="rounded-[2rem] border border-apple-gold/22 bg-apple-gold/[0.08] p-4 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-apple-gold/18 dark:bg-apple-gold/[0.07]">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-apple-gold/14 text-apple-gold">
+                <LockKeyhole size={19} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-black text-apple-text">完整命理档案已上锁</div>
+                <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                  免费版可以保存出生资料和做关系默契分；完整排盘、用神、神煞、近期运势和大师追问需要解锁八字档案。
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={openBaziPayment}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-apple-gold py-3 text-sm font-black text-[#17130f] shadow-[0_14px_30px_rgba(185,123,40,0.20)] active:scale-[0.99]"
+            >
+              <Sparkles size={17} />
+              解锁八字完整档案 ¥19.9
+            </button>
+          </div>
+        )}
+
+        {(!baziResult || !baziUnlocked) && !isCalculating && (
           <motion.div 
             id="bazi-profile-form"
             initial={{ opacity: 0, y: 20 }}
@@ -1476,7 +1505,7 @@ ${recentFortuneContext}
           </motion.div>
         )}
 
-        {baziResult && !isCalculating && (
+        {baziUnlocked && baziResult && !isCalculating && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
