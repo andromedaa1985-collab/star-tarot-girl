@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check } from 'lucide-react';
+import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check, ChevronDown } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, type UserProfile } from '../store';
 import { clsx, type ClassValue } from 'clsx';
@@ -335,6 +335,7 @@ export default function Bazi() {
   const [recentFortuneStatus, setRecentFortuneStatus] = useState<string | null>(null);
   const [matchAId, setMatchAId] = useState('');
   const [matchBId, setMatchBId] = useState('');
+  const [relationshipExpanded, setRelationshipExpanded] = useState(false);
   const [relationshipShareStatus, setRelationshipShareStatus] = useState<string | null>(null);
   const [isCreatingInviteLink, setIsCreatingInviteLink] = useState(false);
   const [invitedProfileName, setInvitedProfileName] = useState<string | null>(null);
@@ -379,6 +380,7 @@ export default function Bazi() {
       next.delete('pair');
       setSearchParams(next, { replace: true });
       setRelationshipShareStatus('旧版邀请链接已升级保护隐私，请让对方重新生成一次。');
+      setRelationshipExpanded(true);
       return;
     }
 
@@ -426,8 +428,12 @@ export default function Bazi() {
         const next = new URLSearchParams(searchParams);
         next.delete('invite');
         setSearchParams(next, { replace: true });
+        setRelationshipExpanded(true);
       } catch (error: any) {
-        if (!cancelled) setRelationshipShareStatus(error.message || '邀请链接已失效，请让对方重新生成一次。');
+        if (!cancelled) {
+          setRelationshipShareStatus(error.message || '邀请链接已失效，请让对方重新生成一次。');
+          setRelationshipExpanded(true);
+        }
       }
     };
 
@@ -450,10 +456,18 @@ export default function Bazi() {
     { label: profiles.length >= 2 ? '两份档案已就绪' : '补上第二个人', done: profiles.length >= 2 },
     { label: relationshipMatch ? '查看默契分' : '生成合盘', done: Boolean(relationshipMatch) },
   ];
+  const relationshipSummary = relationshipMatch
+    ? `${matchA?.name || '你'} × ${matchB?.name || 'TA'} · ${relationshipMatch.score} 分`
+    : profiles.length >= 2
+      ? '已保存两份档案，可以生成默契分。'
+      : profiles.length === 1
+        ? '再补一份 TA 的资料，就能做双人合盘。'
+        : '情侣、暧昧、前任复盘都可以从这里开始。';
   const handleCopyRelationshipLink = async () => {
     const sourceProfile = matchA || profiles.find(profile => profile.id === activeProfileId) || profiles[0];
     if (!sourceProfile) {
       setRelationshipShareStatus('先保存一个档案，再生成邀请链接。');
+      setRelationshipExpanded(true);
       scrollToProfileForm();
       return;
     }
@@ -470,6 +484,7 @@ export default function Bazi() {
 
       if (isLocalUrl(inviteUrl)) {
         setRelationshipShareStatus('邀请功能暂不可用，请稍后再试。');
+        setRelationshipExpanded(true);
         return;
       }
 
@@ -479,11 +494,13 @@ export default function Bazi() {
           ? '邀请链接已复制。下一步：发给 TA。TA 打开后填写自己的出生资料，就能加入这次合盘。'
           : `浏览器暂时不允许自动复制，请手动复制这段链接发给 TA：${inviteUrl}`,
       );
+      setRelationshipExpanded(true);
     } catch (error: any) {
       const message = typeof error?.message === 'string' && /[\u4e00-\u9fff]/.test(error.message)
         ? error.message
         : '邀请链接生成失败，请稍后再试。';
       setRelationshipShareStatus(message);
+      setRelationshipExpanded(true);
     } finally {
       setIsCreatingInviteLink(false);
     }
@@ -907,7 +924,7 @@ ${recentFortuneContext}
   };
 
   return (
-    <div className="relative h-full w-full overflow-y-auto overscroll-contain px-4 pt-6 pb-40 text-apple-text no-scrollbar">
+    <div className="relative h-full w-full overflow-x-hidden overflow-y-auto overscroll-contain px-3 pt-6 pb-40 text-apple-text no-scrollbar sm:px-4">
       {/* Decorative Background Elements */}
       <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-apple-gold/10 to-transparent pointer-events-none"></div>
       
@@ -919,24 +936,49 @@ ${recentFortuneContext}
         <p className="text-apple-text-muted text-sm tracking-widest">洞悉命理，指引前程</p>
       </div>
 
-      <div className="max-w-md mx-auto space-y-6 relative z-10">
-        <section className="overflow-hidden rounded-[2rem] border border-rose-300/18 bg-[linear-gradient(145deg,rgba(255,245,248,0.92),rgba(255,255,255,0.72))] p-4 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:border-rose-300/12 dark:bg-[linear-gradient(145deg,rgba(40,24,38,0.62),rgba(15,18,28,0.76))] dark:shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+      <div className="relative z-10 mx-auto w-full max-w-md min-w-0 space-y-6">
+        <section className="w-full max-w-full overflow-hidden rounded-[2rem] border border-rose-300/18 bg-[linear-gradient(145deg,rgba(255,245,248,0.92),rgba(255,255,255,0.72))] p-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:border-rose-300/12 dark:bg-[linear-gradient(145deg,rgba(40,24,38,0.62),rgba(15,18,28,0.76))] dark:shadow-[0_8px_30px_rgba(0,0,0,0.28)] sm:p-4">
+          <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-400/14 text-rose-300">
                 <Heart size={18} />
               </div>
-              <div>
+              <div className="min-w-0">
                 <h2 className="text-sm font-bold text-apple-text">双人关系合盘</h2>
-                <p className="text-[11px] text-apple-text-muted">免费先看默契分，完整报告适合两个人一起看。</p>
+                <p className="truncate text-[11px] text-apple-text-muted">免费先看默契分，完整报告适合两个人一起看。</p>
               </div>
             </div>
             {relationshipMatch && (
-              <div className="rounded-full border border-apple-gold/18 bg-apple-gold/10 px-3 py-1 text-xs font-black text-apple-gold">
+              <div className="shrink-0 rounded-full border border-apple-gold/18 bg-apple-gold/10 px-3 py-1 text-xs font-black text-apple-gold">
                 {relationshipMatch.score} 分
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setRelationshipExpanded(prev => !prev)}
+            className="flex w-full min-w-0 items-center justify-between gap-3 rounded-[24px] border border-apple-border bg-apple-surface/78 px-3 py-3 text-left transition-all active:scale-[0.99] dark:border-white/10 dark:bg-white/[0.05]"
+            aria-expanded={relationshipExpanded}
+          >
+            <span className="min-w-0 truncate text-xs font-bold text-apple-text-muted">{relationshipSummary}</span>
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-apple-surface-hover px-2.5 py-1 text-[11px] font-black text-apple-text-muted dark:bg-white/10">
+              {relationshipExpanded ? '收起' : '展开'}
+              <ChevronDown size={13} className={cn('transition-transform', relationshipExpanded && 'rotate-180')} />
+            </span>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {relationshipExpanded && (
+              <motion.div
+                key="relationship-body"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="overflow-hidden"
+              >
+                <div className="pt-4">
 
           <div className="mb-4 grid grid-cols-3 gap-2">
             {relationshipFlowSteps.map((step, index) => (
@@ -1274,6 +1316,10 @@ ${recentFortuneContext}
               )}
             </div>
           )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </section>
 
         {baziResult && !baziUnlocked && !isCalculating && (
@@ -1305,15 +1351,15 @@ ${recentFortuneContext}
             id="bazi-profile-form"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8 overflow-hidden rounded-[2rem] border border-apple-border bg-apple-surface p-4 shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] sm:mb-0 sm:p-6"
+            className="mb-8 w-full max-w-full box-border overflow-hidden rounded-[2rem] border border-apple-border bg-apple-surface p-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] sm:mb-0 sm:p-6"
           >
-            <div className="min-w-0 space-y-5">
+            <div className="min-w-0 max-w-full space-y-4 sm:space-y-5">
               {profiles.length > 0 && (
                 <div className="mb-6">
-                  <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                  <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                     <Library size={16} /> 快速选择档案
                   </label>
-                  <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                  <div className="flex max-w-full gap-2 overflow-x-auto pb-2 no-scrollbar">
                     {profiles.map(profile => (
                       <button
                         key={profile.id}
@@ -1351,7 +1397,7 @@ ${recentFortuneContext}
               )}
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                   <User size={16} /> 姓名/称呼
                 </label>
                 <input 
@@ -1359,12 +1405,12 @@ ${recentFortuneContext}
                   value={baziFormData.name}
                   onChange={e => setBaziFormData({...baziFormData, name: e.target.value})}
                   placeholder="输入你的名字"
-                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 ml-1">性别</label>
+                <label className="mb-2 ml-1 block text-sm font-medium text-apple-gold">性别</label>
                 <div className="flex min-w-0 gap-3">
                   <button 
                     onClick={() => setBaziFormData({...baziFormData, gender: 'male'})}
@@ -1392,31 +1438,31 @@ ${recentFortuneContext}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                   <Calendar size={16} /> 出生日期 (公历)
                 </label>
                 <input 
                   type="date" 
                   value={baziFormData.birthDate}
                   onChange={e => setBaziFormData({...baziFormData, birthDate: e.target.value})}
-                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                   <Clock size={16} /> 出生时间
                 </label>
                 <input 
                   type="time" 
                   value={baziFormData.birthTime}
                   onChange={e => setBaziFormData({...baziFormData, birthTime: e.target.value})}
-                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                   <MapPin size={16} /> 出生地
                 </label>
                 <input 
@@ -1424,12 +1470,12 @@ ${recentFortuneContext}
                   value={baziFormData.birthLocation}
                   onChange={e => setBaziFormData({...baziFormData, birthLocation: e.target.value})}
                   placeholder="如：北京市朝阳区"
-                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-apple-gold mb-2 flex items-center gap-2 ml-1">
+                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
                   <MapPin size={16} /> 现居地
                 </label>
                 <input 
@@ -1437,7 +1483,7 @@ ${recentFortuneContext}
                   value={baziFormData.currentLocation}
                   onChange={e => setBaziFormData({...baziFormData, currentLocation: e.target.value})}
                   placeholder="如：上海市浦东新区"
-                  className="w-full min-w-0 max-w-full rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
                 />
               </div>
 
