@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Trash2, Shield, Bell, HelpCircle, LogOut, Compass } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, Database, Download, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppContext } from '../store';
+import { clearAppStorage, downloadAppBackup, getBackupSummary, importAppBackup, parseBackupFile } from '../lib/appBackup';
+
+type BackupNotice = {
+  type: 'success' | 'error' | 'info';
+  message: string;
+};
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -11,14 +17,58 @@ export default function Settings() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [backupNotice, setBackupNotice] = useState<BackupNotice | null>(null);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
+  const backupSummary = getBackupSummary();
+  const archiveCount = backupSummary.profiles + backupSummary.tarotReadings + backupSummary.diaryEntries + backupSummary.simulations + backupSummary.guardianMessages;
+  const lastBackupLabel = formatBackupTime(backupSummary.lastBackupAt);
 
   const handleClearData = () => {
-    localStorage.clear();
+    clearAppStorage();
     setShowClearConfirm(false);
     setShowSuccessToast(true);
     setTimeout(() => {
       window.location.href = '/app';
     }, 1500);
+  };
+
+  const handleExportBackup = () => {
+    try {
+      const backup = downloadAppBackup();
+      setBackupNotice({
+        type: 'success',
+        message: `存档已导出，生成时间：${formatBackupTime(backup.createdAt)}。`,
+      });
+    } catch {
+      setBackupNotice({
+        type: 'error',
+        message: '导出失败，请确认浏览器允许下载文件。',
+      });
+    }
+  };
+
+  const handleImportBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const confirmed = window.confirm('导入会合并备份里的日记、牌阵、档案和记录；同名设置会以备份为准。继续导入吗？');
+    if (!confirmed) return;
+
+    try {
+      const backup = await parseBackupFile(file);
+      const result = importAppBackup(backup);
+      setBackupNotice({
+        type: 'success',
+        message: `已导入 ${result.importedKeys} 类存档，其中 ${result.mergedKeys} 类记录已自动合并。页面即将刷新。`,
+      });
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error: any) {
+      setBackupNotice({
+        type: 'error',
+        message: error?.message || '导入失败，请确认选择的是星轨存档文件。',
+      });
+    }
   };
 
   return (
@@ -50,6 +100,71 @@ export default function Settings() {
         <div className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
           <div className="px-5 py-3 bg-apple-surface border-b border-apple-border">
             <span className="text-xs font-medium text-apple-text-muted tracking-widest">数据管理</span>
+          </div>
+          <div className="border-b border-apple-border p-5">
+            <div className="rounded-3xl border border-apple-border bg-apple-surface/70 p-4 shadow-inner dark:bg-white/[0.035]">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-apple-gold/25 bg-apple-gold/12 text-apple-gold">
+                  <Database size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-bold text-apple-text">星轨存档备份</div>
+                  <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                    保存日记、塔罗记录、八字档案、沙盘推演、守护消息和权益状态。换设备前先导出，导入后会自动合并记录。
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                <ArchiveStat label="命理档案" value={`${backupSummary.profiles} 份`} />
+                <ArchiveStat label="日记记录" value={`${backupSummary.diaryEntries} 篇`} />
+                <ArchiveStat label="牌阵记录" value={`${backupSummary.tarotReadings} 次`} />
+                <ArchiveStat label="总存档" value={`${archiveCount} 条`} />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-apple-border bg-apple-surface/80 p-3 text-[11px] leading-relaxed text-apple-text-muted">
+                上次手动备份：<span className="font-semibold text-apple-text">{lastBackupLabel}</span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  className="flex items-center justify-center gap-2 rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] shadow-[0_10px_24px_rgba(185,123,40,0.18)]"
+                >
+                  <Download size={16} />
+                  导出存档
+                </button>
+                <button
+                  type="button"
+                  onClick={() => backupFileInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-sm font-bold text-apple-text"
+                >
+                  <Upload size={16} />
+                  导入存档
+                </button>
+                <input
+                  ref={backupFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={handleImportBackup}
+                />
+              </div>
+
+              {backupNotice && (
+                <div
+                  className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+                    backupNotice.type === 'error'
+                      ? 'border-red-500/25 bg-red-500/10 text-red-300'
+                      : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text'
+                  }`}
+                >
+                  {backupNotice.type === 'error' ? <AlertCircle size={15} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-apple-gold" />}
+                  <span>{backupNotice.message}</span>
+                </div>
+              )}
+            </div>
           </div>
           <div 
             onClick={() => setShowClearConfirm(true)}
@@ -88,7 +203,7 @@ export default function Settings() {
             >
               <h3 className="font-sans font-bold text-2xl text-apple-text mb-4">清除所有数据</h3>
               <p className="text-apple-text-muted mb-8 text-sm">
-                警告：此操作将清除所有聊天记录、收集的碎片、羁绊等级和能量。此操作不可逆，是否确认清除？
+                此操作会清除本机的日记、塔罗记录、八字档案、沙盘推演、守护消息、能量和权益状态。建议先导出存档备份。
               </p>
               <div className="flex w-full gap-3">
                 <button 
@@ -151,6 +266,28 @@ export default function Settings() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function formatBackupTime(value: string | null) {
+  if (!value) return '还没有手动备份';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '还没有手动备份';
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function ArchiveStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-apple-border bg-apple-surface/80 px-3 py-2 dark:bg-white/[0.035]">
+      <div className="text-[11px] text-apple-text-muted">{label}</div>
+      <div className="mt-1 text-sm font-bold text-apple-text">{value}</div>
     </div>
   );
 }
