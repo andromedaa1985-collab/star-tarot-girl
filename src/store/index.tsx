@@ -12,6 +12,7 @@ import {
   type AppEvent,
   type EngagementState,
 } from '../lib/engagement';
+import { saveAutoRecoveryPoint } from '../lib/appBackup';
 
 // --- Constants & Data ---
 export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2500, 4000];
@@ -474,6 +475,26 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   React.useEffect(() => {
     localStorage.setItem('appEvents', JSON.stringify(appEvents));
   }, [appEvents]);
+
+  React.useEffect(() => {
+    const handle = window.setTimeout(() => {
+      saveAutoRecoveryPoint('auto').catch(() => undefined);
+    }, 2600);
+
+    return () => window.clearTimeout(handle);
+  }, [
+    messages,
+    baziResult,
+    baziMessages,
+    profiles,
+    tarotReadings,
+    simulationHistory,
+    diaryEntries,
+    reviewHistory,
+    guardianMessages,
+    membership,
+    energy,
+  ]);
 
   return (
     <AppContext.Provider value={{

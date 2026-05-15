@@ -1,6 +1,10 @@
 const BACKUP_FORMAT = 'astro-rail-local-archive';
 const BACKUP_VERSION = 1;
 const ROLLBACK_KEY = 'starrail:lastImportRollback';
+const AUTO_RECOVERY_META_KEY = 'starrail:autoRecoveryMeta';
+const AUTO_RECOVERY_DB = 'astro-rail-archive';
+const AUTO_RECOVERY_STORE = 'snapshots';
+const AUTO_RECOVERY_ID = 'latest-auto-recovery';
 
 export const APP_STORAGE_KEYS = [
   'bondExp',
@@ -79,12 +83,20 @@ export interface BackupSummary {
   simulations: number;
   guardianMessages: number;
   lastBackupAt: string | null;
+  lastAutoRecoveryAt: string | null;
 }
 
 export interface ImportResult {
   importedKeys: number;
   mergedKeys: number;
   skippedKeys: string[];
+}
+
+export interface AutoRecoveryMeta {
+  createdAt: string;
+  reason: string;
+  recordCount: number;
+  sizeBytes: number;
 }
 
 function parseStoredValue(key: string, raw: string): StorageValue {
@@ -160,6 +172,68 @@ function getCount(key: string) {
   return Array.isArray(value) ? value.length : 0;
 }
 
+function getBackupCount(backup: AppBackup, key: string) {
+  const value = backup.data[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function getBackupRecordCount(backup: AppBackup) {
+  return (
+    getBackupCount(backup, 'profiles') +
+    getBackupCount(backup, 'tarotReadings') +
+    getBackupCount(backup, 'diaryEntries') +
+    getBackupCount(backup, 'simulationHistory') +
+    getBackupCount(backup, 'guardianMessages')
+  );
+}
+
+function openRecoveryDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('当前浏览器不支持自动恢复点。'));
+      return;
+    }
+
+    const request = indexedDB.open(AUTO_RECOVERY_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(AUTO_RECOVERY_STORE)) {
+        db.createObjectStore(AUTO_RECOVERY_STORE);
+      }
+    };
+    request.onerror = () => reject(request.error || new Error('自动恢复点打开失败。'));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function runRecoveryStore<T>(
+  mode: IDBTransactionMode,
+  runner: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return openRecoveryDb().then((db) => new Promise<T>((resolve, reject) => {
+    const transaction = db.transaction(AUTO_RECOVERY_STORE, mode);
+    const store = transaction.objectStore(AUTO_RECOVERY_STORE);
+    const request = runner(store);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('自动恢复点操作失败。'));
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error || new Error('自动恢复点操作失败。'));
+    };
+  }));
+}
+
+function readAutoRecoveryMeta(): AutoRecoveryMeta | null {
+  try {
+    const raw = localStorage.getItem(AUTO_RECOVERY_META_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createAppBackup(): AppBackup {
   const data: Record<string, StorageValue> = {};
 
@@ -195,6 +269,44 @@ export function downloadAppBackup() {
   URL.revokeObjectURL(url);
   localStorage.setItem('lastManualBackupAt', backup.createdAt);
   return backup;
+}
+
+export function getAutoRecoveryMeta() {
+  return readAutoRecoveryMeta();
+}
+
+export async function saveAutoRecoveryPoint(reason = 'auto'): Promise<AutoRecoveryMeta | null> {
+  const backup = createAppBackup();
+  const recordCount = getBackupRecordCount(backup);
+
+  if (recordCount <= 0) return null;
+
+  const serialized = JSON.stringify(backup);
+  const meta: AutoRecoveryMeta = {
+    createdAt: backup.createdAt,
+    reason,
+    recordCount,
+    sizeBytes: new Blob([serialized]).size,
+  };
+
+  await runRecoveryStore('readwrite', (store) => store.put(backup, AUTO_RECOVERY_ID));
+  localStorage.setItem(AUTO_RECOVERY_META_KEY, JSON.stringify(meta));
+  return meta;
+}
+
+export async function getAutoRecoveryPoint(): Promise<AppBackup | null> {
+  try {
+    const backup = await runRecoveryStore<AppBackup | undefined>('readonly', (store) => store.get(AUTO_RECOVERY_ID));
+    return backup || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function restoreAutoRecoveryPoint(): Promise<ImportResult> {
+  const backup = await getAutoRecoveryPoint();
+  if (!backup) throw new Error('还没有可恢复的自动恢复点。');
+  return importAppBackup(backup);
 }
 
 export async function parseBackupFile(file: File): Promise<AppBackup> {
@@ -256,10 +368,17 @@ export function getBackupSummary(): BackupSummary {
     simulations: getCount('simulationHistory'),
     guardianMessages: getCount('guardianMessages'),
     lastBackupAt: localStorage.getItem('lastManualBackupAt'),
+    lastAutoRecoveryAt: readAutoRecoveryMeta()?.createdAt || null,
   };
 }
 
 export function clearAppStorage() {
   APP_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   localStorage.removeItem('lastManualBackupAt');
+  localStorage.removeItem(AUTO_RECOVERY_META_KEY);
+  try {
+    indexedDB.deleteDatabase(AUTO_RECOVERY_DB);
+  } catch {
+    // Clearing local app data should not be blocked by IndexedDB cleanup failure.
+  }
 }

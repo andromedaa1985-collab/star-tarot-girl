@@ -1,9 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, ChevronLeft, Database, Download, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, Database, Download, RotateCcw, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAppContext } from '../store';
-import { clearAppStorage, downloadAppBackup, getBackupSummary, importAppBackup, parseBackupFile } from '../lib/appBackup';
+import { clearAppStorage, downloadAppBackup, getAutoRecoveryMeta, getBackupSummary, importAppBackup, parseBackupFile, restoreAutoRecoveryPoint } from '../lib/appBackup';
 
 type BackupNotice = {
   type: 'success' | 'error' | 'info';
@@ -12,16 +11,25 @@ type BackupNotice = {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { setMessages, setCardImage, setBondExp, setBondLevel, setEnergy, setFragments } = useAppContext();
   
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [backupNotice, setBackupNotice] = useState<BackupNotice | null>(null);
+  const [autoRecoveryMeta, setAutoRecoveryMeta] = useState(() => getAutoRecoveryMeta());
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const backupSummary = getBackupSummary();
   const archiveCount = backupSummary.profiles + backupSummary.tarotReadings + backupSummary.diaryEntries + backupSummary.simulations + backupSummary.guardianMessages;
   const lastBackupLabel = formatBackupTime(backupSummary.lastBackupAt);
+  const autoRecoveryLabel = formatBackupTime(autoRecoveryMeta?.createdAt || backupSummary.lastAutoRecoveryAt);
+
+  React.useEffect(() => {
+    const handle = window.setInterval(() => {
+      setAutoRecoveryMeta(getAutoRecoveryMeta());
+    }, 2500);
+
+    return () => window.clearInterval(handle);
+  }, []);
 
   const handleClearData = () => {
     clearAppStorage();
@@ -67,6 +75,26 @@ export default function Settings() {
       setBackupNotice({
         type: 'error',
         message: error?.message || '导入失败，请确认选择的是星轨存档文件。',
+      });
+    }
+  };
+
+  const handleRestoreAutoRecovery = async () => {
+    const confirmed = window.confirm('恢复最近自动恢复点会合并其中的记录，并以恢复点里的设置为准。继续恢复吗？');
+    if (!confirmed) return;
+
+    try {
+      const result = await restoreAutoRecoveryPoint();
+      setBackupNotice({
+        type: 'success',
+        message: `已恢复最近恢复点，合并 ${result.mergedKeys} 类记录。页面即将刷新。`,
+      });
+      setAutoRecoveryMeta(getAutoRecoveryMeta());
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error: any) {
+      setBackupNotice({
+        type: 'error',
+        message: error?.message || '恢复失败，当前没有可用的自动恢复点。',
       });
     }
   };
@@ -123,7 +151,8 @@ export default function Settings() {
               </div>
 
               <div className="mt-4 rounded-2xl border border-apple-border bg-apple-surface/80 p-3 text-[11px] leading-relaxed text-apple-text-muted">
-                上次手动备份：<span className="font-semibold text-apple-text">{lastBackupLabel}</span>
+                <div>上次手动备份：<span className="font-semibold text-apple-text">{lastBackupLabel}</span></div>
+                <div className="mt-1">最近自动恢复点：<span className="font-semibold text-apple-text">{autoRecoveryLabel}</span></div>
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3">
@@ -142,6 +171,15 @@ export default function Settings() {
                 >
                   <Upload size={16} />
                   导入存档
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRestoreAutoRecovery}
+                  disabled={!autoRecoveryMeta}
+                  className="col-span-2 flex items-center justify-center gap-2 rounded-2xl border border-apple-gold/25 bg-apple-gold/10 px-4 py-3 text-sm font-bold text-apple-gold disabled:cursor-not-allowed disabled:border-apple-border disabled:bg-apple-surface-hover disabled:text-apple-text-muted"
+                >
+                  <RotateCcw size={16} />
+                  恢复最近自动恢复点
                 </button>
                 <input
                   ref={backupFileInputRef}
