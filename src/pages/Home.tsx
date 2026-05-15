@@ -2187,11 +2187,14 @@ function DrawCardAnimation({
   const fanOffset = compact ? 34 : 42;
   const frameSize = singleCard
     ? compact
-      ? 'h-[226px] w-[200px]'
-      : 'h-[250px] w-[220px]'
+      ? 'h-[294px] w-[220px]'
+      : 'h-[320px] w-[240px]'
     : compact
-      ? 'h-[246px] w-[316px]'
-      : 'h-[274px] w-[360px]';
+      ? 'h-[302px] w-[316px]'
+      : 'h-[330px] w-[360px]';
+  const cardMetaText = animatedCards
+    .map((card) => `${card.name} · ${card.position}`)
+    .join(' / ');
 
   return createPortal(
     <AnimatePresence initial={false}>
@@ -2209,17 +2212,17 @@ function DrawCardAnimation({
             transition={{ duration: 1.2, times: [0, 0.55, 1], ease: 'easeOut' }}
             className="absolute inset-0 bg-black/38 backdrop-blur-[2px]"
           />
-          <div className={clsx('relative -mt-24 flex items-center justify-center', frameSize)}>
+          <div className={clsx('relative -mt-16 flex items-center justify-center', frameSize)}>
             <motion.div
               animate={{ opacity: [0, 1, 1], y: [12, 0, 0] }}
               transition={{ duration: 3.8, times: [0, 0.12, 1], ease: 'easeOut' }}
-              className="absolute -top-12 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+              className="absolute left-1/2 top-0 z-40 flex w-[min(86vw,360px)] -translate-x-1/2 flex-col items-center gap-2 text-center"
             >
               <span className="font-serif text-[18px] font-semibold tracking-[0.08em] text-[#fff7e8] drop-shadow-[0_10px_26px_rgba(0,0,0,0.42)]">
                 {spreadTitle}
               </span>
-              <span className="rounded-full border border-[#f4cf83]/24 bg-[#111621]/62 px-3 py-1 text-[10px] font-semibold tracking-[0.22em] text-[#f4cf83] shadow-[0_12px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-                ARCANA REVEAL
+              <span className="max-w-full truncate rounded-full border border-[#f4cf83]/24 bg-[#111621]/72 px-4 py-1.5 text-[10px] font-semibold tracking-[0.18em] text-[#f4cf83] shadow-[0_12px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+                {singleCard ? cardMetaText : 'ARCANA REVEAL'}
               </span>
             </motion.div>
             {Array.from({ length: Math.min(5, drawCount + 1) }).map((_, item) => (
@@ -2249,7 +2252,7 @@ function DrawCardAnimation({
               const cardSrc = card.image;
               const spread = index - fanCenter;
               const settleX = singleCard ? -4 : spread * fanOffset;
-              const settleY = singleCard ? 8 : Math.abs(spread) * 12 + 4;
+              const settleY = singleCard ? 42 : Math.abs(spread) * 12 + 44;
               const settleRotate = singleCard ? -2 : spread * 8;
               return (
                 <motion.div
@@ -2257,7 +2260,7 @@ function DrawCardAnimation({
                   initial={{ x: 118 + index * 10, y: 126, rotate: 24 + index * 6, scale: 0.56, zIndex: 20 + index }}
                   animate={{
                     x: [118 + index * 10, 38 + spread * 10, settleX, settleX],
-                    y: [126, 18, -12 + Math.abs(spread) * 5, settleY],
+                    y: [126, 58, 26 + Math.abs(spread) * 5, settleY],
                     rotate: [24 + index * 6, -16 + spread * 5, settleRotate + 6, settleRotate],
                     scale: [0.56, 1.03, 1.06, 1],
                   }}
@@ -2269,33 +2272,30 @@ function DrawCardAnimation({
                   }}
                   className={clsx('absolute preserve-3d', cardSize)}
                 >
-                  <motion.div
-                    animate={{ opacity: [0, 0, 1, 1], y: [-8, -8, 0, 0] }}
-                    transition={{ duration: 3.05, delay: index * 0.14, times: [0, 0.42, 0.6, 1], ease: 'easeInOut' }}
-                    className={clsx(
-                      'absolute left-1/2 z-30 flex -translate-x-1/2 flex-col items-center whitespace-nowrap rounded-[16px] border border-white/12 bg-[#111621]/78 px-2.5 py-1 text-center shadow-[0_12px_28px_rgba(0,0,0,0.30)] backdrop-blur-xl',
-                      singleCard ? '-top-[58px] min-w-[118px]' : compact ? '-top-[46px] min-w-[82px]' : '-top-[50px] min-w-[90px]',
-                    )}
-                  >
-                    <span
+                  {!singleCard && (
+                    <motion.div
+                      animate={{ opacity: [0, 0, 1, 1], y: [-8, -8, 0, 0] }}
+                      transition={{ duration: 3.05, delay: index * 0.14, times: [0, 0.42, 0.6, 1], ease: 'easeInOut' }}
                       className={clsx(
-                        'max-w-[108px] truncate font-serif font-semibold leading-none text-[#fff7e8]',
-                        singleCard ? 'text-[12px]' : 'text-[10px]',
+                        'absolute left-1/2 z-30 flex -translate-x-1/2 flex-col items-center whitespace-nowrap rounded-[16px] border border-white/12 bg-[#111621]/78 px-2.5 py-1 text-center shadow-[0_12px_28px_rgba(0,0,0,0.30)] backdrop-blur-xl',
+                        compact ? '-top-[46px] min-w-[82px]' : '-top-[50px] min-w-[90px]',
                       )}
                     >
-                      {card.name}
-                    </span>
-                    <span
-                      className={clsx(
-                        'mt-1 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-[0.16em]',
-                        card.position === '逆位'
-                          ? 'border-[#b8c7ff]/30 bg-[#b8c7ff]/12 text-[#cbd5ff]'
-                          : 'border-[#f4cf83]/34 bg-[#f4cf83]/12 text-[#f4cf83]',
-                      )}
-                    >
-                      {card.position}
-                    </span>
-                  </motion.div>
+                      <span className="max-w-[108px] truncate font-serif text-[10px] font-semibold leading-none text-[#fff7e8]">
+                        {card.name}
+                      </span>
+                      <span
+                        className={clsx(
+                          'mt-1 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-[0.16em]',
+                          card.position === '逆位'
+                            ? 'border-[#b8c7ff]/30 bg-[#b8c7ff]/12 text-[#cbd5ff]'
+                            : 'border-[#f4cf83]/34 bg-[#f4cf83]/12 text-[#f4cf83]',
+                        )}
+                      >
+                        {card.position}
+                      </span>
+                    </motion.div>
+                  )}
                   <motion.div
                     animate={{ opacity: [1, 1, 0, 0] }}
                     transition={{ duration: 2.6, delay: index * 0.14, times: [0, 0.44, 0.66, 1], ease: 'easeInOut' }}
@@ -2330,13 +2330,15 @@ function DrawCardAnimation({
                 </motion.div>
               );
             })}
-            <motion.div
-              animate={{ opacity: [0, 1, 1], y: [8, 0, 0] }}
-              transition={{ duration: 3.8, times: [0, 0.12, 1], ease: 'easeOut' }}
-              className="absolute bottom-0 rounded-full border border-[#f4cf83]/22 bg-[#111621]/74 px-4 py-2 text-xs font-semibold text-[#f4cf83] shadow-[0_14px_38px_rgba(0,0,0,0.32)] backdrop-blur-xl"
-            >
-              {drawCount > 1 ? `正在翻开 ${drawCount} 张牌` : `${animatedCards[0]?.name || '星轨牌面'} · ${animatedCards[0]?.position || '正位'}`}
-            </motion.div>
+            {drawCount > 1 && (
+              <motion.div
+                animate={{ opacity: [0, 1, 1], y: [8, 0, 0] }}
+                transition={{ duration: 3.8, times: [0, 0.12, 1], ease: 'easeOut' }}
+                className="absolute bottom-0 rounded-full border border-[#f4cf83]/22 bg-[#111621]/74 px-4 py-2 text-xs font-semibold text-[#f4cf83] shadow-[0_14px_38px_rgba(0,0,0,0.32)] backdrop-blur-xl"
+              >
+                正在翻开 {drawCount} 张牌
+              </motion.div>
+            )}
           </div>
         </motion.div>
       )}
