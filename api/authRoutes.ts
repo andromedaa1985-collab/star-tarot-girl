@@ -158,7 +158,7 @@ function localPath(key: string) {
 async function readJson<T>(key: string): Promise<T | null> {
   if (shouldUseNetlifyBlobs()) {
     const store = getStore(ACCOUNT_STORE_NAME);
-    return await store.get(key, { type: "json", consistency: "strong" }) as T | null;
+    return await store.get(key, { type: "json" }) as T | null;
   }
 
   try {
