@@ -62,10 +62,19 @@ function validateEmail(email: string) {
 }
 
 function getSessionSecret() {
-  const secret = process.env.AUTH_SESSION_SECRET?.trim();
+  const secret = process.env.AUTH_SESSION_SECRET?.trim() || process.env.SESSION_SECRET?.trim();
   if (secret) return secret;
+
+  const derivationSeed = process.env.DEEPSEEK_API_KEY?.trim() || process.env.IMAGE_API_KEY?.trim();
+  if (derivationSeed && derivationSeed.length >= 24) {
+    return crypto
+      .createHash("sha256")
+      .update(`astro-rail-session:${derivationSeed}`, "utf8")
+      .digest("hex");
+  }
+
   if (process.env.NODE_ENV === "production" || process.env.NETLIFY === "true") {
-    throw new Error("云端账户暂未开通，请稍后再试。");
+    throw new Error("账户服务暂时不可用，请稍后再试。");
   }
   return "dev-only-astro-rail-session-secret";
 }

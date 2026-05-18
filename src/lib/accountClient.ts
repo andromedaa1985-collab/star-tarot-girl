@@ -27,7 +27,7 @@ async function readJsonResponse(response: Response) {
 function toPublicErrorMessage(message: unknown) {
   if (typeof message !== 'string' || !message.trim()) return '请求失败，请稍后再试。';
   if (message.includes('AUTH_SESSION_SECRET') || message.includes('Netlify') || message.includes('Blobs')) {
-    return '云端账户暂未开通，请稍后再试。';
+    return '账户服务暂时不可用，请稍后再试。';
   }
   return message;
 }
