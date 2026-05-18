@@ -22,29 +22,69 @@ import { getStoredAccountSession } from './lib/accountClient';
 
 function App() {
   return (
-    <AppProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/app" element={<RequireAccount><Layout /></RequireAccount>}>
-            <Route index element={<Home />} />
-            <Route path="bazi" element={<Bazi />} />
-            <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
-            <Route path="diary" element={<Diary />} />
-            <Route path="guardian" element={<FeatureGate feature="guardian"><Guardian /></FeatureGate>} />
-            <Route path="collection" element={<Collection />} />
-            <Route path="profile" element={<Profile />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="settings/privacy" element={<Privacy />} />
-            <Route path="settings/notifications" element={<Notifications />} />
-            <Route path="settings/help" element={<Help />} />
-            <Route path="about" element={<About />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </AppProvider>
+    <AppErrorBoundary>
+      <AppProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/app" element={<RequireAccount><Layout /></RequireAccount>}>
+              <Route index element={<Home />} />
+              <Route path="bazi" element={<Bazi />} />
+              <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
+              <Route path="diary" element={<Diary />} />
+              <Route path="guardian" element={<FeatureGate feature="guardian"><Guardian /></FeatureGate>} />
+              <Route path="collection" element={<Collection />} />
+              <Route path="profile" element={<Profile />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="settings/privacy" element={<Privacy />} />
+              <Route path="settings/notifications" element={<Notifications />} />
+              <Route path="settings/help" element={<Help />} />
+              <Route path="about" element={<About />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AppProvider>
+    </AppErrorBoundary>
   );
+}
+
+type AppErrorBoundaryProps = { children: React.ReactNode };
+
+class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, { hasError: boolean }> {
+  declare props: AppErrorBoundaryProps;
+  declare state: { hasError: boolean };
+
+  constructor(props: AppErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#07080d] px-6 text-[#fff9ed]">
+        <div className="w-full max-w-sm rounded-[30px] border border-white/12 bg-[#111520]/86 p-6 text-center shadow-[0_28px_90px_rgba(0,0,0,0.34)]">
+          <div className="text-xl font-black">星轨刚刚走神了</div>
+          <p className="mt-3 text-sm leading-6 text-[#cfc6b5]">
+            页面启动时遇到了一条异常存档。刷新后会自动跳过坏数据，不会影响你的账号。
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 w-full rounded-full bg-[#f4cf83] px-5 py-3 text-sm font-black text-[#0b0910]"
+          >
+            重新进入
+          </button>
+        </div>
+      </main>
+    );
+  }
 }
 
 function RequireAccount({ children }: { children: React.ReactNode }) {

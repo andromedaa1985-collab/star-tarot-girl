@@ -182,58 +182,43 @@ interface AppState {
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
+function readStoredJson<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved === null) return fallback;
+    return JSON.parse(saved) as T;
+  } catch {
+    localStorage.removeItem(key);
+    return fallback;
+  }
+}
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [bondExp, setBondExp] = useState(() => {
-    const saved = localStorage.getItem('bondExp');
-    return saved ? JSON.parse(saved) : 0;
-  });
-  const [bondLevel, setBondLevel] = useState(() => {
-    const saved = localStorage.getItem('bondLevel');
-    return saved ? JSON.parse(saved) : 1;
-  });
-  const [energy, setEnergy] = useState(() => {
-    const saved = localStorage.getItem('energy');
-    return saved ? JSON.parse(saved) : 5;
-  });
-  const [fragments, setFragments] = useState<any[]>(() => {
-    const saved = localStorage.getItem('fragments');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [bondExp, setBondExp] = useState(() => readStoredJson('bondExp', 0));
+  const [bondLevel, setBondLevel] = useState(() => readStoredJson('bondLevel', 1));
+  const [energy, setEnergy] = useState(() => readStoredJson('energy', 5));
+  const [fragments, setFragments] = useState<any[]>(() => readStoredJson('fragments', []));
   const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem('messages');
-    return saved ? JSON.parse(saved) : [
+    return readStoredJson<Message[]>('messages', [
       { 
         id: 'init', 
         role: 'ai', 
         text: '你好呀，我是星轨的引路人。初次见面，让我为你指引前方的道路吧。✨\n\n在这里，你可以向我倾诉任何烦恼，我会为你抽取塔罗牌进行占卜。目前我掌握了以下几种占卜模式：\n1. **单张指引**：快速解答你当下的疑惑或提供今日运势。\n2. **圣三角**：通过三张牌分别解读你的过去、现在和未来。\n3. **爱情十字**：专门为你解析感情状况与发展趋势。\n4. **事业岔路**：当你面临选择时，帮你分析不同选择的走向。\n\n你可以直接点击下方的快捷按钮，或者在输入框告诉我你想占卜什么内容哦~', 
         timestamp: Date.now() 
       }
-    ];
+    ]);
   });
-  const [cardImage, setCardImage] = useState(() => {
-    const saved = localStorage.getItem('cardImage');
-    return saved ? JSON.parse(saved) : '/default-card.png';
-  });
-  const [communityPosts, setCommunityPosts] = useState<any[]>(() => {
-    const saved = localStorage.getItem('communityPosts');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [cardImage, setCardImage] = useState(() => readStoredJson('cardImage', '/default-card.png'));
+  const [communityPosts, setCommunityPosts] = useState<any[]>(() => readStoredJson('communityPosts', []));
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem('settings');
-    return saved ? JSON.parse(saved) : {
+    return readStoredJson<AppSettings>('settings', {
       hapticsEnabled: true,
       darkMode: false,
       bgmEnabled: false
-    };
+    });
   });
-  const [userName, setUserName] = useState(() => {
-    const saved = localStorage.getItem('userName');
-    return saved ? JSON.parse(saved) : '星轨旅人';
-  });
-  const [userAvatar, setUserAvatar] = useState<string | null>(() => {
-    const saved = localStorage.getItem('userAvatar');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [userName, setUserName] = useState(() => readStoredJson('userName', '星轨旅人'));
+  const [userAvatar, setUserAvatar] = useState<string | null>(() => readStoredJson<string | null>('userAvatar', null));
   const [companionOutfit, setCompanionOutfit] = useState<string>(() => {
     const saved = localStorage.getItem('companionOutfit');
     if (!saved) return 'auto';
@@ -245,16 +230,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   });
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('theme');
-    if (saved) return saved as 'light' | 'dark';
+    if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
-  const [baziResult, setBaziResult] = useState<any | null>(() => {
-    const saved = localStorage.getItem('baziResult');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [baziResult, setBaziResult] = useState<any | null>(() => readStoredJson('baziResult', null));
   const [baziFormData, setBaziFormData] = useState<any>(() => {
-    const saved = localStorage.getItem('baziFormData');
-    const parsed = saved ? JSON.parse(saved) : null;
+    const parsed = readStoredJson<any | null>('baziFormData', null);
     return {
       name: parsed?.name || '',
       gender: parsed?.gender || 'male',
@@ -264,62 +245,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       currentLocation: parsed?.currentLocation || ''
     };
   });
-  const [baziMessages, setBaziMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem('baziMessages');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [profiles, setProfiles] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('profiles');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => {
-    const saved = localStorage.getItem('activeProfileId');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [simulatorState, setSimulatorState] = useState<SimulatorState>(() => {
-    const saved = localStorage.getItem('simulatorState');
-    return saved ? JSON.parse(saved) : { dilemma: '', choiceA: '', choiceB: '', result: null };
-  });
-  const [tarotReadings, setTarotReadings] = useState<TarotReading[]>(() => {
-    const saved = localStorage.getItem('tarotReadings');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [simulationHistory, setSimulationHistory] = useState<SimulationHistoryEntry[]>(() => {
-    const saved = localStorage.getItem('simulationHistory');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>(() => {
-    const saved = localStorage.getItem('diaryEntries');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [reviewHistory, setReviewHistory] = useState<ReviewEntry[]>(() => {
-    const saved = localStorage.getItem('reviewHistory');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [guardianMessages, setGuardianMessages] = useState<CompanionMessage[]>(() => {
-    const saved = localStorage.getItem('guardianMessages');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [dailyLetter, setDailyLetter] = useState<string | null>(() => {
-    const saved = localStorage.getItem('dailyLetter');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [dailyLetterDate, setDailyLetterDate] = useState<string | null>(() => {
-    const saved = localStorage.getItem('dailyLetterDate');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [dailyRewardDate, setDailyRewardDate] = useState<string | null>(() => {
-    const saved = localStorage.getItem('dailyRewardDate');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [checkInStreak, setCheckInStreak] = useState<number>(() => {
-    const saved = localStorage.getItem('checkInStreak');
-    return saved ? JSON.parse(saved) : 0;
-  });
-  const [lastCheckInDate, setLastCheckInDate] = useState<string | null>(() => {
-    const saved = localStorage.getItem('lastCheckInDate');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [baziMessages, setBaziMessages] = useState<Message[]>(() => readStoredJson('baziMessages', []));
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => readStoredJson('profiles', []));
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => readStoredJson<string | null>('activeProfileId', null));
+  const [simulatorState, setSimulatorState] = useState<SimulatorState>(() => readStoredJson('simulatorState', { dilemma: '', choiceA: '', choiceB: '', result: null }));
+  const [tarotReadings, setTarotReadings] = useState<TarotReading[]>(() => readStoredJson('tarotReadings', []));
+  const [simulationHistory, setSimulationHistory] = useState<SimulationHistoryEntry[]>(() => readStoredJson('simulationHistory', []));
+  const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>(() => readStoredJson('diaryEntries', []));
+  const [reviewHistory, setReviewHistory] = useState<ReviewEntry[]>(() => readStoredJson('reviewHistory', []));
+  const [guardianMessages, setGuardianMessages] = useState<CompanionMessage[]>(() => readStoredJson('guardianMessages', []));
+  const [dailyLetter, setDailyLetter] = useState<string | null>(() => readStoredJson<string | null>('dailyLetter', null));
+  const [dailyLetterDate, setDailyLetterDate] = useState<string | null>(() => readStoredJson<string | null>('dailyLetterDate', null));
+  const [dailyRewardDate, setDailyRewardDate] = useState<string | null>(() => readStoredJson<string | null>('dailyRewardDate', null));
+  const [checkInStreak, setCheckInStreak] = useState<number>(() => readStoredJson('checkInStreak', 0));
+  const [lastCheckInDate, setLastCheckInDate] = useState<string | null>(() => readStoredJson<string | null>('lastCheckInDate', null));
   const [membership, setMembership] = useState<MembershipState>(() => {
     const saved = localStorage.getItem('membership');
     if (!saved) return normalizeMembership(defaultMembership);
@@ -339,8 +278,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   });
   const [appEvents, setAppEvents] = useState<AppEvent[]>(() => {
-    const saved = localStorage.getItem('appEvents');
-    return saved ? JSON.parse(saved) : [];
+    return readStoredJson('appEvents', []);
   });
 
   React.useEffect(() => {
