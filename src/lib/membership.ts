@@ -15,6 +15,7 @@ export const FREE_READING_LIMIT = 30;
 export const PLUS_READING_LIMIT = 200;
 export const PLUS_MONTHLY_DAYS = 31;
 export const PLUS_TRIAL_HOURS = 24;
+export const PLUS_TRIAL_LEDGER_KEY = 'starrail:plusTrialLedger';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -30,8 +31,34 @@ export const defaultMembership: MembershipState = {
   unlocks: [],
 };
 
+export function hasLocalPlusTrialLedger() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage.getItem(PLUS_TRIAL_LEDGER_KEY);
+    if (!raw) return false;
+    if (raw === 'used') return true;
+    const parsed = JSON.parse(raw) as { used?: unknown; claimedAt?: unknown };
+    return Boolean(parsed.used || parsed.claimedAt);
+  } catch {
+    return true;
+  }
+}
+
+export function markLocalPlusTrialUsed(now = new Date()) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      PLUS_TRIAL_LEDGER_KEY,
+      JSON.stringify({ used: true, claimedAt: now.toISOString() }),
+    );
+  } catch {
+    // Trial entitlement should not fail just because localStorage is temporarily unavailable.
+  }
+}
+
 export function normalizeMembership(value: unknown): MembershipState {
-  if (!value || typeof value !== 'object') return defaultMembership;
+  const trialUsedByLedger = hasLocalPlusTrialLedger();
+  if (!value || typeof value !== 'object') return { ...defaultMembership, trialUsed: trialUsedByLedger };
 
   const input = value as Partial<MembershipState>;
   const unlocks = normalizeUnlocks(input.unlocks);
@@ -39,7 +66,7 @@ export function normalizeMembership(value: unknown): MembershipState {
   return {
     plan: input.plan === 'plus' || input.plan === 'tester' ? input.plan : 'free',
     expiresAt: typeof input.expiresAt === 'string' ? input.expiresAt : null,
-    trialUsed: Boolean(input.trialUsed),
+    trialUsed: Boolean(input.trialUsed) || trialUsedByLedger,
     activatedAt: typeof input.activatedAt === 'string' ? input.activatedAt : null,
     source:
       input.source === 'trial' || input.source === 'payment' || input.source === 'manual' || input.source === 'tester'
@@ -58,6 +85,10 @@ export function isPlusActive(membership: MembershipState, now = new Date()) {
 
 export function isTesterActive(membership: MembershipState) {
   return membership.plan === 'tester';
+}
+
+export function canStartPlusTrial(membership: MembershipState, now = new Date()) {
+  return !membership.trialUsed && !hasLocalPlusTrialLedger() && !isPlusActive(membership, now);
 }
 
 export function hasFeatureAccess(membership: MembershipState, feature: PremiumFeature) {
@@ -90,7 +121,11 @@ export function getDailyMissionEnergy(membership: MembershipState) {
 }
 
 export function startPlusTrial(membership: MembershipState, now = new Date()): MembershipState {
-  if (membership.trialUsed || isPlusActive(membership, now)) return membership;
+  if (!canStartPlusTrial(membership, now)) {
+    return hasLocalPlusTrialLedger() ? { ...membership, trialUsed: true } : membership;
+  }
+
+  markLocalPlusTrialUsed(now);
 
   return {
     plan: 'plus',

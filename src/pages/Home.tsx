@@ -31,10 +31,14 @@ import { useNavigate } from 'react-router-dom';
 import {
   LEVEL_THRESHOLDS,
   LEVEL_TITLES,
+  type DiaryEntry,
+  type SimulationHistoryEntry,
   type TarotReading,
+  type UserProfile,
   useAppContext,
 } from '../store';
 import {
+  canStartPlusTrial,
   getDailyCheckInEnergy,
   getDailyMissionEnergy,
   getMembershipLabel,
@@ -205,11 +209,40 @@ const getLocalDateKey = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+const getRandomInt = (maxExclusive: number) => {
+  if (maxExclusive <= 1) return 0;
+  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
+    return Math.floor(Math.random() * maxExclusive);
+  }
+
+  const bucketSize = 0x100000000;
+  const limit = Math.floor(bucketSize / maxExclusive) * maxExclusive;
+  const buffer = new Uint32Array(1);
+  let value = 0;
+
+  do {
+    crypto.getRandomValues(buffer);
+    value = buffer[0];
+  } while (value >= limit);
+
+  return value % maxExclusive;
+};
+
+const shuffleTarotDeck = () => {
+  const deck = [...TAROT_CARDS];
+  for (let index = deck.length - 1; index > 0; index -= 1) {
+    const swapIndex = getRandomInt(index + 1);
+    [deck[index], deck[swapIndex]] = [deck[swapIndex], deck[index]];
+  }
+  return deck;
+};
+
 const drawCards = (count = 1): DrawnCard[] => {
-  const deck = [...TAROT_CARDS].sort(() => Math.random() - 0.5);
-  return deck.slice(0, count).map((card) => ({
+  const drawCount = Math.max(1, Math.min(count, TAROT_CARDS.length));
+  const deck = shuffleTarotDeck();
+  return deck.slice(0, drawCount).map((card) => ({
     name: card.name,
-    position: Math.random() > 0.5 ? '正位' : '逆位',
+    position: getRandomInt(2) === 0 ? '正位' : '逆位',
     image: `/tarot/${card.file}`,
   }));
 };
@@ -357,6 +390,268 @@ const fallbackCurrentReadingAnswer = (question: string, currentReading?: TarotRe
 今天先做一个动作：把刚才那张牌对应到一个现实选择上，只问自己“下一步最小的动作是什么”。`;
 };
 
+const MEMORY_WINDOW_MS = 7 * 86400000;
+
+const MEMORY_THEME_BUCKETS = [
+  {
+    label: '工作选择',
+    keywords: ['工作', '事业', '职场', '跳槽', '项目', '公司', '创业', '赚钱', '执行', '机会'],
+    action: '看执行阻力',
+    prompt: '结合我最近关于工作选择的牌迹，帮我看今天最需要处理的执行阻力。',
+  },
+  {
+    label: '关系状态',
+    keywords: ['感情', '恋爱', '喜欢', '关系', '复合', '分手', '暧昧', '对方', '伴侣', '情侣'],
+    action: '看关系走向',
+    prompt: '结合我最近关于关系状态的记录，帮我看这段关系现在最需要被看见的地方。',
+  },
+  {
+    label: '自我状态',
+    keywords: ['焦虑', '迷茫', '状态', '情绪', '自己', '压力', '未来', '烦', '累', '害怕'],
+    action: '看情绪出口',
+    prompt: '结合我最近的状态，帮我看今天可以先松开哪一部分压力。',
+  },
+  {
+    label: '人生选择',
+    keywords: ['选择', '要不要', '怎么办', '方向', '决定', '该不该', '能不能', '适合', '机会'],
+    action: '看下一步',
+    prompt: '结合我最近反复纠结的选择，帮我看下一步最小但有效的行动。',
+  },
+];
+
+type MemoryRecall = {
+  title: string;
+  desc: string;
+  cta: string;
+  prompt?: string;
+  meta: string;
+  contextLines: string[];
+};
+
+type TarotArchiveReport = {
+  title: string;
+  dateRangeLabel: string;
+  keywords: string[];
+  timeline: Array<{
+    id: string;
+    date: string;
+    title: string;
+    card: string;
+    summary: string;
+  }>;
+  advice: string[];
+  prompt: string;
+};
+
+const getMemoryTime = (value?: string) => {
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(time) ? time : 0;
+};
+
+const getRecentItems = <T extends { date: string }>(items: T[], now = Date.now()) =>
+  [...items]
+    .filter((item) => now - getMemoryTime(item.date) <= MEMORY_WINDOW_MS)
+    .sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date));
+
+const getThemeFromReadings = (readings: TarotReading[]) => {
+  const ranked = MEMORY_THEME_BUCKETS.map((bucket) => ({
+    ...bucket,
+    count: readings.filter((reading) =>
+      bucket.keywords.some((keyword) => reading.question.includes(keyword) || reading.summary.includes(keyword)),
+    ).length,
+  })).sort((a, b) => b.count - a.count);
+
+  return ranked[0]?.count ? ranked[0] : null;
+};
+
+const getMoodLabel = (mood: DiaryEntry['mood']) => {
+  const labels: Record<DiaryEntry['mood'], string> = {
+    great: '很亮的心情',
+    good: '还不错的状态',
+    neutral: '平淡的一天',
+    bad: '有点低落',
+    awful: '很辛苦的时刻',
+  };
+  return labels[mood];
+};
+
+const getShortText = (text: string, max = 28) => {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+};
+
+const formatArchiveDate = (date: string, options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }) => {
+  const parsed = new Date(date);
+  if (!Number.isFinite(parsed.getTime())) return '最近';
+  return parsed.toLocaleDateString('zh-CN', options);
+};
+
+const getPrimaryCardName = (cards: string) => cards.split(/[，,、]/)[0]?.trim() || '未记录牌面';
+
+const buildTarotArchiveReport = (readings: TarotReading[]): TarotArchiveReport => {
+  const sorted = [...readings].sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date));
+  const recent = getRecentItems(sorted);
+  const scope = recent.length > 0 ? recent : sorted.slice(0, 7);
+  const first = scope[scope.length - 1];
+  const last = scope[0];
+  const dateRangeLabel =
+    first && last
+      ? `${formatArchiveDate(first.date)} - ${formatArchiveDate(last.date)}`
+      : '还没有时间线';
+
+  const theme = getThemeFromReadings(scope);
+  const keywordScores = MEMORY_THEME_BUCKETS.map((bucket) => ({
+    label: bucket.label,
+    count: scope.filter((reading) =>
+      bucket.keywords.some((keyword) => reading.question.includes(keyword) || reading.summary.includes(keyword)),
+    ).length,
+  })).filter((item) => item.count > 0);
+
+  const cardRank = Object.entries(
+    scope.reduce<Record<string, number>>((acc, reading) => {
+      const card = getPrimaryCardName(reading.cards);
+      if (card) acc[card] = (acc[card] || 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .sort((a, b) => b[1] - a[1])
+    .map(([card]) => card);
+
+  const keywords = [
+    ...keywordScores.sort((a, b) => b.count - a.count).map((item) => item.label),
+    ...cardRank.slice(0, 2),
+  ].slice(0, 5);
+
+  const timeline = scope.slice(0, 5).map((reading) => ({
+    id: reading.id,
+    date: formatArchiveDate(reading.date, { month: 'numeric', day: 'numeric' }),
+    title: getShortText(reading.question || '一次没有命名的问题', 24),
+    card: getShortText(getPrimaryCardName(reading.cards), 18),
+    summary: getShortText(reading.summary || '这次牌面已经留在档案里。', 48),
+  }));
+
+  const topCard = cardRank[0] || '还没有代表牌';
+  const themeLabel = theme?.label || keywordScores[0]?.label || '自我状态';
+  const advice =
+    scope.length === 0
+      ? ['先抽一张今日牌，让第一条牌迹成为档案起点。', '问题越具体，后续复盘越能看出变化。']
+      : [
+          `先把这周的问题收束到「${themeLabel}」，不要同时审判所有方向。`,
+          `代表牌「${topCard}」出现后，适合写下一个今天就能验证的小动作。`,
+          scope.length >= 3 ? '下一次追问可以直接问“我反复卡住的地方是什么”。' : '再留下两三次牌迹后，时间线会更有参考价值。',
+        ];
+
+  return {
+    title: scope.length > 0 ? `${themeLabel}观察档案` : '新的牌迹档案',
+    dateRangeLabel,
+    keywords: keywords.length > 0 ? keywords : ['等待第一张牌'],
+    timeline,
+    advice,
+    prompt:
+      scope.length > 0
+        ? `结合我这份「${themeLabel}观察档案」和最近牌迹，帮我继续看下一步最该注意什么。`
+        : '帮我抽一张今日牌，作为我的第一份牌迹档案。',
+  };
+};
+
+const buildMemoryRecall = (input: {
+  tarotReadings: TarotReading[];
+  diaryEntries: DiaryEntry[];
+  simulationHistory: SimulationHistoryEntry[];
+  profiles: UserProfile[];
+  activeProfileId: string | null;
+}): MemoryRecall => {
+  const recentReadings = getRecentItems(input.tarotReadings);
+  const recentDiaries = getRecentItems(input.diaryEntries);
+  const latestReading = recentReadings[0] || input.tarotReadings[0];
+  const latestDiary = recentDiaries[0] || input.diaryEntries[0];
+  const latestSimulation = [...input.simulationHistory].sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date))[0];
+  const activeProfile =
+    input.profiles.find((profile) => profile.id === input.activeProfileId) || input.profiles[0] || null;
+  const theme = getThemeFromReadings(recentReadings);
+  const memoryCount =
+    input.tarotReadings.length + input.diaryEntries.length + input.simulationHistory.length + input.profiles.length;
+
+  const contextLines = [
+    activeProfile
+      ? `命理档案：${activeProfile.name}，${activeProfile.gender === 'female' ? '女' : '男'}，出生地${activeProfile.birthLocation || '未填写'}，现居${activeProfile.currentLocation || '未填写'}。`
+      : '',
+    theme ? `最近 7 天高频主题：${theme.label}，相关牌迹 ${theme.count} 次。` : '',
+    latestReading ? `最近牌迹：问题“${getShortText(latestReading.question, 46)}”，牌面“${getShortText(latestReading.cards, 42)}”。` : '',
+    latestDiary ? `最近日记：${getMoodLabel(latestDiary.mood)}，内容“${getShortText(latestDiary.content, 54)}”。` : '',
+    latestSimulation
+      ? `最近沙盘：在“${getShortText(latestSimulation.dilemma, 42)}”里权衡“${getShortText(latestSimulation.choiceA, 18)}”和“${getShortText(latestSimulation.choiceB, 18)}”。`
+      : '',
+  ].filter(Boolean);
+
+  if (theme && recentReadings.length >= 2) {
+    return {
+      title: `我记得你这几天常在问「${theme.label}」`,
+      desc: `已经留下 ${recentReadings.length} 次近期牌迹。今天可以先不换方向，直接看卡住你的那一小段阻力。`,
+      cta: theme.action,
+      prompt: theme.prompt,
+      meta: `${memoryCount} 份线索`,
+      contextLines,
+    };
+  }
+
+  if (latestDiary) {
+    return {
+      title: `我记得你上次写下的是「${getMoodLabel(latestDiary.mood)}」`,
+      desc: latestDiary.content
+        ? `那篇日记里有一句“${getShortText(latestDiary.content, 34)}”。今天可以先看看情绪最需要被放在哪里。`
+        : '今天可以先从情绪出口开始，不急着立刻解决所有事。',
+      cta: '看情绪出口',
+      prompt: '结合我最近的日记状态，帮我看今天最需要放下的压力和一个能执行的小动作。',
+      meta: `${memoryCount} 份线索`,
+      contextLines,
+    };
+  }
+
+  if (latestSimulation) {
+    return {
+      title: '我记得你还在权衡一个选择',
+      desc: `上次沙盘里，你把“${getShortText(latestSimulation.choiceA, 18)}”和“${getShortText(latestSimulation.choiceB, 18)}”放在一起比较过。`,
+      cta: '继续看下一步',
+      prompt: '结合我上次的沙盘选择，帮我看今天更适合先验证哪一步。',
+      meta: `${memoryCount} 份线索`,
+      contextLines,
+    };
+  }
+
+  if (latestReading) {
+    return {
+      title: '我记得你上一张牌留下的问题',
+      desc: `上次你问的是“${getShortText(latestReading.question, 34)}”。如果还没完全放下，可以沿着这张牌继续看。`,
+      cta: '接着解读',
+      prompt: '结合我上一轮牌面，帮我继续看现在最需要注意的一点。',
+      meta: `${memoryCount} 份线索`,
+      contextLines,
+    };
+  }
+
+  if (activeProfile) {
+    return {
+      title: `我已经记住了「${activeProfile.name}」这份档案`,
+      desc: '之后牌迹、日记和沙盘会围绕这份档案慢慢沉淀，不用每次重新介绍自己。',
+      cta: '看今日状态',
+      prompt: `结合${activeProfile.name}的命理档案，帮我看今天最适合关注的状态。`,
+      meta: `${memoryCount} 份线索`,
+      contextLines,
+    };
+  }
+
+  return {
+    title: '先留下一条属于你的线索',
+    desc: '抽一张今日牌、写一篇日记，或者建一份档案。之后星轨就能沿着你的上下文继续陪你看。',
+    cta: '抽今日牌',
+    prompt: '今日运势',
+    meta: '新档案',
+    contextLines,
+  };
+};
+
 export default function Home() {
   const navigate = useNavigate();
   const {
@@ -374,7 +669,9 @@ export default function Home() {
     setTheme,
     diaryEntries,
     simulatorState,
+    simulationHistory,
     profiles,
+    activeProfileId,
     checkInStreak,
     setCheckInStreak,
     lastCheckInDate,
@@ -415,6 +712,7 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const initialChatScrollDoneRef = useRef(false);
   const petDragRef = useRef<{
     startX: number;
     startY: number;
@@ -444,6 +742,7 @@ export default function Home() {
   const canClaimReturnReward = engagement.activeDays >= 2 && engagement.returnRewardDate !== todayKey;
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
+  const trialAvailable = canStartPlusTrial(membership);
   const readingLimit = getReadingLimit(membership);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
@@ -463,13 +762,24 @@ export default function Home() {
   const progressPercent = Math.min(100, Math.round((bondExp / nextLevelExp) * 100));
   const visibleMessages = messages.filter((message) => message.id !== 'init');
   const hasDrawnCard = cardImage && cardImage !== '/default-card.png' && cardImage !== 'default-card.png';
+  const memoryRecall = useMemo(
+    () => buildMemoryRecall({ tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId }),
+    [tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId],
+  );
+  const memoryContextText = memoryRecall.contextLines.length
+    ? `已知用户上下文（可以轻轻引用，不要机械复述）：\n${memoryRecall.contextLines.join('\n')}`
+    : '';
   const companionBubbleText = isDrawingCards
     ? '别盯着牌背看，它会紧张。'
     : isThinking
       ? '我在翻星轨，你先别急着给自己判刑。'
       : hasDrawnCard
-        ? PET_MURMURS[(tarotReadings.length + bondLevel) % PET_MURMURS.length]
-        : '今天先问一个小问题，不要一上来就审判人生。';
+        ? memoryRecall.contextLines.length
+          ? '我把你留下的线索放在下面了，今天可以接着看。'
+          : PET_MURMURS[(tarotReadings.length + bondLevel) % PET_MURMURS.length]
+        : memoryRecall.contextLines.length
+          ? '我把你留下的线索放在下面了，今天可以接着看。'
+          : '今天先问一个小问题，不要一上来就审判人生。';
   const autoOutfit = getAutoCompanionOutfit(bondLevel);
   const selectedOutfit = COMPANION_OUTFITS.find((item) => item.id === companionOutfit);
   const activeOutfit =
@@ -591,6 +901,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (initialChatScrollDoneRef.current || visibleMessages.length === 0) return;
+    initialChatScrollDoneRef.current = true;
+    scrollConversationToBottom('auto');
+  }, [visibleMessages.length]);
+
+  useEffect(() => {
     if (!autoScrollOnNextMessage) return;
     scrollConversationToBottom();
     if (!isThinking) setAutoScrollOnNextMessage(false);
@@ -614,6 +930,7 @@ export default function Home() {
   };
 
   const handleStartTrial = () => {
+    if (!trialAvailable) return;
     setMembership((current) => startPlusTrial(current));
     setEnergy((value) => Math.max(value, 12));
     setShowUpgradePrompt(false);
@@ -658,6 +975,14 @@ export default function Home() {
       return;
     }
     if (nextBestAction.route) navigate(nextBestAction.route);
+  };
+
+  const handleMemoryRecallAction = () => {
+    if (memoryRecall.prompt) {
+      handleSend(memoryRecall.prompt);
+      return;
+    }
+    navigate('/app/diary');
   };
 
   const handleDailyMissionShortcut = (mission: 'ask' | 'diary' | 'simulator') => {
@@ -732,13 +1057,16 @@ export default function Home() {
             {
               role: 'system',
               content:
-                '你是星轨里的中文塔罗少女。回答要客观但温柔，像在轻声陪伴用户看清问题；不要恐吓、不要审判、不要冷冰冰地下结论。不要使用 Markdown 星号、加粗符号或井号标题。没有明确要求抽牌时，不要重新抽牌，只基于当前上下文继续解读。',
+                '你是星轨里的中文塔罗少女。回答要客观但温柔，像在轻声陪伴用户看清问题；不要恐吓、不要审判、不要冷冰冰地下结论。不要使用 Markdown 星号、加粗符号或井号标题。没有明确要求抽牌时，不要重新抽牌，只基于当前上下文继续解读。可以适度引用用户已留下的牌迹、日记、档案和沙盘线索，让回答像接着上次聊，但不要机械暴露数据清单。',
             },
             {
               role: 'user',
-              content: shouldDraw
-                ? buildPrompt(question, cards, isInternetMode)
-                : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
+              content: [
+                memoryContextText,
+                shouldDraw
+                  ? buildPrompt(question, cards, isInternetMode)
+                  : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
+              ].filter(Boolean).join('\n\n'),
             },
           ],
         }),
@@ -897,6 +1225,18 @@ export default function Home() {
     setShowScrollBottom(target.scrollHeight - target.scrollTop - target.clientHeight > 220);
   };
 
+  const openDailyTasksFromChat = () => {
+    setShowDailyPanel(true);
+    setShowScrollTop(false);
+    setShowScrollBottom(true);
+    const scrollToDaily = () => {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    window.requestAnimationFrame(scrollToDaily);
+    window.setTimeout(scrollToDaily, 80);
+  };
+
   const showComposerSuggestions = composerFocused && !isThinking;
 
   const composerSuggestions = (
@@ -909,6 +1249,16 @@ export default function Home() {
           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
           className="mx-auto mb-1.5 flex w-full max-w-[min(540px,calc(100vw-28px))] gap-1.5 overflow-x-auto rounded-[18px] border border-[#efe3cf]/72 bg-[#fffaf2]/72 p-1.5 shadow-[0_16px_44px_rgba(84,55,24,0.11),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl no-scrollbar dark:border-white/[0.08] dark:bg-[#111522]/74 dark:shadow-[0_18px_48px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.07)] sm:mb-2 sm:gap-2 sm:rounded-[22px] sm:p-2"
         >
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setShowReadingLog(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#f4cf83]/32 bg-[#f4cf83]/18 px-2.5 py-1.5 text-[11px] font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] transition-transform active:scale-[0.98] dark:border-[#f4cf83]/20 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83] sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
+            aria-label="打开牌迹档案"
+          >
+            <BookOpen size={13} />
+            牌迹
+          </button>
           {COMPOSER_SUGGESTIONS.map((item) => (
             <button
               key={item.label}
@@ -974,6 +1324,66 @@ export default function Home() {
     </div>
   );
 
+  const contextActionDock = (
+    <AnimatePresence initial={false}>
+      {visibleMessages.length > 0 && !showComposerSuggestions && (
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+          className="mx-auto mb-1.5 grid w-full max-w-[min(540px,calc(100vw-28px))] grid-cols-3 gap-1.5 rounded-[22px] border border-[#efe3cf]/72 bg-[#fff8ee]/82 p-1.5 shadow-[0_16px_42px_rgba(84,55,24,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/82 dark:shadow-[0_16px_42px_rgba(0,0,0,0.40),inset_0_1px_0_rgba(255,255,255,0.07)]"
+        >
+          <button
+            type="button"
+            onClick={() => setShowReadingLog(true)}
+            className="flex min-w-0 items-center gap-2 rounded-[18px] bg-[#f4cf83]/18 px-2 py-2 text-left text-[#8f5e1b] transition-transform active:scale-[0.98] dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
+            aria-label="打开牌迹档案"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#fff4dc]/78 dark:bg-[#f4cf83]/10">
+              <BookOpen size={15} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-bold">牌迹</span>
+              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{tarotReadings.length} 条</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleMemoryRecallAction}
+            disabled={isThinking}
+            className="flex min-w-0 items-center gap-2 rounded-[18px] px-2 py-2 text-left text-[#6f6253] transition-transform active:scale-[0.98] disabled:opacity-55 dark:text-white/62"
+            aria-label="继续星轨记忆"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#f1dfbc]/78 text-[#9b641e] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]">
+              <Sparkles size={15} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-bold text-[#8f5e1b] dark:text-[#f4cf83]">记得你</span>
+              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{memoryRecall.meta}</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={openDailyTasksFromChat}
+            className="flex min-w-0 items-center gap-2 rounded-[18px] px-2 py-2 text-left text-[#6f6253] transition-transform active:scale-[0.98] dark:text-white/62"
+            aria-label="打开今日任务"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#f1dfbc]/78 text-[#9b641e] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]">
+              <CalendarCheck size={15} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-bold text-[#8f5e1b] dark:text-[#f4cf83]">{canClaimDailyReward ? '领奖励' : '任务'}</span>
+              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{missionCount}/3</span>
+            </span>
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   const companionPet = (wrapperClassName: string, docked = false) => (
     <div className={wrapperClassName}>
       <div
@@ -1024,7 +1434,7 @@ export default function Home() {
         onScroll={handleScroll}
         className={clsx(
           'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-4 no-scrollbar sm:px-6',
-          visibleMessages.length > 0 ? 'pb-[176px]' : 'pb-[132px]',
+          visibleMessages.length > 0 ? 'pb-[224px]' : 'pb-[132px]',
         )}
       >
         <div
@@ -1130,9 +1540,9 @@ export default function Home() {
               </button>
             </div>
 
-            <div className={clsx('relative z-10 mt-2', visibleMessages.length > 0 ? 'min-h-[68px]' : 'min-h-[300px]')}>
+            <div className={clsx('relative z-10 mt-2', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[300px]')}>
               {visibleMessages.length > 0 && (
-                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                   <div className="relative h-14 w-12">
                     <div className="absolute left-0 top-1 h-12 w-8 -rotate-6 rounded-[10px] bg-[#111827] shadow-[0_10px_20px_rgba(18,14,9,0.18)]" />
                     {(cardStackImages[0] || hasDrawnCard) && (
@@ -1149,15 +1559,27 @@ export default function Home() {
                       {isThinking ? '解读中...' : companionBubbleText}
                     </p>
                   </div>
-                  <button
-                    onClick={() => handleSend('解读当前牌面', { mode: 'current' })}
-                    disabled={isThinking}
-                    className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#17130f] text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                    aria-label="解读当前牌面"
-                    title="解读当前牌面"
-                  >
-                    <Sparkles size={19} />
-                  </button>
+                  <div className="flex w-[58px] shrink-0 flex-col gap-1.5">
+                    <button
+                      onClick={() => setShowReadingLog(true)}
+                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] border border-[#f4cf83]/28 bg-[#f4cf83]/14 text-[10px] font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.50)] dark:border-[#f4cf83]/18 dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
+                      aria-label="打开牌迹档案"
+                      title="牌迹档案"
+                    >
+                      <BookOpen size={13} />
+                      牌迹
+                    </button>
+                    <button
+                      onClick={() => handleSend('解读当前牌面', { mode: 'current' })}
+                      disabled={isThinking}
+                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] bg-[#17130f] text-[10px] font-bold text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                      aria-label="解读当前牌面"
+                      title="解读当前牌面"
+                    >
+                      <Sparkles size={13} />
+                      解读
+                    </button>
+                  </div>
                 </div>
               )}
               {visibleMessages.length === 0 && (
@@ -1244,11 +1666,12 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => setShowReadingLog(true)}
-                  className="flex h-[52px] w-[52px] items-center justify-center rounded-[22px] bg-[#f4ecdf] text-[#806f5c] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/58"
+                  className="flex h-[52px] w-[74px] flex-col items-center justify-center gap-0.5 rounded-[22px] bg-[#f4ecdf] text-[#806f5c] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/58"
                   aria-label="打开牌迹"
-                  title="牌迹"
+                  title="牌迹档案"
                 >
-                  <BookOpen size={23} />
+                  <BookOpen size={18} />
+                  <span className="text-[10px] font-bold leading-none">牌迹</span>
                 </button>
               </div>
                 </>
@@ -1269,6 +1692,40 @@ export default function Home() {
               </AnimatePresence>
             </div>
           </motion.section>
+
+          {visibleMessages.length === 0 && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.08, type: 'spring', stiffness: 220, damping: 24 }}
+              className="order-2 overflow-hidden rounded-[24px] border border-[#eadcc8]/72 bg-[#fff8ee]/64 p-3 shadow-[0_16px_42px_rgba(88,60,28,0.10),inset_0_1px_0_rgba(255,255,255,0.70)] backdrop-blur-2xl dark:border-white/[0.07] dark:bg-white/[0.052] dark:shadow-[0_18px_44px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#a06b22] dark:text-[#f4cf83]">
+                    <Sparkles size={13} />
+                    <span>星轨记得你</span>
+                    <span className="rounded-full bg-[#f3e5ce]/72 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/50">
+                      {memoryRecall.meta}
+                    </span>
+                  </div>
+                  <h2 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
+                    {memoryRecall.title}
+                  </h2>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                    {memoryRecall.desc}
+                  </p>
+                </div>
+                <button
+                  onClick={handleMemoryRecallAction}
+                  disabled={isThinking}
+                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                >
+                  {memoryRecall.cta}
+                </button>
+              </div>
+            </motion.section>
+          )}
 
           {visibleMessages.length === 0 && !showDailyPanel && (
           <section className="order-2 space-y-2">
@@ -1463,6 +1920,7 @@ export default function Home() {
       )}
 
       <div className="absolute inset-x-0 bottom-[18px] z-50 px-4">
+        {contextActionDock}
         {composerSuggestions}
         {composer}
       </div>
@@ -1473,8 +1931,8 @@ export default function Home() {
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            onClick={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
-            className="absolute bottom-[112px] left-[calc(50%_-_20px)] z-40 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62"
+            onClick={() => scrollConversationToBottom()}
+            className="absolute bottom-[178px] left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:left-[calc(50%_-_250px)]"
             aria-label="滚动到底部"
             title="滚动到底部"
           >
@@ -1490,7 +1948,7 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="absolute bottom-[164px] left-[calc(50%_-_20px)] z-40 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:bg-white/[0.08]"
+            className="absolute bottom-[226px] left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:left-[calc(50%_-_250px)]"
             aria-label="回到顶部"
             title="回到顶部"
           >
@@ -1508,6 +1966,10 @@ export default function Home() {
         plusActive={plusActive}
         onUpgrade={() => openUpgradePrompt('weekly')}
         onShare={handleShareReadingCard}
+        onContinue={(prompt) => {
+          setShowReadingLog(false);
+          handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
+        }}
       />
 
       <WardrobeModal
@@ -1521,7 +1983,7 @@ export default function Home() {
       <UpgradePromptModal
         open={showUpgradePrompt}
         reason={upgradeReason}
-        trialAvailable={!membership.trialUsed && !plusActive}
+        trialAvailable={trialAvailable}
         onStartTrial={handleStartTrial}
         onGoPlus={handleOpenPlusPage}
         onClose={() => setShowUpgradePrompt(false)}
@@ -1792,11 +2254,12 @@ export default function Home() {
               </button>
               <button
                 onClick={() => setShowReadingLog(true)}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/46 text-apple-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition-transform active:scale-95 dark:bg-white/[0.06]"
+                className="flex h-10 w-[64px] items-center justify-center gap-1 rounded-full bg-white/46 text-apple-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition-transform active:scale-95 dark:bg-white/[0.06]"
                 aria-label="打开牌迹"
-                title="牌迹"
+                title="牌迹档案"
               >
-                <BookOpen size={19} />
+                <BookOpen size={15} />
+                <span className="text-[10px] font-bold">牌迹</span>
               </button>
             </div>
           </motion.section>
@@ -2049,6 +2512,10 @@ export default function Home() {
         plusActive={plusActive}
         onUpgrade={() => openUpgradePrompt('weekly')}
         onShare={handleShareReadingCard}
+        onContinue={(prompt) => {
+          setShowReadingLog(false);
+          handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
+        }}
       />
 
       <WardrobeModal
@@ -2062,7 +2529,7 @@ export default function Home() {
       <UpgradePromptModal
         open={showUpgradePrompt}
         reason={upgradeReason}
-        trialAvailable={!membership.trialUsed && !plusActive}
+        trialAvailable={trialAvailable}
         onStartTrial={handleStartTrial}
         onGoPlus={handleOpenPlusPage}
         onClose={() => setShowUpgradePrompt(false)}
@@ -2560,6 +3027,7 @@ function ReadingLog({
   plusActive,
   onUpgrade,
   onShare,
+  onContinue,
 }: {
   open: boolean;
   onClose: () => void;
@@ -2569,8 +3037,11 @@ function ReadingLog({
   plusActive: boolean;
   onUpgrade: () => void;
   onShare: (reading: TarotReading) => void;
+  onContinue: (prompt: string) => void;
 }) {
   if (typeof document === 'undefined') return null;
+  const archiveReport = buildTarotArchiveReport(readings);
+  const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
 
   return createPortal(
     <AnimatePresence>
@@ -2599,16 +3070,75 @@ function ReadingLog({
               </button>
             </div>
             <div className="max-h-[58vh] overflow-y-auto p-4 no-scrollbar">
-              <div className="mb-3 rounded-[26px] border border-[#F4CF83]/22 bg-[#F4CF83]/10 p-4">
+              <div className="mb-3 overflow-hidden rounded-[28px] border border-[#F4CF83]/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-black text-[#B97B28] dark:text-[#F4CF83]">本周牌迹报告</div>
-                    <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">{weeklyReportText}</p>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
+                      本周档案
+                    </div>
+                    <div className="mt-1 truncate text-xl font-black text-apple-text">{archiveReport.title}</div>
+                    <div className="mt-1 text-xs text-apple-text-muted">
+                      {archiveReport.dateRangeLabel} · {weekCount} 次牌迹
+                    </div>
                   </div>
-                  <div className="shrink-0 rounded-full border border-apple-border bg-apple-surface px-3 py-1.5 text-xs font-bold text-apple-text-muted">
-                    {weekCount} 次
-                  </div>
+                  <button
+                    onClick={() => onContinue(archiveReport.prompt)}
+                    className="shrink-0 rounded-full bg-[#F4CF83] px-3 py-2 text-xs font-black text-[#17130f] shadow-[0_12px_28px_rgba(185,123,40,0.20)]"
+                  >
+                    继续追问
+                  </button>
                 </div>
+
+                <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{weeklyReportText}</p>
+
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {archiveReport.keywords.map((keyword) => (
+                    <span
+                      key={keyword}
+                      className="rounded-full border border-[#F4CF83]/22 bg-apple-surface/70 px-2.5 py-1 text-[11px] font-bold text-[#B97B28] dark:text-[#F4CF83]"
+                    >
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="mt-4 rounded-[22px] border border-apple-border bg-apple-surface/72 p-3">
+                  <div className="mb-2 text-xs font-black text-apple-text">时间线</div>
+                  {visibleTimeline.length === 0 ? (
+                    <div className="text-xs leading-relaxed text-apple-text-muted">还没有可以沉淀的牌迹，先抽一张今日牌。</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {visibleTimeline.map((item) => (
+                        <div key={item.id} className="grid grid-cols-[44px_minmax(0,1fr)] gap-2">
+                          <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
+                          <div className="min-w-0 border-l border-[#F4CF83]/24 pl-3">
+                            <div className="truncate text-xs font-black text-apple-text">{item.title}</div>
+                            <div className="mt-0.5 truncate text-[11px] font-bold text-[#B97B28] dark:text-[#F4CF83]">{item.card}</div>
+                            <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{item.summary}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!plusActive && archiveReport.timeline.length > visibleTimeline.length && (
+                    <button
+                      onClick={onUpgrade}
+                      className="mt-3 w-full rounded-full border border-[#F4CF83]/24 bg-[#F4CF83]/10 px-3 py-2 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
+                    >
+                      解锁完整时间线
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 grid gap-2">
+                  {archiveReport.advice.slice(0, plusActive ? 3 : 2).map((item, index) => (
+                    <div key={item} className="rounded-[18px] bg-apple-surface/64 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                      <span className="mr-1 font-black text-apple-text">建议 {index + 1}</span>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+
                 {!plusActive && (
                   <button
                     onClick={onUpgrade}

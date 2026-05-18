@@ -1,10 +1,12 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { AppProvider } from './store';
 import Layout from './components/Layout';
 import { FeatureGate } from './components/FeatureGate';
+import { AccountAutoSync } from './components/AccountAutoSync';
 import Home from './pages/Home';
 import Landing from './pages/Landing';
+import Auth from './pages/Auth';
 import Collection from './pages/Collection';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
@@ -16,6 +18,7 @@ import Bazi from './pages/Bazi';
 import Simulator from './pages/Simulator';
 import Diary from './pages/Diary';
 import Guardian from './pages/Guardian';
+import { getStoredAccountSession } from './lib/accountClient';
 
 function App() {
   return (
@@ -23,7 +26,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />
-          <Route path="/app" element={<Layout />}>
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/app" element={<RequireAccount><Layout /></RequireAccount>}>
             <Route index element={<Home />} />
             <Route path="bazi" element={<Bazi />} />
             <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
@@ -40,6 +44,23 @@ function App() {
         </Routes>
       </BrowserRouter>
     </AppProvider>
+  );
+}
+
+function RequireAccount({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const session = getStoredAccountSession();
+
+  if (!session) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/auth?next=${encodeURIComponent(next)}`} replace />;
+  }
+
+  return (
+    <>
+      <AccountAutoSync />
+      {children}
+    </>
   );
 }
 

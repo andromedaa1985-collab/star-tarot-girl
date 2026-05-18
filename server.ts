@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
+import { registerAuthRoutes } from "./api/authRoutes";
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -259,8 +260,9 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: false }));
+  app.use(express.json({ limit: "5mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "5mb" }));
+  registerAuthRoutes(app);
 
   // API routes
   app.get("/api/health", (req, res) => {

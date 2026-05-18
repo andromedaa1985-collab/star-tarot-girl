@@ -2,11 +2,13 @@ import express from "express";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
+import { registerAuthRoutes } from "./authRoutes";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
+registerAuthRoutes(app);
 
 const relationshipInvites = new Map<string, { profile: any; createdAt: string; expiresAt: number }>();
 const RELATIONSHIP_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;

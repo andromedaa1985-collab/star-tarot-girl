@@ -1,8 +1,20 @@
 import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, ChevronLeft, Database, Download, RotateCcw, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, Cloud, Database, Download, KeyRound, Mail, RotateCcw, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload, UserRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clearAppStorage, downloadAppBackup, getAutoRecoveryMeta, getBackupSummary, importAppBackup, parseBackupFile, restoreAutoRecoveryPoint } from '../lib/appBackup';
+import { clearAppStorage, createAppBackup, downloadAppBackup, getAutoRecoveryMeta, getBackupSummary, importAppBackup, parseBackupFile, restoreAutoRecoveryPoint } from '../lib/appBackup';
+import {
+  clearAccountSession,
+  downloadCloudArchive,
+  getStoredAccountSession,
+  loginAccount,
+  refreshAccountSession,
+  registerAccount,
+  storeAccountSession,
+  uploadCloudArchive,
+  type AccountSession,
+} from '../lib/accountClient';
+import { activateAccountWorkspace, clearActiveLocalWorkspace, saveAccountWorkspace } from '../lib/accountWorkspace';
 
 type BackupNotice = {
   type: 'success' | 'error' | 'info';
@@ -17,11 +29,19 @@ export default function Settings() {
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [backupNotice, setBackupNotice] = useState<BackupNotice | null>(null);
   const [autoRecoveryMeta, setAutoRecoveryMeta] = useState(() => getAutoRecoveryMeta());
+  const [accountSession, setAccountSession] = useState<AccountSession | null>(() => getStoredAccountSession());
+  const [accountMode, setAccountMode] = useState<'login' | 'register'>('login');
+  const [accountEmail, setAccountEmail] = useState(() => getStoredAccountSession()?.user.email || '');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [accountDisplayName, setAccountDisplayName] = useState('');
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountNotice, setAccountNotice] = useState<BackupNotice | null>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const backupSummary = getBackupSummary();
   const archiveCount = backupSummary.profiles + backupSummary.tarotReadings + backupSummary.diaryEntries + backupSummary.simulations + backupSummary.guardianMessages;
-  const lastBackupLabel = formatBackupTime(backupSummary.lastBackupAt);
-  const autoRecoveryLabel = formatBackupTime(autoRecoveryMeta?.createdAt || backupSummary.lastAutoRecoveryAt);
+  const lastBackupLabel = formatBackupTime(backupSummary.lastBackupAt, '还没有手动备份');
+  const autoRecoveryLabel = formatBackupTime(autoRecoveryMeta?.createdAt || backupSummary.lastAutoRecoveryAt, '还没有自动恢复点');
+  const cloudArchiveLabel = formatBackupTime(accountSession?.user.archiveUpdatedAt || null, '还没有云端存档');
 
   React.useEffect(() => {
     const handle = window.setInterval(() => {
@@ -29,6 +49,18 @@ export default function Settings() {
     }, 2500);
 
     return () => window.clearInterval(handle);
+  }, []);
+
+  React.useEffect(() => {
+    const session = getStoredAccountSession();
+    if (!session) return;
+
+    refreshAccountSession(session)
+      .then(setAccountSession)
+      .catch(() => {
+        clearAccountSession();
+        setAccountSession(null);
+      });
   }, []);
 
   const handleClearData = () => {
@@ -99,6 +131,104 @@ export default function Settings() {
     }
   };
 
+  const handleAccountSubmit = async () => {
+    setAccountBusy(true);
+    setAccountNotice(null);
+    const previousSession = getStoredAccountSession();
+    try {
+      const session = accountMode === 'login'
+        ? await loginAccount({ email: accountEmail, password: accountPassword })
+        : await registerAccount({ email: accountEmail, password: accountPassword, displayName: accountDisplayName });
+      await activateAccountWorkspace(session, previousSession);
+      setAccountSession(session);
+      setAccountPassword('');
+      setAccountNotice({
+        type: 'success',
+        message: accountMode === 'login' ? '登录成功，可以同步或恢复云端存档。' : '账户已创建，可以把当前本机存档同步到云端。',
+      });
+    } catch (error: any) {
+      setAccountNotice({
+        type: 'error',
+        message: getAccountErrorMessage(error),
+      });
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const handleCloudSync = async () => {
+    if (!accountSession) return;
+    setAccountBusy(true);
+    setAccountNotice(null);
+    try {
+      const nextSession = await uploadCloudArchive(accountSession, createAppBackup());
+      setAccountSession(nextSession);
+      setAccountNotice({
+        type: 'success',
+        message: `已同步到云端，共 ${nextSession.user.archiveRecordCount} 条核心记录。`,
+      });
+    } catch (error: any) {
+      setAccountNotice({
+        type: 'error',
+        message: getAccountErrorMessage(error, '同步失败，请稍后再试。'),
+      });
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const handleCloudRestore = async () => {
+    if (!accountSession) return;
+    const confirmed = window.confirm('从云端恢复会合并云端记录，并以云端设置为准。继续恢复吗？');
+    if (!confirmed) return;
+
+    setAccountBusy(true);
+    setAccountNotice(null);
+    try {
+      const data = await downloadCloudArchive(accountSession);
+      importAppBackup(data.archive);
+      const nextSession = {
+        ...accountSession,
+        user: {
+          ...accountSession.user,
+          archiveUpdatedAt: data.archiveUpdatedAt,
+          archiveRecordCount: data.archiveRecordCount,
+        },
+      };
+      storeAccountSession(nextSession);
+      setAccountSession(nextSession);
+      setAccountNotice({
+        type: 'success',
+        message: '云端存档已恢复，页面即将刷新。',
+      });
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error: any) {
+      setAccountNotice({
+        type: 'error',
+        message: getAccountErrorMessage(error, '恢复失败，请确认这个账户已有云端存档。'),
+      });
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const handleAccountLogout = () => {
+    if (accountSession) {
+      saveAccountWorkspace(accountSession.user.id);
+    }
+    clearAccountSession();
+    clearActiveLocalWorkspace();
+    setAccountSession(null);
+    setAccountPassword('');
+    setAccountNotice({
+      type: 'info',
+      message: '已退出当前账户，并为这个账户保留本机工作区。',
+    });
+    window.setTimeout(() => {
+      window.location.href = `/auth?next=${encodeURIComponent('/app')}`;
+    }, 360);
+  };
+
   return (
     <div className="relative h-full w-full overflow-y-auto overscroll-contain px-6 pt-4 pb-40 text-apple-text no-scrollbar">
       <div className="flex items-center mb-8">
@@ -119,6 +249,113 @@ export default function Settings() {
         <div className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
           <div className="px-5 py-3 bg-apple-surface border-b border-apple-border">
             <span className="text-xs font-medium text-apple-text-muted tracking-widest">账号与隐私</span>
+          </div>
+          <div className="border-b border-apple-border p-5">
+            <div className="rounded-3xl border border-apple-border bg-apple-surface/70 p-4 shadow-inner dark:bg-white/[0.035]">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-apple-gold/25 bg-apple-gold/12 text-apple-gold">
+                  <Cloud size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-bold text-apple-text">云端账户</div>
+                  <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                    登录后可以把本机存档同步到云端，换设备时再恢复。当前阶段先支持邮箱和密码。
+                  </p>
+                </div>
+              </div>
+
+              {accountSession ? (
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-2xl border border-apple-border bg-apple-surface/80 p-3 text-xs leading-relaxed text-apple-text-muted dark:bg-white/[0.035]">
+                    <div className="font-bold text-apple-text">{accountSession.user.displayName}</div>
+                    <div className="mt-1 break-all">{accountSession.user.email}</div>
+                    <div className="mt-2">云端存档：<span className="font-semibold text-apple-text">{cloudArchiveLabel}</span></div>
+                    <div className="mt-1">核心记录：<span className="font-semibold text-apple-text">{accountSession.user.archiveRecordCount} 条</span></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCloudSync}
+                      disabled={accountBusy}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] disabled:opacity-60"
+                    >
+                      <Upload size={16} />
+                      同步到云端
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloudRestore}
+                      disabled={accountBusy || !accountSession.user.archiveUpdatedAt}
+                      className="flex items-center justify-center gap-2 rounded-2xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-sm font-bold text-apple-text disabled:opacity-50"
+                    >
+                      <Download size={16} />
+                      从云端恢复
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAccountLogout}
+                    disabled={accountBusy}
+                    className="w-full rounded-2xl border border-apple-border bg-apple-surface/70 px-4 py-3 text-sm font-bold text-apple-text-muted"
+                  >
+                    退出云端账户
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-2 rounded-2xl bg-apple-surface-hover p-1">
+                    <button
+                      type="button"
+                      onClick={() => setAccountMode('login')}
+                      className={`rounded-xl py-2 text-xs font-bold ${accountMode === 'login' ? 'bg-apple-gold text-[#121018]' : 'text-apple-text-muted'}`}
+                    >
+                      登录
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAccountMode('register')}
+                      className={`rounded-xl py-2 text-xs font-bold ${accountMode === 'register' ? 'bg-apple-gold text-[#121018]' : 'text-apple-text-muted'}`}
+                    >
+                      注册
+                    </button>
+                  </div>
+                  {accountMode === 'register' && (
+                    <AccountInput
+                      icon={<UserRound size={15} />}
+                      value={accountDisplayName}
+                      onChange={setAccountDisplayName}
+                      placeholder="昵称，例如：星轨旅人"
+                    />
+                  )}
+                  <AccountInput
+                    icon={<Mail size={15} />}
+                    value={accountEmail}
+                    onChange={setAccountEmail}
+                    placeholder="邮箱"
+                    type="email"
+                  />
+                  <AccountInput
+                    icon={<KeyRound size={15} />}
+                    value={accountPassword}
+                    onChange={setAccountPassword}
+                    placeholder="密码，至少 8 位"
+                    type="password"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAccountSubmit}
+                    disabled={accountBusy}
+                    className="w-full rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] disabled:opacity-60"
+                  >
+                    {accountBusy ? '处理中...' : accountMode === 'login' ? '登录并查看云端存档' : '创建账户'}
+                  </button>
+                </div>
+              )}
+
+              {accountNotice && (
+                <NoticeBox notice={accountNotice} />
+              )}
+            </div>
           </div>
           <SettingRow icon={<Shield size={18} />} title="隐私设置" onClick={() => navigate('/app/settings/privacy')} />
           <SettingRow icon={<Bell size={18} />} title="通知管理" onClick={() => navigate('/app/settings/notifications')} />
@@ -241,7 +478,7 @@ export default function Settings() {
             >
               <h3 className="font-sans font-bold text-2xl text-apple-text mb-4">清除所有数据</h3>
               <p className="text-apple-text-muted mb-8 text-sm">
-                此操作会清除本机的日记、塔罗记录、八字档案、沙盘推演、守护消息、能量和权益状态。建议先导出存档备份。
+                此操作会清除本机的日记、塔罗记录、八字档案、沙盘推演、守护消息和能量；已领取的试用记录与生效权益不会重置。建议先导出存档备份。
               </p>
               <div className="flex w-full gap-3">
                 <button 
@@ -308,10 +545,10 @@ export default function Settings() {
   );
 }
 
-function formatBackupTime(value: string | null) {
-  if (!value) return '还没有手动备份';
+function formatBackupTime(value: string | null | undefined, emptyLabel = '还没有手动备份') {
+  if (!value) return emptyLabel;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '还没有手动备份';
+  if (Number.isNaN(date.getTime())) return emptyLabel;
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -319,6 +556,59 @@ function formatBackupTime(value: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function getAccountErrorMessage(error: any, fallback = '账户请求失败，请稍后再试。') {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  if (!message) return fallback;
+  if (message.includes('AUTH_SESSION_SECRET') || message.includes('Netlify') || message.includes('Blobs')) {
+    return '云端账户暂未开通，请稍后再试。';
+  }
+  return message;
+}
+
+function AccountInput({
+  icon,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  icon: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: React.HTMLInputTypeAttribute;
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded-2xl border border-apple-border bg-apple-surface/80 px-3 py-3 text-apple-text-muted focus-within:border-apple-gold/60 focus-within:text-apple-gold dark:bg-white/[0.035]">
+      <span className="shrink-0">{icon}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete={type === 'password' ? 'current-password' : type === 'email' ? 'email' : 'nickname'}
+        className="min-w-0 flex-1 bg-transparent text-sm font-medium text-apple-text placeholder:text-apple-text-muted/70 outline-none"
+      />
+    </label>
+  );
+}
+
+function NoticeBox({ notice }: { notice: BackupNotice }) {
+  const isError = notice.type === 'error';
+  return (
+    <div
+      className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+        isError
+          ? 'border-red-500/25 bg-red-500/10 text-red-300'
+          : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text'
+      }`}
+    >
+      {isError ? <AlertCircle size={15} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-apple-gold" />}
+      <span>{notice.message}</span>
+    </div>
+  );
 }
 
 function ArchiveStat({ label, value }: { label: string; value: string }) {

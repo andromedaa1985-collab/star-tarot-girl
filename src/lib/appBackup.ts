@@ -1,3 +1,11 @@
+import {
+  PLUS_TRIAL_LEDGER_KEY,
+  defaultMembership,
+  isPlusActive,
+  normalizeMembership,
+  type MembershipState,
+} from './membership';
+
 const BACKUP_FORMAT = 'astro-rail-local-archive';
 const BACKUP_VERSION = 1;
 const ROLLBACK_KEY = 'starrail:lastImportRollback';
@@ -99,6 +107,10 @@ export interface AutoRecoveryMeta {
   sizeBytes: number;
 }
 
+interface ClearAppStorageOptions {
+  preserveEntitlements?: boolean;
+}
+
 function parseStoredValue(key: string, raw: string): StorageValue {
   if (RAW_STRING_KEYS.has(key)) return raw;
   try {
@@ -121,6 +133,25 @@ function writeValue(key: string, value: StorageValue) {
     return;
   }
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function readMembershipForClear(): MembershipState | null {
+  const raw = localStorage.getItem('membership');
+  if (!raw) return null;
+  try {
+    return normalizeMembership(JSON.parse(raw));
+  } catch {
+    return normalizeMembership(null);
+  }
+}
+
+function shouldPreserveMembership(membership: MembershipState) {
+  return (
+    membership.plan === 'tester' ||
+    isPlusActive(membership) ||
+    membership.trialUsed ||
+    membership.unlocks.length > 0
+  );
 }
 
 function asArray(value: StorageValue): unknown[] | null {
@@ -372,10 +403,35 @@ export function getBackupSummary(): BackupSummary {
   };
 }
 
-export function clearAppStorage() {
+export function clearAppStorage(options: ClearAppStorageOptions = {}) {
+  const { preserveEntitlements = true } = options;
+  const preservedMembership = readMembershipForClear();
+  const trialLedger =
+    localStorage.getItem(PLUS_TRIAL_LEDGER_KEY) ||
+    (preservedMembership?.trialUsed
+      ? JSON.stringify({ used: true, migratedAt: new Date().toISOString() })
+      : null);
+
   APP_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   localStorage.removeItem('lastManualBackupAt');
   localStorage.removeItem(AUTO_RECOVERY_META_KEY);
+
+  if (trialLedger) {
+    localStorage.setItem(PLUS_TRIAL_LEDGER_KEY, trialLedger);
+  }
+
+  if (preserveEntitlements && preservedMembership && shouldPreserveMembership(preservedMembership)) {
+    localStorage.setItem(
+      'membership',
+      JSON.stringify({
+        ...preservedMembership,
+        trialUsed: preservedMembership.trialUsed || Boolean(trialLedger),
+      }),
+    );
+  } else if (trialLedger) {
+    localStorage.setItem('membership', JSON.stringify({ ...defaultMembership, trialUsed: true }));
+  }
+
   try {
     indexedDB.deleteDatabase(AUTO_RECOVERY_DB);
   } catch {

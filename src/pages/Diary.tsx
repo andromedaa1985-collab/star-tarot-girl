@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, ChevronRight, Loader2, BrainCircuit, History } from 'lucide-react';
+import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppContext, DiaryEntry, ReviewEntry } from '../store';
 import clsx from 'clsx';
 import { recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
+import { isPlusActive } from '../lib/membership';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -75,9 +77,83 @@ function sameIdSet(a: string[], b: string[]) {
   return sortedA.every((id, index) => id === sortedB[index]);
 }
 
+type DiaryReviewMeta = Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> & Partial<Pick<ReviewEntry, 'date' | 'entryIds'>>;
+
+const DIARY_KEYWORD_HINTS = ['工作', '关系', '恋爱', '家人', '焦虑', '压力', '选择', '金钱', '学习', '失眠', '疲惫', '机会', '边界', '自我'];
+
+function getMoodLabel(mood: DiaryEntry['mood']) {
+  return MOODS.find((item) => item.value === mood)?.label || '未记录';
+}
+
+function compactText(text: string, limit = 58) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+function cleanReviewContent(content: string) {
+  return content.replace(/\*\*/g, '').replace(/#/g, '').trim();
+}
+
+function getReviewEntries(review: DiaryReviewMeta, entries: DiaryEntry[]) {
+  if (review.entryIds?.length) {
+    const idSet = new Set(review.entryIds);
+    return entries.filter((entry) => idSet.has(entry.id));
+  }
+  if (review.startDate && review.endDate) {
+    return getEntriesInRange(entries, review.startDate, review.endDate);
+  }
+  return [];
+}
+
+function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) {
+  const cleanContent = cleanReviewContent(content);
+  const lines = cleanContent.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const sourceText = `${cleanContent} ${entries.map((entry) => `${entry.content} ${(entry.tags || []).join(' ')}`).join(' ')}`;
+  const keywordCounts = new Map<string, number>();
+
+  entries.forEach((entry) => {
+    entry.tags?.forEach((tag) => {
+      const normalized = tag.trim();
+      if (normalized) keywordCounts.set(normalized, (keywordCounts.get(normalized) || 0) + 2);
+    });
+  });
+  DIARY_KEYWORD_HINTS.forEach((keyword) => {
+    if (sourceText.includes(keyword)) keywordCounts.set(keyword, (keywordCounts.get(keyword) || 0) + 1);
+  });
+
+  const keywords = [...keywordCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([keyword]) => keyword)
+    .slice(0, 5);
+
+  const sortedEntries = [...entries].sort((a, b) => parseDateKey(a.date).getTime() - parseDateKey(b.date).getTime());
+  const timeline = sortedEntries.slice(-4).map((entry) => ({
+    id: entry.id,
+    date: entry.date.slice(5).replace('-', '/'),
+    mood: getMoodLabel(entry.mood),
+    content: compactText(entry.content, 42),
+  }));
+
+  const adviceLines = lines
+    .filter((line) => /建议|可以|先|试着|提醒|适合|不必|别|留意|照顾/.test(line))
+    .slice(0, 2);
+  const fallbackAdvice = lines.slice(-2).filter(Boolean);
+
+  return {
+    title: `${meta?.rangeLabel || '近期'}命运档案`,
+    dateRange: formatDateRange(meta?.startDate, meta?.endDate) || meta?.date || '',
+    entryCount: typeof meta?.entryCount === 'number' ? meta.entryCount : entries.length,
+    keywords: keywords.length > 0 ? keywords : ['情绪', '节奏', '自我'],
+    summary: compactText(lines[0] || '这份复盘会慢慢记录你的情绪、选择和生活节奏。', 96),
+    timeline,
+    advice: adviceLines.length > 0 ? adviceLines : fallbackAdvice,
+  };
+}
+
 export default function Diary() {
   useTrustedTime();
-  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents } = useAppContext();
+  const navigate = useNavigate();
+  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership } = useAppContext();
   const [isAdding, setIsAdding] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState<string | null>(null);
@@ -99,6 +175,38 @@ export default function Diary() {
   const reviewWindow = getReviewWindow(reviewRange, trustedNow);
   const scopedDiaryEntries = getEntriesInRange(diaryEntries, reviewWindow.startDate, reviewWindow.endDate);
   const reviewRangeText = formatDateRange(reviewWindow.startDate, reviewWindow.endDate);
+  const plusActive = isPlusActive(membership, trustedNow);
+  const isPremiumReviewRange = reviewRange !== 'today';
+
+  const openPlusForReview = () => {
+    navigate('/app/profile?plus=1&plan=plus_monthly&from=diary_review');
+  };
+
+  const askTarotFromReview = (content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) => {
+    const archive = buildDiaryReviewArchive(content, meta, entries);
+    const prompt = [
+      `请沿着我的「${archive.title}」继续看。`,
+      archive.dateRange ? `时间范围：${archive.dateRange}。` : '',
+      `关键词：${archive.keywords.join('、')}。`,
+      `复盘摘要：${archive.summary}`,
+      '我想知道接下来最需要照顾的重点，以及今天可以先做哪一件小事。',
+    ].filter(Boolean).join('\n');
+
+    try {
+      localStorage.setItem('draft:home:input', JSON.stringify(prompt));
+    } catch {
+      // Draft handoff is optional. Navigation still works if storage is unavailable.
+    }
+    navigate('/app');
+  };
+
+  const handleSelectReviewRange = (rangeKey: ReviewRangeKey) => {
+    if (rangeKey !== 'today' && !plusActive) {
+      openPlusForReview();
+      return;
+    }
+    setReviewRange(rangeKey);
+  };
 
   const handleSaveEntry = () => {
     if (!newContent.trim()) return;
@@ -126,6 +234,11 @@ export default function Diary() {
   };
 
   const handleReview = async () => {
+    if (isPremiumReviewRange && !plusActive) {
+      openPlusForReview();
+      return;
+    }
+
     if (scopedDiaryEntries.length === 0) {
       setReviewResult(`${reviewWindow.label}还没有日记可复盘。先写一篇，星轨才能看见这段时间真正发生了什么。`);
       setReviewResultMeta({
@@ -145,7 +258,7 @@ export default function Diary() {
     );
 
     if (existingReview) {
-      setReviewResult(`这段时间已经复盘过了，我把上次的结果放在这里。\n\n${existingReview.content}`);
+      setReviewResult(existingReview.content);
       setReviewResultMeta({
         rangeLabel: existingReview.rangeLabel || reviewWindow.label,
         startDate: existingReview.startDate || reviewWindow.startDate,
@@ -292,44 +405,62 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               <div className="min-w-0">
                 <div className="text-sm font-bold text-apple-text">选择复盘范围</div>
                 <div className="mt-0.5 text-[11px] text-apple-text-muted">
-                  {reviewRangeText} · {scopedDiaryEntries.length} 篇
+                  今日复盘免费 · 周期复盘 Plus 可用
                 </div>
               </div>
-              <div className="shrink-0 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
-                不重复复盘
+              <div className="flex shrink-0 items-center gap-1 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+                {plusActive ? <Crown size={12} /> : <Lock size={12} />}
+                {plusActive ? 'Plus 已开通' : 'Plus 解锁'}
               </div>
             </div>
             <div className="grid grid-cols-4 gap-2">
               {REVIEW_RANGES.map((range) => {
                 const active = reviewRange === range.key;
+                const locked = range.key !== 'today' && !plusActive;
                 return (
                   <button
                     key={range.key}
                     type="button"
-                    onClick={() => setReviewRange(range.key)}
+                    onClick={() => handleSelectReviewRange(range.key)}
                     className={clsx(
-                      'rounded-full border px-2 py-2 text-xs font-bold transition-all',
+                      'relative rounded-full border px-2 py-2 text-xs font-bold transition-all',
                       active
                         ? 'border-apple-gold bg-apple-gold text-[#17130f] shadow-[0_10px_24px_rgba(185,123,40,0.18)]'
-                        : 'border-apple-border bg-apple-bg/50 text-apple-text-muted hover:border-apple-gold/35 hover:text-apple-text dark:border-white/10 dark:bg-black/14'
+                        : locked
+                          ? 'border-apple-border bg-apple-bg/40 text-apple-text-muted/60 hover:border-apple-gold/35 hover:text-apple-gold dark:border-white/10 dark:bg-black/14'
+                          : 'border-apple-border bg-apple-bg/50 text-apple-text-muted hover:border-apple-gold/35 hover:text-apple-text dark:border-white/10 dark:bg-black/14'
                     )}
+                    title={locked ? '开通 Plus 后可用' : range.label}
                   >
-                    {range.label}
+                    <span className="inline-flex items-center justify-center gap-1">
+                      {locked && <Lock size={11} />}
+                      {range.label}
+                    </span>
                   </button>
                 );
               })}
+            </div>
+            <div className="mt-3 rounded-2xl bg-apple-bg/50 px-3 py-2 text-[11px] leading-relaxed text-apple-text-muted dark:bg-black/14">
+              当前范围：{reviewRangeText} · {scopedDiaryEntries.length} 篇
             </div>
           </section>
           
           <button
             onClick={handleReview}
             disabled={isReviewing}
-            className="bg-gradient-to-br from-apple-gold to-[#c88a34] rounded-3xl p-5 flex flex-col items-center justify-center gap-3 shadow-[0_16px_34px_rgba(185,123,40,0.20)] text-[#17130f] hover:opacity-90 transition-all disabled:opacity-70 dark:from-[#f1cf80] dark:to-[#b98436] dark:text-[#17130f] dark:shadow-[0_14px_34px_rgba(244,207,131,0.18)]"
+            className={clsx(
+              'rounded-3xl p-5 flex flex-col items-center justify-center gap-3 transition-all disabled:opacity-70',
+              isPremiumReviewRange && !plusActive
+                ? 'border border-apple-gold/30 bg-apple-surface text-apple-gold shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:bg-[#141821]/82'
+                : 'bg-gradient-to-br from-apple-gold to-[#c88a34] shadow-[0_16px_34px_rgba(185,123,40,0.20)] text-[#17130f] hover:opacity-90 dark:from-[#f1cf80] dark:to-[#b98436] dark:text-[#17130f] dark:shadow-[0_14px_34px_rgba(244,207,131,0.18)]'
+            )}
           >
             <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
-              {isReviewing ? <Loader2 size={24} className="animate-spin" /> : <BrainCircuit size={24} />}
+              {isReviewing ? <Loader2 size={24} className="animate-spin" /> : isPremiumReviewRange && !plusActive ? <Lock size={24} /> : <BrainCircuit size={24} />}
             </div>
-            <span className="font-medium text-sm tracking-widest">{isReviewing ? '复盘中...' : `${reviewWindow.label}复盘`}</span>
+            <span className="font-medium text-sm tracking-widest">
+              {isReviewing ? '复盘中...' : isPremiumReviewRange && !plusActive ? '开通 Plus' : `${reviewWindow.label}复盘`}
+            </span>
           </button>
 
           <button
@@ -352,29 +483,13 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <div className="bg-apple-surface backdrop-blur-xl border border-apple-accent/28 rounded-3xl p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] relative dark:border-apple-gold/24 dark:shadow-[0_14px_42px_rgba(244,207,131,0.12)]">
-                <button 
-                  onClick={() => setReviewResult(null)}
-                  className="absolute top-4 right-4 text-apple-text-muted hover:text-apple-text"
-                >
-                  <X size={18} />
-                </button>
-                <div className="flex items-center gap-2 mb-4 text-apple-accent dark:text-apple-gold">
-                  <Sparkles size={20} />
-                  <div>
-                    <h3 className="font-sans font-bold text-lg">{reviewResultMeta?.rangeLabel || reviewWindow.label}命运复盘</h3>
-                    {reviewResultMeta?.startDate && reviewResultMeta?.endDate && (
-                      <div className="mt-0.5 text-[11px] font-medium tracking-wider text-apple-text-muted">
-                        {formatDateRange(reviewResultMeta.startDate, reviewResultMeta.endDate)}
-                        {typeof reviewResultMeta.entryCount === 'number' ? ` · ${reviewResultMeta.entryCount} 篇` : ''}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="text-sm leading-relaxed text-apple-text whitespace-pre-wrap">
-                  {reviewResult}
-                </div>
-              </div>
+              <DiaryReviewArchiveCard
+                content={reviewResult}
+                meta={reviewResultMeta}
+                entries={scopedDiaryEntries}
+                onClose={() => setReviewResult(null)}
+                onContinue={() => askTarotFromReview(reviewResult, reviewResultMeta, scopedDiaryEntries)}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -558,27 +673,20 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                     <p className="text-sm text-apple-text-muted">暂无复盘记录</p>
                   </div>
                 ) : (
-                  reviewHistory.map((review) => (
-                    <div key={review.id} className="bg-apple-surface rounded-2xl p-5 border border-apple-border">
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-bold text-apple-text">{review.rangeLabel || '近期复盘'}</div>
-                          {typeof review.entryCount === 'number' && (
-                            <div className="rounded-full bg-apple-gold/10 px-2 py-1 text-[10px] font-bold text-apple-gold">
-                              {review.entryCount} 篇
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-1 font-mono text-[11px] font-bold tracking-widest text-apple-text-muted">
-                          {formatDateRange(review.startDate, review.endDate) || review.date}
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-apple-text-muted/70">生成于 {review.date}</div>
-                      </div>
-                      <div className="text-sm leading-relaxed text-apple-text whitespace-pre-wrap">
-                        {review.content}
-                      </div>
-                    </div>
-                  ))
+                  reviewHistory.map((review) => {
+                    const entries = getReviewEntries(review, diaryEntries);
+                    return (
+                      <React.Fragment key={review.id}>
+                        <DiaryReviewArchiveCard
+                          content={review.content}
+                          meta={review}
+                          entries={entries}
+                          compact
+                          onContinue={() => askTarotFromReview(review.content, review, entries)}
+                        />
+                      </React.Fragment>
+                    );
+                  })
                 )}
               </div>
             </motion.div>
@@ -593,6 +701,139 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 function Portal({ children }: { children: React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(children, document.body);
+}
+
+function DiaryReviewArchiveCard({
+  content,
+  meta,
+  entries,
+  compact = false,
+  onClose,
+  onContinue,
+}: {
+  content: string;
+  meta: DiaryReviewMeta | null;
+  entries: DiaryEntry[];
+  compact?: boolean;
+  onClose?: () => void;
+  onContinue?: () => void;
+}) {
+  const archive = buildDiaryReviewArchive(content, meta, entries);
+
+  return (
+    <div
+      className={clsx(
+        'relative overflow-hidden border border-apple-accent/24 bg-apple-surface shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:border-apple-gold/22 dark:bg-[#111722]/86 dark:shadow-[0_14px_42px_rgba(0,0,0,0.34)]',
+        compact ? 'rounded-[26px] p-4' : 'rounded-3xl p-5 sm:p-6',
+      )}
+    >
+      <div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-apple-gold/12 blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/36 to-transparent" />
+
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 z-10 rounded-full bg-apple-surface-hover p-2 text-apple-text-muted hover:text-apple-text"
+          aria-label="关闭复盘档案"
+        >
+          <X size={16} />
+        </button>
+      )}
+
+      <div className="relative z-10">
+        <div className="flex items-start justify-between gap-3 pr-10">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-apple-gold">
+              <FileText size={14} />
+              复盘档案
+            </div>
+            <h3 className="mt-1 line-clamp-2 text-lg font-black text-apple-text">{archive.title}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-apple-text-muted">
+              <span className="inline-flex items-center gap-1">
+                <Calendar size={12} />
+                {archive.dateRange || '近期记录'}
+              </span>
+              <span>{archive.entryCount} 篇日记</span>
+            </div>
+          </div>
+          {!onClose && onContinue && (
+            <button
+              onClick={onContinue}
+              className="shrink-0 rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] shadow-[0_12px_28px_rgba(185,123,40,0.18)] transition-transform active:scale-[0.98]"
+            >
+              继续问
+            </button>
+          )}
+        </div>
+
+        <p className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg/45 p-3 text-sm leading-relaxed text-apple-text dark:border-white/10 dark:bg-black/16">
+          {archive.summary}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {archive.keywords.map((keyword) => (
+            <span
+              key={keyword}
+              className="inline-flex items-center gap-1 rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[11px] font-bold text-apple-gold"
+            >
+              <Tags size={11} />
+              {keyword}
+            </span>
+          ))}
+        </div>
+
+        {archive.timeline.length > 0 && (
+          <div className="mt-4 rounded-[22px] border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-black/16">
+            <div className="mb-2 flex items-center gap-2 text-xs font-black text-apple-text">
+              <History size={14} className="text-apple-gold" />
+              情绪时间线
+            </div>
+            <div className="space-y-2">
+              {archive.timeline.map((item) => (
+                <div key={item.id} className="grid grid-cols-[46px_minmax(0,1fr)] gap-2">
+                  <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
+                  <div className="min-w-0 border-l border-apple-gold/24 pl-3">
+                    <div className="text-xs font-black text-apple-text">{item.mood}</div>
+                    <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{item.content}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {archive.advice.length > 0 && (
+          <div className="mt-3 grid gap-2">
+            {archive.advice.map((item, index) => (
+              <div key={`${item}-${index}`} className="rounded-[18px] bg-apple-surface-hover px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                <span className="mr-1 font-black text-apple-text">留意 {index + 1}</span>
+                {item}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!compact && (
+          <details className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg/38 p-3 dark:border-white/10 dark:bg-black/14">
+            <summary className="cursor-pointer text-xs font-black text-apple-text-muted">查看完整复盘</summary>
+            <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-apple-text">
+              {cleanReviewContent(content)}
+            </div>
+          </details>
+        )}
+
+        {onClose && onContinue && (
+          <button
+            onClick={onContinue}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-3 text-sm font-black text-[#17130f] shadow-[0_14px_30px_rgba(185,123,40,0.20)] transition-transform active:scale-[0.99]"
+          >
+            <MessageCircle size={16} />
+            带着这份档案继续问
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function DiaryStat({ label, value }: { label: string; value: string }) {

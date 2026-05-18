@@ -54,10 +54,14 @@ const ritualSteps = [
 
 export default function Landing() {
   const navigate = useNavigate();
+  const openAuth = React.useCallback(
+    (nextPath = '/app') => navigate(`/auth?next=${encodeURIComponent(nextPath)}`),
+    [navigate],
+  );
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#07080d] text-[#fff9ed] selection:bg-[#f4cf83] selection:text-[#0b0910]">
-      <Hero onEnter={() => navigate('/app')} />
+      <Hero onEnter={() => openAuth('/app')} />
       <section className="relative border-y border-white/10 bg-[#090a12]/82 px-5 py-4 backdrop-blur-2xl sm:px-8">
         <div className="mx-auto grid max-w-6xl grid-cols-3 gap-2 sm:gap-4">
           {proofPoints.map(([value, label]) => (
@@ -71,9 +75,9 @@ export default function Landing() {
           ))}
         </div>
       </section>
-      <Features onOpen={(path) => navigate(path)} />
+      <Features onOpen={(path) => openAuth(path)} />
       <CompanionLooks />
-      <RevenuePath onEnter={() => navigate('/app')} />
+      <RevenuePath onEnter={() => openAuth('/app')} />
     </main>
   );
 }
@@ -148,13 +152,13 @@ function Hero({ onEnter }: { onEnter: () => void }) {
               </span>
             </div>
 
-            <div className="relative mt-5 min-h-[330px] overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.035))]">
-              <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#10131f] to-transparent" />
+            <div className="relative mt-5 aspect-square overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.035))] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
               <img
-                src="/default-pet.png"
+                src="/detail-card-hero.png"
                 alt="星轨塔罗少女"
-                className="absolute bottom-[-10px] left-1/2 h-[350px] max-w-none -translate-x-1/2 object-contain drop-shadow-[0_24px_38px_rgba(0,0,0,0.32)]"
+                className="absolute inset-0 h-full w-full object-cover"
               />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,244,210,0.16),transparent_34%),linear-gradient(180deg,rgba(9,12,22,0)_62%,rgba(9,12,22,0.45)_100%)]" />
             </div>
 
             <div className="mt-4 rounded-[28px] border border-white/12 bg-black/20 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">

@@ -1,9 +1,12 @@
 import serverless from "serverless-http";
+import { connectLambda } from "@netlify/blobs";
 import app from "../../api/index";
 
 const serverlessHandler = serverless(app);
 
 export const handler = (event: any, context: any) => {
+  connectLambda(event);
+
   const path = event.path || "";
   let normalizedPath = path;
 

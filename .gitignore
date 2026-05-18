@@ -18,3 +18,4 @@ coverage/
 /fix-colors.*
 /test*.js
 /test*.ts
+/.data/

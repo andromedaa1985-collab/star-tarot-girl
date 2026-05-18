@@ -4,15 +4,18 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Clock3,
   Compass,
   GitMerge,
   History,
   Loader2,
+  MessageCircle,
   RotateCcw,
   Scale,
   Sparkles,
 } from 'lucide-react';
-import { useAppContext } from '../store';
+import { useNavigate } from 'react-router-dom';
+import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
 
@@ -243,7 +246,68 @@ const getRiskLabel = (value: number) => {
   return '相对稳';
 };
 
+const SIMULATION_KEYWORD_HINTS = ['工作', '关系', '恋爱', '学习', '金钱', '家庭', '迁移', '自我', '合作', '离开', '留下', '机会', '压力', '风险'];
+
+function compactSimulationText(text: string, limit = 68) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+function formatSimulationDate(date?: string) {
+  if (!date) return '刚刚生成';
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return date;
+  return value.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+}
+
+function splitAdviceLines(text: string) {
+  return text
+    .replace(/\*\*/g, '')
+    .split(/[。！？\n]+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+}
+
+function buildSimulationArchive({
+  date,
+  dilemma,
+  choiceA,
+  choiceB,
+  result,
+}: {
+  date?: string;
+  dilemma: string;
+  choiceA: string;
+  choiceB: string;
+  result: SimulationResult;
+}) {
+  const riskA = clampRisk(result.choiceA.riskLevel);
+  const riskB = clampRisk(result.choiceB.riskLevel);
+  const delta = Math.abs(riskA - riskB);
+  const saferLine = delta < 8 ? '两条线风险接近' : riskA < riskB ? 'A 线更稳' : 'B 线更稳';
+  const source = `${dilemma} ${choiceA} ${choiceB} ${result.advice} ${result.choiceA.title} ${result.choiceB.title}`;
+  const keywords = SIMULATION_KEYWORD_HINTS.filter((keyword) => source.includes(keyword)).slice(0, 5);
+  const advice = splitAdviceLines(result.advice);
+
+  return {
+    dateLabel: formatSimulationDate(date),
+    title: `${compactSimulationText(choiceA || 'A 线', 16)} / ${compactSimulationText(choiceB || 'B 线', 16)}`,
+    keywords: keywords.length > 0 ? keywords : ['选择', '代价', '节奏'],
+    saferLine,
+    riskA,
+    riskB,
+    summary: compactSimulationText(dilemma || '这次推演记录了一个重要选择。', 92),
+    timeline: [
+      { label: 'A 线短期', text: result.choiceA.shortTerm },
+      { label: 'B 线短期', text: result.choiceB.shortTerm },
+      { label: '最终提醒', text: advice[0] || result.advice },
+    ],
+  };
+}
+
 export default function Simulator() {
+  const navigate = useNavigate();
   const { baziFormData, simulatorState, setSimulatorState, simulationHistory, setSimulationHistory, profiles, activeProfileId, setAppEvents } = useAppContext();
   const [isSimulating, setIsSimulating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -287,6 +351,40 @@ export default function Simulator() {
     setChoiceB('');
     setDilemma('');
     setFormError(null);
+  };
+
+  const askTarotFromSimulation = (source?: {
+    date?: string;
+    dilemma: string;
+    choiceA: string;
+    choiceB: string;
+    result: SimulationResult;
+  }) => {
+    const activeSource = source || (result ? {
+      date: new Date().toISOString(),
+      dilemma,
+      choiceA,
+      choiceB,
+      result,
+    } : null);
+    if (!activeSource) return;
+
+    const archive = buildSimulationArchive(activeSource);
+    const prompt = [
+      `请沿着我的「沙盘推演档案」继续看。`,
+      `当前问题：${activeSource.dilemma}`,
+      `A 线：${activeSource.choiceA}`,
+      `B 线：${activeSource.choiceB}`,
+      `档案判断：${archive.saferLine}，关键词：${archive.keywords.join('、')}。`,
+      '我想知道今天最适合先验证哪一步，以及哪种代价要提前准备。',
+    ].join('\n');
+
+    try {
+      localStorage.setItem('draft:home:input', JSON.stringify(prompt));
+    } catch {
+      // Draft handoff is optional. Navigation still works if storage is unavailable.
+    }
+    navigate('/app');
   };
 
   const handleSimulate = async () => {
@@ -427,25 +525,30 @@ ${baziContext}
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-black text-apple-text">
                 <History size={16} className="text-apple-gold" />
-                最近推演
+                沙盘档案
               </div>
-              <span className="text-[11px] text-apple-text-muted">点击可回看</span>
+              <span className="text-[11px] text-apple-text-muted">可回看、可继续问</span>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               {simulationHistory.slice(0, 3).map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setDilemma(item.dilemma);
-                    setChoiceA(item.choiceA);
-                    setChoiceB(item.choiceB);
-                    setResult(item.result);
-                  }}
-                  className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface/72 p-3 text-left transition-transform active:scale-[0.98] dark:border-white/10 dark:bg-black/15"
-                >
-                  <div className="line-clamp-1 text-xs font-black text-apple-text">{item.dilemma}</div>
-                  <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{item.advice}</div>
-                </button>
+                <React.Fragment key={item.id}>
+                  <SimulationHistoryCard
+                    item={item}
+                    onOpen={() => {
+                      setDilemma(item.dilemma);
+                      setChoiceA(item.choiceA);
+                      setChoiceB(item.choiceB);
+                      setResult(item.result);
+                    }}
+                    onContinue={() => askTarotFromSimulation({
+                      date: item.date,
+                      dilemma: item.dilemma,
+                      choiceA: item.choiceA,
+                      choiceB: item.choiceB,
+                      result: item.result as SimulationResult,
+                    })}
+                  />
+                </React.Fragment>
               ))}
             </div>
           </section>
@@ -581,6 +684,15 @@ ${baziContext}
               animate={{ opacity: 1, y: 0 }}
               className="space-y-4"
             >
+              <SimulationArchivePanel
+                date={new Date().toISOString()}
+                dilemma={dilemma}
+                choiceA={choiceA}
+                choiceB={choiceB}
+                result={result}
+                onContinue={() => askTarotFromSimulation()}
+              />
+
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <ResultBranch label="A 线" result={result.choiceA} tone="a" />
                 <ResultBranch label="B 线" result={result.choiceB} tone="b" />
@@ -609,6 +721,144 @@ ${baziContext}
             </motion.section>
           )}
         </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function SimulationArchivePanel({
+  date,
+  dilemma,
+  choiceA,
+  choiceB,
+  result,
+  onContinue,
+}: {
+  date?: string;
+  dilemma: string;
+  choiceA: string;
+  choiceB: string;
+  result: SimulationResult;
+  onContinue: () => void;
+}) {
+  const archive = buildSimulationArchive({ date, dilemma, choiceA, choiceB, result });
+
+  return (
+    <div className="relative overflow-hidden rounded-[32px] border border-apple-gold/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,252,246,0.82))] p-5 shadow-[0_18px_48px_rgba(117,82,42,0.13)] backdrop-blur-2xl dark:border-apple-gold/18 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.13),rgba(18,23,34,0.82))] dark:shadow-[0_20px_56px_rgba(0,0,0,0.36)]">
+      <div className="pointer-events-none absolute -right-10 -top-14 h-40 w-40 rounded-full bg-apple-gold/16 blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/42 to-transparent" />
+      <div className="relative z-10 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-apple-gold">
+            <Scale size={14} />
+            推演档案
+          </div>
+          <h2 className="mt-1 line-clamp-2 text-xl font-black text-apple-text">{archive.title}</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-apple-text-muted">
+            <span className="inline-flex items-center gap-1">
+              <Clock3 size={12} />
+              {archive.dateLabel}
+            </span>
+            <span>{archive.saferLine}</span>
+            <span>A {archive.riskA}% / B {archive.riskB}%</span>
+          </div>
+        </div>
+        <button
+          onClick={onContinue}
+          className="shrink-0 rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] shadow-[0_12px_28px_rgba(185,123,40,0.20)] transition-transform active:scale-[0.98]"
+        >
+          继续问
+        </button>
+      </div>
+
+      <p className="relative z-10 mt-4 rounded-[20px] border border-apple-border bg-apple-surface/70 p-3 text-sm leading-relaxed text-apple-text dark:border-white/10 dark:bg-black/16">
+        {archive.summary}
+      </p>
+
+      <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
+        {archive.keywords.map((keyword) => (
+          <span key={keyword} className="rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+            {keyword}
+          </span>
+        ))}
+      </div>
+
+      <div className="relative z-10 mt-4 grid gap-2 sm:grid-cols-3">
+        {archive.timeline.map((item) => (
+          <div key={item.label} className="rounded-[20px] border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-black/16">
+            <div className="text-xs font-black text-apple-text">{item.label}</div>
+            <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-apple-text-muted">{item.text}</p>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={onContinue}
+        className="relative z-10 mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-apple-gold/24 bg-apple-surface/70 py-3 text-sm font-black text-apple-gold transition-transform active:scale-[0.99] dark:bg-black/18"
+      >
+        <MessageCircle size={16} />
+        带着这次推演问塔罗
+      </button>
+    </div>
+  );
+}
+
+function SimulationHistoryCard({
+  item,
+  onOpen,
+  onContinue,
+}: {
+  item: SimulationHistoryEntry;
+  onOpen: () => void;
+  onContinue: () => void;
+}) {
+  const result = item.result as SimulationResult;
+  const archive = buildSimulationArchive({
+    date: item.date,
+    dilemma: item.dilemma,
+    choiceA: item.choiceA,
+    choiceB: item.choiceB,
+    result,
+  });
+
+  return (
+    <div className="min-w-0 rounded-[22px] border border-apple-border bg-apple-surface/72 p-3 text-left dark:border-white/10 dark:bg-black/15">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[10px] font-black text-apple-gold">
+            <Scale size={12} />
+            {archive.dateLabel}
+          </div>
+          <div className="mt-1 line-clamp-2 text-xs font-black leading-snug text-apple-text">{archive.summary}</div>
+        </div>
+        <div className="shrink-0 rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-bold text-apple-gold">
+          {archive.saferLine}
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {archive.keywords.slice(0, 3).map((keyword) => (
+          <span key={keyword} className="rounded-full bg-apple-bg/55 px-2 py-0.5 text-[10px] text-apple-text-muted dark:bg-white/[0.055]">
+            {keyword}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-full border border-apple-border bg-apple-surface/80 px-3 py-2 text-[11px] font-black text-apple-text-muted transition-transform active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.045]"
+        >
+          回看
+        </button>
+        <button
+          type="button"
+          onClick={onContinue}
+          className="rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] transition-transform active:scale-[0.98]"
+        >
+          继续问
+        </button>
       </div>
     </div>
   );

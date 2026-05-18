@@ -322,11 +322,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   });
   const [membership, setMembership] = useState<MembershipState>(() => {
     const saved = localStorage.getItem('membership');
-    if (!saved) return defaultMembership;
+    if (!saved) return normalizeMembership(defaultMembership);
     try {
       return normalizeMembership(JSON.parse(saved));
     } catch {
-      return defaultMembership;
+      return normalizeMembership(defaultMembership);
     }
   });
   const [engagement, setEngagement] = useState<EngagementState>(() => {

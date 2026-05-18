@@ -43,6 +43,52 @@ const navItems = [
   { to: '/app/profile', label: '我的', icon: <User size={20} /> },
 ];
 
+const TAROT_NAV_POSITION_KEY = 'astroRailTarotFloatingNavPosition';
+const TAROT_NAV_CLOSED_SIZE = 48;
+const TAROT_NAV_OPEN_WIDTH = 332;
+const TAROT_NAV_EDGE = 8;
+
+type FloatingNavPosition = {
+  x: number;
+  y: number;
+};
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const getDefaultFloatingNavPosition = (): FloatingNavPosition => {
+  if (typeof window === 'undefined') return { x: 320, y: 560 };
+  return {
+    x: Math.max(TAROT_NAV_EDGE, window.innerWidth - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+    y: Math.max(TAROT_NAV_EDGE, window.innerHeight - 260),
+  };
+};
+
+const getFloatingNavWidth = (open: boolean) => {
+  if (typeof window === 'undefined') return open ? TAROT_NAV_OPEN_WIDTH : TAROT_NAV_CLOSED_SIZE;
+  return open ? Math.min(TAROT_NAV_OPEN_WIDTH, window.innerWidth - TAROT_NAV_EDGE * 2) : TAROT_NAV_CLOSED_SIZE;
+};
+
+const getFloatingNavBounds = (open: boolean) => {
+  if (typeof window === 'undefined') {
+    return { minX: TAROT_NAV_EDGE, maxX: 360, minY: TAROT_NAV_EDGE, maxY: 720 };
+  }
+  const openWidth = getFloatingNavWidth(open);
+  return {
+    minX: open ? TAROT_NAV_EDGE + openWidth - TAROT_NAV_CLOSED_SIZE : TAROT_NAV_EDGE,
+    maxX: Math.max(TAROT_NAV_EDGE, window.innerWidth - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+    minY: TAROT_NAV_EDGE,
+    maxY: Math.max(TAROT_NAV_EDGE, window.innerHeight - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+  };
+};
+
+const clampFloatingNavPosition = (position: FloatingNavPosition, open: boolean): FloatingNavPosition => {
+  const bounds = getFloatingNavBounds(open);
+  return {
+    x: clampNumber(position.x, bounds.minX, bounds.maxX),
+    y: clampNumber(position.y, bounds.minY, bounds.maxY),
+  };
+};
+
 export default function Layout() {
   const location = useLocation();
   const isTarotHome = location.pathname === '/app';
@@ -115,8 +161,89 @@ function BottomDock() {
 
 function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const { membership } = useAppContext();
+  const [position, setPosition] = React.useState<FloatingNavPosition>(() => {
+    if (typeof window === 'undefined') return getDefaultFloatingNavPosition();
+    try {
+      const saved = localStorage.getItem(TAROT_NAV_POSITION_KEY);
+      return saved ? clampFloatingNavPosition(JSON.parse(saved), false) : getDefaultFloatingNavPosition();
+    } catch {
+      return getDefaultFloatingNavPosition();
+    }
+  });
+  const dragRef = React.useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+
+  const navWidth = getFloatingNavWidth(open);
+  const displayPosition = clampFloatingNavPosition(position, open);
+  const displayLeft = open
+    ? clampNumber(displayPosition.x - navWidth + TAROT_NAV_CLOSED_SIZE, TAROT_NAV_EDGE, window.innerWidth - navWidth - TAROT_NAV_EDGE)
+    : displayPosition.x;
+
+  React.useEffect(() => {
+    setPosition((current) => clampFloatingNavPosition(current, open));
+  }, [open]);
+
+  React.useEffect(() => {
+    const handleResize = () => setPosition((current) => clampFloatingNavPosition(current, open));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [open]);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(TAROT_NAV_POSITION_KEY, JSON.stringify(position));
+    } catch {
+      // Ignore storage failures; dragging should still work for this session.
+    }
+  }, [position]);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (open && (event.target as HTMLElement).closest('a,button')) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: position.x,
+      originY: position.y,
+      moved: false,
+    };
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaX) + Math.abs(deltaY) > 4) drag.moved = true;
+    setPosition(clampFloatingNavPosition({ x: drag.originX + deltaX, y: drag.originY + deltaY }, open));
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!open && drag && !drag.moved) onToggle();
+  };
+
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-[86px] z-50 flex justify-center px-4">
+    <div
+      className="pointer-events-none fixed z-50"
+      style={{
+        left: displayLeft,
+        top: displayPosition.y,
+        width: open ? navWidth : TAROT_NAV_CLOSED_SIZE,
+      }}
+    >
       <AnimatePresence initial={false}>
         {open ? (
           <motion.nav
@@ -125,7 +252,12 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-            className="pointer-events-auto flex h-12 max-w-[calc(100vw-32px)] items-center gap-1 rounded-[24px] border border-[#e2cfb5]/85 bg-[#fff8ec]/90 px-1.5 shadow-[0_18px_52px_rgba(117,82,42,0.16),inset_0_1px_0_rgba(255,255,255,0.82)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111621]/88 dark:shadow-[0_18px_52px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            className="pointer-events-auto flex h-12 cursor-grab touch-none items-center gap-1 rounded-[24px] border border-[#e2cfb5]/85 bg-[#fff8ec]/90 px-1.5 shadow-[0_18px_52px_rgba(117,82,42,0.16),inset_0_1px_0_rgba(255,255,255,0.82)] backdrop-blur-2xl active:cursor-grabbing dark:border-white/10 dark:bg-[#111621]/88 dark:shadow-[0_18px_52px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]"
+            style={{ width: navWidth }}
           >
             {navItems.map((item) => (
               <React.Fragment key={item.to}>
@@ -142,8 +274,8 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
               type="button"
               onClick={onToggle}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#dcc7aa]/85 bg-[#f5e7d3]/80 text-[#9a641c] transition-transform active:scale-95 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#f4cf83]"
-              aria-label="close navigation"
-              title="close navigation"
+              aria-label="收起导航"
+              title="收起导航"
             >
               <X size={17} />
             </button>
@@ -155,10 +287,13 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 14 }}
             type="button"
-            onClick={onToggle}
-            className="pointer-events-auto fixed bottom-[98px] right-0 flex h-12 w-9 items-center justify-start rounded-l-[22px] border border-r-0 border-[#d7c1a2]/90 bg-[#fff6e8]/90 pl-2 text-[#9a641c] opacity-95 shadow-[0_16px_44px_rgba(117,82,42,0.16)] backdrop-blur-2xl transition-transform active:scale-95 dark:border-white/12 dark:bg-[#111621]/78 dark:text-[#f4cf83] dark:shadow-[0_16px_44px_rgba(0,0,0,0.32)]"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            className="pointer-events-auto flex h-12 w-12 cursor-grab touch-none items-center justify-center rounded-[20px] border border-[#d7c1a2]/90 bg-[#fff6e8]/90 text-[#9a641c] opacity-95 shadow-[0_16px_44px_rgba(117,82,42,0.16)] backdrop-blur-2xl transition-transform active:scale-95 active:cursor-grabbing dark:border-white/12 dark:bg-[#111621]/78 dark:text-[#f4cf83] dark:shadow-[0_16px_44px_rgba(0,0,0,0.32)]"
             aria-label="open navigation"
-            title="open navigation"
+            title="拖动导航，点击展开"
           >
             <Sparkles size={18} />
           </motion.button>

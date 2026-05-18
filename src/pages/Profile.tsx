@@ -9,6 +9,7 @@ import {
   activateTesterAccess,
   activatePlusDays,
   addFeatureUnlock,
+  canStartPlusTrial,
   getMembershipLabel,
   getPlusDaysLeft,
   isPlusActive,
@@ -123,6 +124,7 @@ export default function Profile() {
   const lastCheckInLabel = lastCheckInDate ? lastCheckInDate.replace(/-/g, '.') : '还没开始';
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
+  const trialAvailable = canStartPlusTrial(membership);
   const membershipLabel = getMembershipLabel(membership);
   const plusDaysLeft = getPlusDaysLeft(membership);
   const paymentOrderId = searchParams.get('order') || '';
@@ -275,7 +277,7 @@ export default function Profile() {
   };
 
   const handleStartTrial = () => {
-    if (membership.trialUsed || plusActive) return;
+    if (!trialAvailable) return;
     setMembership((current) => startPlusTrial(current));
     setEnergy((value) => Math.max(value, 12));
     setPaymentMessage('已开启 24 小时 Plus 试用，能量补到至少 12 点。');
@@ -545,7 +547,7 @@ export default function Profile() {
                   </div>
                 </div>
               </div>
-              {!plusActive && !membership.trialUsed && (
+              {trialAvailable && (
                 <button
                   onClick={handleStartTrial}
                   className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-apple-gold/28 bg-apple-gold/12 py-3 text-sm font-bold text-apple-gold"
