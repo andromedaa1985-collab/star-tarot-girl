@@ -213,6 +213,203 @@ interface BaziResult {
   romance: string;
 }
 
+type FiveElement = '木' | '火' | '土' | '金' | '水';
+type TenGodName = '比肩' | '劫财' | '食神' | '伤官' | '正财' | '偏财' | '正官' | '七杀' | '正印' | '偏印';
+
+const FIVE_ELEMENTS: FiveElement[] = ['木', '火', '土', '金', '水'];
+const TEN_GODS: TenGodName[] = ['比肩', '劫财', '食神', '伤官', '正财', '偏财', '正官', '七杀', '正印', '偏印'];
+
+const STEM_ELEMENT: Record<string, FiveElement> = {
+  甲: '木', 乙: '木',
+  丙: '火', 丁: '火',
+  戊: '土', 己: '土',
+  庚: '金', 辛: '金',
+  壬: '水', 癸: '水',
+};
+
+const STEM_POLARITY: Record<string, 'yang' | 'yin'> = {
+  甲: 'yang', 丙: 'yang', 戊: 'yang', 庚: 'yang', 壬: 'yang',
+  乙: 'yin', 丁: 'yin', 己: 'yin', 辛: 'yin', 癸: 'yin',
+};
+
+const HIDDEN_STEMS: Record<string, Array<{ gan: string; weight: number }>> = {
+  子: [{ gan: '癸', weight: 1 }],
+  丑: [{ gan: '己', weight: 0.6 }, { gan: '癸', weight: 0.25 }, { gan: '辛', weight: 0.15 }],
+  寅: [{ gan: '甲', weight: 0.6 }, { gan: '丙', weight: 0.25 }, { gan: '戊', weight: 0.15 }],
+  卯: [{ gan: '乙', weight: 1 }],
+  辰: [{ gan: '戊', weight: 0.6 }, { gan: '乙', weight: 0.25 }, { gan: '癸', weight: 0.15 }],
+  巳: [{ gan: '丙', weight: 0.6 }, { gan: '戊', weight: 0.25 }, { gan: '庚', weight: 0.15 }],
+  午: [{ gan: '丁', weight: 0.7 }, { gan: '己', weight: 0.3 }],
+  未: [{ gan: '己', weight: 0.6 }, { gan: '丁', weight: 0.25 }, { gan: '乙', weight: 0.15 }],
+  申: [{ gan: '庚', weight: 0.6 }, { gan: '壬', weight: 0.25 }, { gan: '戊', weight: 0.15 }],
+  酉: [{ gan: '辛', weight: 1 }],
+  戌: [{ gan: '戊', weight: 0.6 }, { gan: '辛', weight: 0.25 }, { gan: '丁', weight: 0.15 }],
+  亥: [{ gan: '壬', weight: 0.7 }, { gan: '甲', weight: 0.3 }],
+};
+
+const BRANCH_SEASON_ELEMENT: Record<string, FiveElement> = {
+  寅: '木', 卯: '木',
+  巳: '火', 午: '火',
+  辰: '土', 戌: '土', 丑: '土', 未: '土',
+  申: '金', 酉: '金',
+  亥: '水', 子: '水',
+};
+
+const GENERATES: Record<FiveElement, FiveElement> = { 木: '火', 火: '土', 土: '金', 金: '水', 水: '木' };
+const CONTROLS: Record<FiveElement, FiveElement> = { 木: '土', 土: '水', 水: '火', 火: '金', 金: '木' };
+const ELEMENT_COLORS: Record<FiveElement, string[]> = {
+  木: ['绿色', '青色'],
+  火: ['红色', '紫色'],
+  土: ['黄色', '棕色'],
+  金: ['白色', '金色'],
+  水: ['蓝色', '黑色'],
+};
+const ELEMENT_DIRECTIONS: Record<FiveElement, string[]> = {
+  木: ['东方'],
+  火: ['南方'],
+  土: ['中宫', '西南'],
+  金: ['西方'],
+  水: ['北方'],
+};
+const ELEMENT_NUMBERS: Record<FiveElement, number[]> = {
+  木: [3, 8],
+  火: [2, 7],
+  土: [5, 10],
+  金: [4, 9],
+  水: [1, 6],
+};
+
+function getGeneratingElement(element: FiveElement) {
+  return FIVE_ELEMENTS.find((item) => GENERATES[item] === element) || element;
+}
+
+function getControllingElement(element: FiveElement) {
+  return FIVE_ELEMENTS.find((item) => CONTROLS[item] === element) || element;
+}
+
+function normalizeScores<T extends string>(keys: readonly T[], scores: Record<T, number>) {
+  const total = keys.reduce((sum, key) => sum + Math.max(0, scores[key] || 0), 0) || 1;
+  const items = keys.map((key) => {
+    const raw = (Math.max(0, scores[key] || 0) / total) * 100;
+    return { key, raw, percentage: Math.round(raw) };
+  });
+
+  let diff = 100 - items.reduce((sum, item) => sum + item.percentage, 0);
+  while (diff !== 0) {
+    const candidates = items
+      .filter((item) => diff > 0 || item.percentage > 0)
+      .sort((a, b) => (diff > 0 ? b.raw - b.percentage - (a.raw - a.percentage) : b.percentage - a.percentage));
+    const target = candidates[0];
+    if (!target) break;
+    target.percentage += diff > 0 ? 1 : -1;
+    diff += diff > 0 ? -1 : 1;
+  }
+
+  return items;
+}
+
+function getTenGodName(dayGan: string, targetGan: string): TenGodName {
+  const dayElement = STEM_ELEMENT[dayGan];
+  const targetElement = STEM_ELEMENT[targetGan];
+  const samePolarity = STEM_POLARITY[dayGan] === STEM_POLARITY[targetGan];
+
+  if (!dayElement || !targetElement) return '比肩';
+  if (dayElement === targetElement) return samePolarity ? '比肩' : '劫财';
+  if (GENERATES[dayElement] === targetElement) return samePolarity ? '食神' : '伤官';
+  if (CONTROLS[dayElement] === targetElement) return samePolarity ? '偏财' : '正财';
+  if (CONTROLS[targetElement] === dayElement) return samePolarity ? '七杀' : '正官';
+  return samePolarity ? '偏印' : '正印';
+}
+
+function buildWeightedBaziMetrics(baZi: any) {
+  const dayGan = baZi.getDayGan();
+  const dayElement = STEM_ELEMENT[dayGan] || '木';
+  const monthZhi = baZi.getMonthZhi();
+  const seasonElement = BRANCH_SEASON_ELEMENT[monthZhi];
+  const pillars = [
+    { key: 'year', gan: baZi.getYearGan(), zhi: baZi.getYearZhi(), weight: 0.82 },
+    { key: 'month', gan: baZi.getMonthGan(), zhi: baZi.getMonthZhi(), weight: 1.48 },
+    { key: 'day', gan: dayGan, zhi: baZi.getDayZhi(), weight: 1.1 },
+    { key: 'hour', gan: baZi.getTimeGan(), zhi: baZi.getTimeZhi(), weight: 0.95 },
+  ];
+  const elementScores = Object.fromEntries(FIVE_ELEMENTS.map((element) => [element, 0])) as Record<FiveElement, number>;
+  const tenGodScores = Object.fromEntries(TEN_GODS.map((god) => [god, 0])) as Record<TenGodName, number>;
+
+  const addElement = (gan: string, weight: number) => {
+    const element = STEM_ELEMENT[gan];
+    if (element) elementScores[element] += weight;
+  };
+  const addTenGod = (gan: string, weight: number) => {
+    tenGodScores[getTenGodName(dayGan, gan)] += weight;
+  };
+
+  pillars.forEach((pillar) => {
+    addElement(pillar.gan, pillar.weight * 0.9);
+    if (pillar.key !== 'day') addTenGod(pillar.gan, pillar.weight * 0.95);
+
+    (HIDDEN_STEMS[pillar.zhi] || []).forEach((hidden) => {
+      addElement(hidden.gan, pillar.weight * 1.12 * hidden.weight);
+      addTenGod(hidden.gan, pillar.weight * 0.82 * hidden.weight);
+    });
+  });
+
+  if (seasonElement) elementScores[seasonElement] *= 1.14;
+
+  const elementItems = normalizeScores(FIVE_ELEMENTS, elementScores);
+  const tenGodItems = normalizeScores(TEN_GODS, tenGodScores);
+  const resourceElement = getGeneratingElement(dayElement);
+  const outputElement = GENERATES[dayElement];
+  const wealthElement = CONTROLS[dayElement];
+  const officerElement = getControllingElement(dayElement);
+  const totalElementScore = FIVE_ELEMENTS.reduce((sum, element) => sum + elementScores[element], 0) || 1;
+  const supportRatio = (elementScores[dayElement] + elementScores[resourceElement] * 0.86) / totalElementScore;
+  const strength =
+    supportRatio >= 0.58 ? '身强' :
+      supportRatio >= 0.5 ? '中和偏强' :
+        supportRatio >= 0.43 ? '中和偏弱' : '身弱';
+  const favorableCandidates = supportRatio >= 0.52
+    ? [outputElement, wealthElement, officerElement]
+    : [resourceElement, dayElement, officerElement];
+  const favorable = [...new Set(favorableCandidates)]
+    .sort((a, b) => elementScores[a] - elementScores[b])
+    .slice(0, 2);
+
+  const highest = Math.max(...elementItems.map((item) => item.percentage));
+  const lowest = Math.min(...elementItems.map((item) => item.percentage));
+  const elements = elementItems.map(({ key, percentage }) => {
+    const labels = [
+      key === dayElement ? '日主' : '',
+      key === seasonElement ? '得令' : '',
+      percentage >= highest - 2 ? '偏旺' : '',
+      percentage <= lowest + 2 ? '偏弱' : '',
+    ].filter(Boolean);
+    return {
+      name: key,
+      percentage,
+      gods: labels.slice(0, 2).join(' · '),
+      isDayMaster: key === dayElement,
+    };
+  });
+
+  const defaultColors: Record<TenGodName, string> = {
+    比肩: '#FF8A80', 劫财: '#FF5252',
+    食神: '#FFD180', 伤官: '#FFAB40',
+    正财: '#FFE57F', 偏财: '#FFD740',
+    正官: '#80D8FF', 七杀: '#40C4FF',
+    正印: '#B9F6CA', 偏印: '#69F0AE',
+  };
+
+  return {
+    elements,
+    tenGods: tenGodItems.map(({ key, percentage }) => ({ name: key, percentage, color: defaultColors[key] })),
+    strength,
+    favorable,
+    luckyColors: favorable.flatMap((element) => ELEMENT_COLORS[element]).slice(0, 3),
+    luckyDirections: favorable.flatMap((element) => ELEMENT_DIRECTIONS[element]).slice(0, 2),
+    luckyNumbers: favorable.flatMap((element) => ELEMENT_NUMBERS[element]).slice(0, 3),
+  };
+}
+
 const buildRecentFortuneContext = (formData: any, now = getTrustedNow()) => {
   const base = [
     `当前时间：${formatAppDateTime(now)}（${getAppWeekday(now)}，北京时间）`,
@@ -267,7 +464,8 @@ function calculateShenSha(bazi: { yearGan: string, yearZhi: string, monthGan: st
   const wenChang: Record<string, string> = { '甲': '巳', '乙': '午', '丙': '申', '丁': '酉', '戊': '申', '己': '酉', '庚': '亥', '辛': '子', '壬': '寅', '癸': '卯' };
   const fuXing: Record<string, string[]> = { '甲': ['寅', '子'], '乙': ['丑', '亥'], '丙': ['子', '戌'], '丁': ['亥', '酉'], '戊': ['申'], '己': ['未'], '庚': ['午'], '辛': ['巳'], '壬': ['辰'], '癸': ['卯'] };
   const luShen: Record<string, string> = { '甲': '寅', '乙': '卯', '丙': '巳', '丁': '午', '戊': '巳', '己': '午', '庚': '申', '辛': '酉', '壬': '亥', '癸': '子' };
-  const yangRen: Record<string, string> = { '甲': '卯', '乙': '辰', '丙': '午', '丁': '未', '戊': '午', '己': '未', '庚': '酉', '辛': '戌', '壬': '子', '癸': '丑' };
+  // 羊刃按日干帝旺位查；部分流派只取阳干，这里保留阴干标注但按帝旺位落支。
+  const yangRen: Record<string, string> = { '甲': '卯', '乙': '寅', '丙': '午', '丁': '巳', '戊': '午', '己': '巳', '庚': '酉', '辛': '申', '壬': '子', '癸': '亥' };
   const taoHua: Record<string, string> = { '申': '酉', '子': '酉', '辰': '酉', '寅': '卯', '午': '卯', '戌': '卯', '亥': '子', '卯': '子', '未': '子', '巳': '午', '酉': '午', '丑': '午' };
   const yiMa: Record<string, string> = { '申': '寅', '子': '寅', '辰': '寅', '寅': '申', '午': '申', '戌': '申', '亥': '巳', '卯': '巳', '未': '巳', '巳': '亥', '酉': '亥', '丑': '亥' };
   const huaGai: Record<string, string> = { '申': '辰', '子': '辰', '辰': '辰', '寅': '戌', '午': '戌', '戌': '戌', '亥': '未', '卯': '未', '未': '未', '巳': '丑', '酉': '丑', '丑': '丑' };
@@ -662,57 +860,9 @@ export default function Bazi() {
         hour: [baZi.getTimeGan(), baZi.getTimeZhi()] as [string, string]
       };
 
-      // Calculate WuXing
-      const wuxingStr = baZi.getYearWuXing() + baZi.getMonthWuXing() + baZi.getDayWuXing() + baZi.getTimeWuXing();
-      const wuxingCounts: Record<string, number> = { '木': 0, '火': 0, '土': 0, '金': 0, '水': 0 };
-      for (let i = 0; i < wuxingStr.length; i++) {
-        if (wuxingCounts[wuxingStr[i]] !== undefined) {
-          wuxingCounts[wuxingStr[i]]++;
-        }
-      }
-
-      const dayMasterElement = baZi.getDayWuXing()[0];
-      const exactElements = Object.keys(wuxingCounts).map(name => ({
-        name,
-        percentage: Math.round((wuxingCounts[name] / 8) * 100),
-        gods: "", // Will be filled by LLM or left empty
-        isDayMaster: name === dayMasterElement
-      }));
-
-      // Calculate Ten Gods
-      const tenGodsList = [
-        baZi.getYearShiShenGan(),
-        baZi.getYearShiShenZhi()[0],
-        baZi.getMonthShiShenGan(),
-        baZi.getMonthShiShenZhi()[0],
-        baZi.getDayShiShenZhi()[0],
-        baZi.getTimeShiShenGan(),
-        baZi.getTimeShiShenZhi()[0]
-      ];
-
-      const tenGodsCounts: Record<string, number> = {
-        "比肩": 0, "劫财": 0, "食神": 0, "伤官": 0, "正财": 0, "偏财": 0, "正官": 0, "七杀": 0, "正印": 0, "偏印": 0
-      };
-
-      tenGodsList.forEach(god => {
-        if (tenGodsCounts[god] !== undefined) {
-          tenGodsCounts[god]++;
-        }
-      });
-
-      const defaultColors: Record<string, string> = {
-        "比肩": "#FF8A80", "劫财": "#FF5252", 
-        "食神": "#FFD180", "伤官": "#FFAB40", 
-        "正财": "#FFE57F", "偏财": "#FFD740", 
-        "正官": "#80D8FF", "七杀": "#40C4FF", 
-        "正印": "#B9F6CA", "偏印": "#69F0AE"
-      };
-
-      const exactTenGods = Object.keys(tenGodsCounts).map(name => ({
-        name,
-        percentage: Math.round((tenGodsCounts[name] / 7) * 100),
-        color: defaultColors[name]
-      }));
+      const weightedMetrics = buildWeightedBaziMetrics(baZi);
+      const exactElements = weightedMetrics.elements;
+      const exactTenGods = weightedMetrics.tenGods;
       
       // Calculate ShenSha precisely
       const shenshaData = calculateShenSha({
@@ -738,7 +888,7 @@ export default function Bazi() {
 出生地：${baziFormData.birthLocation}
 现居地：${baziFormData.currentLocation}
 
-【重要：我已经为你精确计算了该用户的八字、五行、十神和神煞，请务必严格基于此数据进行推演，绝不能自己瞎算！】
+【重要：我已经为你计算了该用户的八字、加权五行、加权十神和神煞。五行与十神包含天干、地支藏干、月令权重，不是简单八字等分；请务必严格基于此数据进行推演，绝不能自己瞎算！】
 精确八字与神煞：
 ${exactBaziStr}
 
@@ -810,6 +960,11 @@ ${exactBaziStr}
         pattern: parsedResult.pattern,
         wuxing: {
           ...parsedResult.wuxing,
+          strength: weightedMetrics.strength,
+          favorable: weightedMetrics.favorable,
+          luckyColors: weightedMetrics.luckyColors,
+          luckyDirections: weightedMetrics.luckyDirections,
+          luckyNumbers: weightedMetrics.luckyNumbers,
           elements: exactElements
         },
         tenGods: exactTenGods,
@@ -1682,7 +1837,7 @@ ${recentFortuneContext}
                         />
                       </div>
                       <div className="w-10 text-right text-apple-text-muted font-medium">{el.percentage}%</div>
-                      <div className="w-20 text-xs text-apple-text-muted truncate">{el.gods}</div>
+                      <div className="w-24 text-right text-[11px] leading-tight text-apple-text-muted">{el.gods}</div>
                     </div>
                   );
                 })}
