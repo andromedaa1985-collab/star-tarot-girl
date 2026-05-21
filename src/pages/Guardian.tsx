@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Moon, Send, Sparkles, Mail, Loader2 } from 'lucide-react';
+import { Moon, Send, Sparkles, Mail, Loader2, History, ScrollText } from 'lucide-react';
 import { useAppContext, LEVEL_TITLES } from '../store';
 import clsx from 'clsx';
 import { recordAppEvent } from '../lib/engagement';
@@ -34,7 +34,7 @@ const moodLabels: Record<string, string> = {
 
 export default function Guardian() {
   const { 
-    userName, bondLevel, bondExp, setBondExp, 
+    userName, bondLevel, setBondExp,
     diaryEntries, baziResult,
     tarotReadings, simulationHistory, profiles, activeProfileId,
     guardianMessages, setGuardianMessages,
@@ -51,6 +51,7 @@ export default function Guardian() {
 
   const todayStr = new Date().toLocaleDateString('zh-CN');
   const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
+  const bondTitle = LEVEL_TITLES[bondLevel - 1] || LEVEL_TITLES[0];
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
   const recentReadings = [...tarotReadings]
     .filter((reading) => Date.now() - getTime(reading.date) <= MEMORY_WINDOW_MS)
@@ -62,7 +63,11 @@ export default function Guardian() {
     .filter((item) => Date.now() - getTime(item.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date))[0];
   const recentGuardianReplies = [...guardianMessages]
-    .filter((message) => message.role === 'ai' && Date.now() - message.timestamp <= MEMORY_WINDOW_MS)
+    .filter((message) => (
+      message.role === 'ai' &&
+      Date.now() - message.timestamp <= MEMORY_WINDOW_MS &&
+      !message.text.includes('我是你的星轨守护灵')
+    ))
     .sort((a, b) => b.timestamp - a.timestamp);
   const guardianContextLines = [
     activeProfile ? `当前档案：${activeProfile.name}，出生地 ${activeProfile.birthLocation || '未填写'}，现居 ${activeProfile.currentLocation || '未填写'}。` : '',
@@ -71,6 +76,8 @@ export default function Guardian() {
     recentSimulation ? `最近沙盘：在「${shortText(recentSimulation.choiceA, 18)}」和「${shortText(recentSimulation.choiceB, 18)}」之间权衡。` : '',
     recentGuardianReplies[0] ? `上次守护回应：${shortText(recentGuardianReplies[0].text, 54)}` : '',
   ].filter(Boolean);
+  const visibleContextLines = guardianContextLines.slice(0, 3);
+  const hiddenContextCount = Math.max(0, guardianContextLines.length - visibleContextLines.length);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -93,7 +100,7 @@ export default function Guardian() {
   const generateDailyLetter = async () => {
     setIsGeneratingLetter(true);
     try {
-      const recentDiary = diaryEntries.length > 0 ? diaryEntries[0] : null;
+      const recentDiary = recentDiaries[0] || null;
       let diaryContext = "用户昨天没有写日记。";
       if (recentDiary) {
         diaryContext = `用户最近的一篇日记（${recentDiary.date}）：心情是【${recentDiary.mood}】，内容是“${recentDiary.content}”。`;
@@ -104,18 +111,18 @@ export default function Guardian() {
         baziContext = `用户的八字格局是【${baziResult.pattern.name}】，五行喜用神是【${baziResult.wuxing.favorable.join('、')}】，性格特质是【${baziResult.personality}】。`;
       }
 
-      const prompt = `作为用户的【星轨守护灵】，请为ta写一封今天的【晨间寄语】。
+      const prompt = `作为用户的【星轨守护灵】，请为ta写一封今天的【今日守护回访】。
 【上下文信息】：
 - 用户姓名：${userName}
-- 羁绊等级：${LEVEL_TITLES[bondLevel]}
+- 羁绊等级：${bondTitle}
 - 命理信息：${baziContext}
 - 近期情绪：${diaryContext}
 
 【要求】：
-1. 语气要神圣、温柔、充满宿命感与包容感，像一个默默注视着ta的守护神。
-2. 必须结合ta的八字命理（如五行喜忌、性格）和最近的日记情绪来写。如果ta难过，请给予命理角度的安慰；如果ta开心，请给予祝福。
+1. 先轻轻点出一条你记得的近况，再回应今天可以怎么照顾自己。
+2. 必须结合ta的八字命理（如五行喜忌、性格）和最近的日记情绪来写。如果线索不足，就温柔地邀请ta留下一个具体问题。
 3. 纯文本，不要使用任何Markdown格式。
-4. 字数控制在150字左右，分2-3段。`;
+4. 字数控制在120字左右，分2段，最后给一个低压力小动作。`;
 
       let aiText = "";
       try {
@@ -194,7 +201,7 @@ export default function Guardian() {
 
 【当前用户状态】：
 - 姓名：${userName}
-- 你们的羁绊等级：${bondLevel}级 (${LEVEL_TITLES[bondLevel]})
+- 你们的羁绊等级：${bondLevel}级 (${bondTitle})
 - 用户的命理特征：${baziContext}
 
 【你的行为准则】：
@@ -305,8 +312,10 @@ export default function Guardian() {
                   {isGeneratingLetter ? <Loader2 size={20} className="animate-spin" /> : <Mail size={20} />}
                 </div>
                 <div className="text-left">
-                  <div className="font-medium text-apple-text">今日守护寄语</div>
-                  <div className="text-xs text-apple-text-muted">基于你的命理与昨日心境生成</div>
+                  <div className="font-medium text-apple-text">今日守护回访</div>
+                  <div className="text-xs text-apple-text-muted">
+                    {guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
+                  </div>
                 </div>
               </div>
               <Sparkles size={16} className="text-apple-accent opacity-50 group-hover:opacity-100 transition-opacity" />
@@ -321,12 +330,40 @@ export default function Guardian() {
                   <Mail size={20} />
                 </div>
                 <div className="text-left">
-                  <div className="font-medium">查看今日寄语</div>
+                  <div className="font-medium">查看今日回访</div>
                   <div className="text-xs text-white/75">已生成，随时可以重温</div>
                 </div>
               </div>
             </button>
           )}
+          <div className="mt-3 rounded-2xl border border-apple-border bg-apple-surface/90 p-4 text-left shadow-sm backdrop-blur-xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-apple-text">
+                <History size={16} className="text-apple-accent" />
+                今日引用线索
+              </div>
+              <div className="flex items-center gap-1 rounded-full bg-apple-accent/10 px-2.5 py-1 text-[11px] font-medium text-apple-accent">
+                <ScrollText size={12} />
+                档案 + 近 7 天
+              </div>
+            </div>
+            {visibleContextLines.length ? (
+              <div className="space-y-2">
+                {visibleContextLines.map((line) => (
+                  <div key={line} className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                    {line}
+                  </div>
+                ))}
+                {hiddenContextCount > 0 && (
+                  <div className="text-xs font-medium text-apple-accent">还有 {hiddenContextCount} 条线索会放进回访里</div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                还没有可引用的近况。写一篇日记、抽一次牌，或做一次沙盘后，守护会更像是在接着你的故事说话。
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -384,6 +421,7 @@ export default function Guardian() {
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
+            aria-label="发送给守护"
             className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-apple-gold text-[#17130f] rounded-full flex items-center justify-center shadow-[0_12px_24px_rgba(185,123,40,0.20)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#c88a34] dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_0_15px_rgba(107,138,255,0.4)] dark:hover:bg-[#5A75E6]"
           >
             <Send size={18} className="ml-0.5" />
@@ -415,7 +453,7 @@ export default function Guardian() {
               </div>
               
               <h3 className="font-serif font-bold text-xl text-center text-apple-text mb-4 tracking-widest relative z-10 shrink-0">
-                今日守护寄语
+                今日守护回访
               </h3>
               
               <div className="font-serif text-[15px] leading-loose text-apple-text-muted whitespace-pre-wrap relative z-10 overflow-y-auto flex-1 min-h-0 pr-2 custom-scrollbar">
@@ -427,7 +465,7 @@ export default function Guardian() {
                   onClick={() => setShowLetter(false)}
                   className="px-8 py-3 bg-apple-gold text-[#17130f] rounded-full font-bold shadow-[0_12px_24px_rgba(185,123,40,0.20)] hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)] dark:hover:bg-[#5A75E6]"
                 >
-                  收下寄语
+                  收下回访
                 </button>
               </div>
             </motion.div>
