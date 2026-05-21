@@ -9,6 +9,7 @@ import { recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
+import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -312,7 +313,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             model: 'deepseek-chat',
             messages: [
               { role: 'system', content: '你是一位精通心理学与命理学的命运复盘导师。' },
-              { role: 'user', content: prompt }
+              { role: 'user', content: `${DIARY_REVIEW_SYSTEM_PROMPT}\n\n${ACTIONABLE_MEMORY_RULES}\n\n${prompt}` }
             ]
           })
         });
@@ -324,7 +325,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         throw err;
       }
 
-      const finalResult = aiText.replace(/\*\*/g, '').replace(/#/g, '');
+      const finalResult = cleanAiText(aiText);
       setReviewResult(finalResult);
       
       // Save to history (limit to 30)

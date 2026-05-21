@@ -67,6 +67,22 @@ export function FeatureGate({
   if (hasFeatureAccess(membership, feature)) return <>{children}</>;
 
   const copy = FEATURE_COPY[feature];
+  const paidCopy =
+    feature === 'guardian'
+      ? {
+          ...copy,
+          title: '守护回访',
+          eyebrow: '不是泛泛寄语，而是回应最近的你',
+          desc: 'Plus 会让守护每日读取最近牌迹、日记和选择，写成一封短回访，并给一个低压力小动作。',
+          gains: ['回应近期线索', '每日低压力行动', '接入长期记忆和 7 日复盘'],
+        }
+      : feature === 'simulator'
+        ? {
+            ...copy,
+            desc: 'Plus 会把选择沙盘接入你的牌迹、日记和档案，让推演更像围绕你的长期处境展开。',
+            gains: ['结合长期记忆', '记录每次选择', '复盘反复出现的岔路'],
+          }
+        : copy;
   const memoryCount = tarotReadings.length + diaryEntries.length + profiles.length + simulationHistory.length;
   const memoryHint =
     memoryCount > 0
@@ -82,15 +98,15 @@ export function FeatureGate({
         </div>
         <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#F4CF83]/20 bg-[#F4CF83]/10 px-3 py-1 text-xs font-bold text-[#F4CF83]">
           <Sparkles size={14} />
-          {copy.eyebrow}
+          {paidCopy.eyebrow}
         </div>
-        <h2 className="text-2xl font-black text-apple-text">{copy.title}</h2>
-        <p className="mt-3 text-sm leading-7 text-apple-text-muted">{copy.desc}</p>
+        <h2 className="text-2xl font-black text-apple-text">{paidCopy.title}</h2>
+        <p className="mt-3 text-sm leading-7 text-apple-text-muted">{paidCopy.desc}</p>
         <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.045] p-4">
           <div className="text-xs font-bold text-[#F4CF83]">解锁后不会从零开始</div>
           <p className="mt-1 text-xs leading-6 text-apple-text-muted">{memoryHint}</p>
           <div className="mt-3 grid gap-2">
-            {copy.gains.map((gain) => (
+            {paidCopy.gains.map((gain) => (
               <div key={gain} className="flex items-center gap-2 text-xs text-apple-text">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#F4CF83]" />
                 <span>{gain}</span>
@@ -101,11 +117,11 @@ export function FeatureGate({
         <div className="mt-6 grid gap-3">
           <button
             type="button"
-            onClick={() => navigate(`/app/profile?plus=1&plan=${copy.planId}`)}
+            onClick={() => navigate(`/app/profile?plus=1&plan=${paidCopy.planId}`)}
             className="flex w-full items-center justify-center gap-2 rounded-full bg-[#F4CF83] py-3 font-black text-[#0b0d13] shadow-[0_16px_42px_rgba(244,207,131,0.22)] transition-transform active:scale-[0.98]"
           >
             <WalletCards size={18} />
-            {copy.cta}
+            {paidCopy.cta}
           </button>
           <button
             type="button"

@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
+import { SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 
 interface SimulationResult {
   choiceA: {
@@ -447,7 +448,7 @@ ${baziContext}
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: '你是一个严格输出JSON格式的人生沙盘推演系统。' },
-              { role: 'user', content: prompt }
+              { role: 'user', content: `${SIMULATOR_JSON_SYSTEM_PROMPT}\n\n${prompt}` }
             ]
           })
         });

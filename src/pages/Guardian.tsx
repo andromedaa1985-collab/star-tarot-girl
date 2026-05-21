@@ -5,11 +5,38 @@ import { useAppContext, LEVEL_TITLES } from '../store';
 import clsx from 'clsx';
 import { recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
+import {
+  ACTIONABLE_MEMORY_RULES,
+  GUARDIAN_CHAT_SYSTEM_PROMPT,
+  GUARDIAN_LETTER_SYSTEM_PROMPT,
+  cleanAiText,
+} from '../lib/aiPrompting';
+
+const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+const getTime = (value?: string | number) => {
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(time) ? time : 0;
+};
+
+const shortText = (text = '', max = 42) => {
+  const clean = String(text).replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+};
+
+const moodLabels: Record<string, string> = {
+  great: '很亮的心情',
+  good: '还不错的状态',
+  neutral: '平静但有点悬着',
+  bad: '有点低落',
+  awful: '很辛苦',
+};
 
 export default function Guardian() {
   const { 
     userName, bondLevel, bondExp, setBondExp, 
     diaryEntries, baziResult,
+    tarotReadings, simulationHistory, profiles, activeProfileId,
     guardianMessages, setGuardianMessages,
     dailyLetter, setDailyLetter,
     dailyLetterDate, setDailyLetterDate,
@@ -24,6 +51,26 @@ export default function Guardian() {
 
   const todayStr = new Date().toLocaleDateString('zh-CN');
   const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+  const recentReadings = [...tarotReadings]
+    .filter((reading) => Date.now() - getTime(reading.date) <= MEMORY_WINDOW_MS)
+    .sort((a, b) => getTime(b.date) - getTime(a.date));
+  const recentDiaries = [...diaryEntries]
+    .filter((entry) => Date.now() - getTime(entry.date) <= MEMORY_WINDOW_MS)
+    .sort((a, b) => getTime(b.date) - getTime(a.date));
+  const recentSimulation = [...simulationHistory]
+    .filter((item) => Date.now() - getTime(item.date) <= MEMORY_WINDOW_MS)
+    .sort((a, b) => getTime(b.date) - getTime(a.date))[0];
+  const recentGuardianReplies = [...guardianMessages]
+    .filter((message) => message.role === 'ai' && Date.now() - message.timestamp <= MEMORY_WINDOW_MS)
+    .sort((a, b) => b.timestamp - a.timestamp);
+  const guardianContextLines = [
+    activeProfile ? `当前档案：${activeProfile.name}，出生地 ${activeProfile.birthLocation || '未填写'}，现居 ${activeProfile.currentLocation || '未填写'}。` : '',
+    recentReadings[0] ? `最近牌迹：问过「${shortText(recentReadings[0].question, 36)}」，牌面「${shortText(recentReadings[0].cards, 30)}」。` : '',
+    recentDiaries[0] ? `最近日记：${moodLabels[recentDiaries[0].mood] || recentDiaries[0].mood}，「${shortText(recentDiaries[0].content, 46)}」。` : '',
+    recentSimulation ? `最近沙盘：在「${shortText(recentSimulation.choiceA, 18)}」和「${shortText(recentSimulation.choiceB, 18)}」之间权衡。` : '',
+    recentGuardianReplies[0] ? `上次守护回应：${shortText(recentGuardianReplies[0].text, 54)}` : '',
+  ].filter(Boolean);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -80,7 +127,18 @@ export default function Guardian() {
             temperature: 0.7,
             messages: [
               { role: 'system', content: '你是用户的星轨守护灵。' },
-              { role: 'user', content: prompt }
+              {
+                role: 'user',
+                content: [
+                  GUARDIAN_LETTER_SYSTEM_PROMPT,
+                  '这封来信必须像今日回访，而不是泛泛寄语。',
+                  guardianContextLines.length
+                    ? `星轨近期记得：\n${guardianContextLines.join('\n')}`
+                    : '星轨近期还没有足够线索，请引导用户先留下牌迹或日记。',
+                  ACTIONABLE_MEMORY_RULES,
+                  prompt,
+                ].join('\n\n'),
+              }
             ]
           })
         });
@@ -92,7 +150,7 @@ export default function Guardian() {
         aiText = "星轨流转，愿你今日平安喜乐。";
       }
 
-      const cleanedText = aiText.replace(/\*\*/g, '').replace(/#/g, '');
+      const cleanedText = cleanAiText(aiText);
       setDailyLetter(cleanedText);
       setDailyLetterDate(todayStr);
       setShowLetter(true);
@@ -156,7 +214,16 @@ export default function Guardian() {
             model: 'deepseek-chat',
             temperature: 0.7,
             messages: [
-              { role: 'system', content: systemPrompt },
+              {
+                role: 'system',
+                content: [
+                  GUARDIAN_CHAT_SYSTEM_PROMPT,
+                  systemPrompt,
+                  guardianContextLines.length
+                    ? `近期线索：\n${guardianContextLines.join('\n')}`
+                    : '近期线索不足：请先引导用户留下牌迹、日记或一个具体问题。',
+                ].join('\n\n'),
+              },
               ...guardianMessages.slice(-10).map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text })),
               { role: 'user', content: userText }
             ]
@@ -170,7 +237,7 @@ export default function Guardian() {
         aiText = "我在这里，一直都在。";
       }
 
-      const cleanedText = aiText.replace(/\*\*/g, '').replace(/#/g, '');
+      const cleanedText = cleanAiText(aiText);
 
       setGuardianMessages(prev => [...prev, {
         id: Date.now().toString(),

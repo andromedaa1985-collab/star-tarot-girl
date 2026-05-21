@@ -31,7 +31,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   LEVEL_THRESHOLDS,
   LEVEL_TITLES,
+  type CompanionMessage,
   type DiaryEntry,
+  type Message,
   type SimulationHistoryEntry,
   type TarotReading,
   type UserProfile,
@@ -50,6 +52,7 @@ import {
 import { getNextBestAction, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
+import { TAROT_SYSTEM_PROMPT } from '../lib/aiPrompting';
 
 type DrawnCard = {
   name: string;
@@ -419,6 +422,14 @@ const MEMORY_THEME_BUCKETS = [
   },
 ];
 
+type MemoryTheme = (typeof MEMORY_THEME_BUCKETS)[number] & { count: number };
+
+type MemoryInsight = {
+  label: string;
+  text: string;
+  tone: 'tarot' | 'diary' | 'choice' | 'profile' | 'starter';
+};
+
 type MemoryRecall = {
   title: string;
   desc: string;
@@ -426,12 +437,20 @@ type MemoryRecall = {
   prompt?: string;
   meta: string;
   contextLines: string[];
+  insights: MemoryInsight[];
 };
 
 type TarotArchiveReport = {
   title: string;
   dateRangeLabel: string;
+  recordCount: number;
   keywords: string[];
+  signals: Array<{
+    label: string;
+    value: string;
+    desc: string;
+  }>;
+  evidence: string[];
   timeline: Array<{
     id: string;
     date: string;
@@ -452,6 +471,19 @@ const getRecentItems = <T extends { date: string }>(items: T[], now = Date.now()
   [...items]
     .filter((item) => now - getMemoryTime(item.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date));
+
+const getTodaysSimulation = (items: SimulationHistoryEntry[], todayKey = getLocalDateKey()) =>
+  [...items]
+    .filter((item) => {
+      const parsed = new Date(item.date);
+      return !Number.isNaN(parsed.getTime()) && getLocalDateKey(parsed) === todayKey;
+    })
+    .sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date))[0] || null;
+
+const getRecentGuardianMessages = (items: CompanionMessage[], now = Date.now()) =>
+  [...items]
+    .filter((item) => item.role === 'ai' && now - item.timestamp <= MEMORY_WINDOW_MS)
+    .sort((a, b) => b.timestamp - a.timestamp);
 
 const getThemeFromReadings = (readings: TarotReading[]) => {
   const ranked = MEMORY_THEME_BUCKETS.map((bucket) => ({
@@ -481,6 +513,107 @@ const getShortText = (text: string, max = 28) => {
   return clean.length > max ? `${clean.slice(0, max)}...` : clean;
 };
 
+const buildMemoryInsights = (input: {
+  recentReadings: TarotReading[];
+  latestReading?: TarotReading | null;
+  latestDiary?: DiaryEntry | null;
+  todaysSimulation?: SimulationHistoryEntry | null;
+  activeProfile?: UserProfile | null;
+  theme?: MemoryTheme | null;
+}): MemoryInsight[] => {
+  const insights: MemoryInsight[] = [];
+
+  if (input.theme && input.recentReadings.length >= 2) {
+    insights.push({
+      label: '反复主题',
+      text: `最近 7 天有 ${input.theme.count} 次线索落在「${input.theme.label}」，适合继续追问同一处阻力。`,
+      tone: 'tarot',
+    });
+  }
+
+  if (input.latestReading) {
+    insights.push({
+      label: '最近牌迹',
+      text: `你问过「${getShortText(input.latestReading.question, 30)}」，牌面留下「${getShortText(input.latestReading.cards, 28)}」。`,
+      tone: 'tarot',
+    });
+  }
+
+  if (input.latestDiary) {
+    insights.push({
+      label: '情绪线索',
+      text: `最近日记是${getMoodLabel(input.latestDiary.mood)}：「${getShortText(input.latestDiary.content, 34)}」。`,
+      tone: 'diary',
+    });
+  }
+
+  if (input.todaysSimulation) {
+    insights.push({
+      label: '今日选择',
+      text: `你正在「${getShortText(input.todaysSimulation.choiceA, 16)}」和「${getShortText(input.todaysSimulation.choiceB, 16)}」之间权衡。`,
+      tone: 'choice',
+    });
+  }
+
+  if (input.activeProfile) {
+    insights.push({
+      label: '命理档案',
+      text: `当前档案是「${input.activeProfile.name}」，之后的解读会优先沿着这份上下文沉淀。`,
+      tone: 'profile',
+    });
+  }
+
+  return insights.length
+    ? insights.slice(0, 3)
+    : [
+        {
+          label: '第一条线索',
+          text: '抽一张今日牌、写一篇日记，或建一份档案后，这里会开始沉淀你的个人上下文。',
+          tone: 'starter',
+        },
+      ];
+};
+
+const normalizeReadingText = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+const shouldCollapseReadingText = (text: string, maxLength: number) =>
+  normalizeReadingText(text).length > maxLength || text.split(/\n+/).filter(Boolean).length > 3;
+
+const isProbablyCutSummary = (text: string) => {
+  const trimmed = text.trim();
+  return trimmed.length >= 135 && !/[。！？.!?」”）)]$/.test(trimmed);
+};
+
+const getFullReadingSummary = (reading: TarotReading, messages: Message[] = []) => {
+  const storedSummary = reading.summary?.trim() || '';
+  const readingTime = Date.parse(reading.date);
+  const imageSet = new Set([reading.cardImage || '', ...(reading.cardImages || [])].filter(Boolean));
+  const candidates = messages
+    .filter((message) => {
+      if (message.role !== 'ai' || !message.text?.trim()) return false;
+      const timeClose = Number.isFinite(readingTime) ? Math.abs(message.timestamp - readingTime) < 3 * 60 * 1000 : true;
+      const imageMatched =
+        imageSet.size === 0 ||
+        Boolean(message.cardImage && imageSet.has(message.cardImage)) ||
+        Boolean(message.cardImages?.some((image) => imageSet.has(image)));
+      return timeClose && imageMatched;
+    })
+    .sort((a, b) => Math.abs(a.timestamp - readingTime) - Math.abs(b.timestamp - readingTime));
+  const recovered = candidates[0]?.text?.trim();
+
+  if (!storedSummary) return recovered || '这次牌面已经留在档案里。';
+  if (!recovered) return storedSummary;
+
+  const normalizedStored = normalizeReadingText(storedSummary);
+  const normalizedRecovered = normalizeReadingText(recovered);
+  const sameOpening = normalizedRecovered.startsWith(normalizedStored.slice(0, 42));
+  if (isProbablyCutSummary(storedSummary) || sameOpening || normalizedRecovered.includes(normalizedStored.slice(0, 42))) {
+    return recovered;
+  }
+
+  return storedSummary;
+};
+
 const formatArchiveDate = (date: string, options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }) => {
   const parsed = new Date(date);
   if (!Number.isFinite(parsed.getTime())) return '最近';
@@ -489,10 +622,18 @@ const formatArchiveDate = (date: string, options: Intl.DateTimeFormatOptions = {
 
 const getPrimaryCardName = (cards: string) => cards.split(/[，,、]/)[0]?.trim() || '未记录牌面';
 
-const buildTarotArchiveReport = (readings: TarotReading[]): TarotArchiveReport => {
+const buildTarotArchiveReport = (
+  readings: TarotReading[],
+  messages: Message[] = [],
+  diaryEntries: DiaryEntry[] = [],
+  guardianMessages: CompanionMessage[] = [],
+): TarotArchiveReport => {
   const sorted = [...readings].sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date));
   const recent = getRecentItems(sorted);
   const scope = recent.length > 0 ? recent : sorted.slice(0, 7);
+  const recentDiaries = getRecentItems(diaryEntries);
+  const recentGuardian = getRecentGuardianMessages(guardianMessages);
+  const recordCount = scope.length + recentDiaries.length + recentGuardian.length;
   const first = scope[scope.length - 1];
   const last = scope[0];
   const dateRangeLabel =
@@ -526,13 +667,44 @@ const buildTarotArchiveReport = (readings: TarotReading[]): TarotArchiveReport =
   const timeline = scope.slice(0, 5).map((reading) => ({
     id: reading.id,
     date: formatArchiveDate(reading.date, { month: 'numeric', day: 'numeric' }),
-    title: getShortText(reading.question || '一次没有命名的问题', 24),
-    card: getShortText(getPrimaryCardName(reading.cards), 18),
-    summary: getShortText(reading.summary || '这次牌面已经留在档案里。', 48),
+    title: reading.question || '一次没有命名的问题',
+    card: getPrimaryCardName(reading.cards) || '未记录牌面',
+    summary: getFullReadingSummary(reading, messages),
   }));
 
   const topCard = cardRank[0] || '还没有代表牌';
   const themeLabel = theme?.label || keywordScores[0]?.label || '自我状态';
+  const diaryMoodRank = Object.entries(
+    recentDiaries.reduce<Record<string, number>>((acc, entry) => {
+      const mood = getMoodLabel(entry.mood);
+      acc[mood] = (acc[mood] || 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const topDiaryMood = diaryMoodRank[0]?.[0] || '等待日记';
+  const latestGuardian = recentGuardian[0];
+  const signals = [
+    {
+      label: '反复主题',
+      value: theme?.count ? `${themeLabel} · ${theme.count} 次` : themeLabel,
+      desc: scope.length >= 2 ? '牌迹里已经出现可追踪的重复问题。' : '先积累到 2-3 次牌迹，主题会更稳定。',
+    },
+    {
+      label: '情绪底色',
+      value: recentDiaries.length ? `${topDiaryMood} · ${recentDiaries.length} 篇` : '等待日记',
+      desc: recentDiaries.length ? `最近日记提到「${getShortText(recentDiaries[0].content, 28)}」。` : '写下心情后，复盘会更像在看真实的你。',
+    },
+    {
+      label: '守护回声',
+      value: recentGuardian.length ? `${recentGuardian.length} 封来信` : '等待守护',
+      desc: latestGuardian ? `最近守护提到「${getShortText(latestGuardian.text, 32)}」。` : '守护聊天会成为周报里的陪伴线索。',
+    },
+  ];
+  const evidence = [
+    scope[0] ? `最近牌迹：${getShortText(scope[0].question, 34)} / ${getShortText(scope[0].cards, 24)}` : '',
+    recentDiaries[0] ? `最近日记：${getMoodLabel(recentDiaries[0].mood)}，${getShortText(recentDiaries[0].content, 42)}` : '',
+    latestGuardian ? `守护回应：${getShortText(latestGuardian.text, 46)}` : '',
+  ].filter(Boolean);
   const advice =
     scope.length === 0
       ? ['先抽一张今日牌，让第一条牌迹成为档案起点。', '问题越具体，后续复盘越能看出变化。']
@@ -545,7 +717,10 @@ const buildTarotArchiveReport = (readings: TarotReading[]): TarotArchiveReport =
   return {
     title: scope.length > 0 ? `${themeLabel}观察档案` : '新的牌迹档案',
     dateRangeLabel,
+    recordCount,
     keywords: keywords.length > 0 ? keywords : ['等待第一张牌'],
+    signals,
+    evidence,
     timeline,
     advice,
     prompt:
@@ -566,7 +741,7 @@ const buildMemoryRecall = (input: {
   const recentDiaries = getRecentItems(input.diaryEntries);
   const latestReading = recentReadings[0] || input.tarotReadings[0];
   const latestDiary = recentDiaries[0] || input.diaryEntries[0];
-  const latestSimulation = [...input.simulationHistory].sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date))[0];
+  const todaysSimulation = getTodaysSimulation(input.simulationHistory);
   const activeProfile =
     input.profiles.find((profile) => profile.id === input.activeProfileId) || input.profiles[0] || null;
   const theme = getThemeFromReadings(recentReadings);
@@ -580,10 +755,18 @@ const buildMemoryRecall = (input: {
     theme ? `最近 7 天高频主题：${theme.label}，相关牌迹 ${theme.count} 次。` : '',
     latestReading ? `最近牌迹：问题“${getShortText(latestReading.question, 46)}”，牌面“${getShortText(latestReading.cards, 42)}”。` : '',
     latestDiary ? `最近日记：${getMoodLabel(latestDiary.mood)}，内容“${getShortText(latestDiary.content, 54)}”。` : '',
-    latestSimulation
-      ? `最近沙盘：在“${getShortText(latestSimulation.dilemma, 42)}”里权衡“${getShortText(latestSimulation.choiceA, 18)}”和“${getShortText(latestSimulation.choiceB, 18)}”。`
+    todaysSimulation
+      ? `今日沙盘：在“${getShortText(todaysSimulation.dilemma, 42)}”里权衡“${getShortText(todaysSimulation.choiceA, 18)}”和“${getShortText(todaysSimulation.choiceB, 18)}”。`
       : '',
   ].filter(Boolean);
+  const insights = buildMemoryInsights({
+    recentReadings,
+    latestReading,
+    latestDiary,
+    todaysSimulation,
+    activeProfile,
+    theme,
+  });
 
   if (theme && recentReadings.length >= 2) {
     return {
@@ -593,6 +776,7 @@ const buildMemoryRecall = (input: {
       prompt: theme.prompt,
       meta: `${memoryCount} 份线索`,
       contextLines,
+      insights,
     };
   }
 
@@ -606,17 +790,19 @@ const buildMemoryRecall = (input: {
       prompt: '结合我最近的日记状态，帮我看今天最需要放下的压力和一个能执行的小动作。',
       meta: `${memoryCount} 份线索`,
       contextLines,
+      insights,
     };
   }
 
-  if (latestSimulation) {
+  if (todaysSimulation) {
     return {
       title: '我记得你还在权衡一个选择',
-      desc: `上次沙盘里，你把“${getShortText(latestSimulation.choiceA, 18)}”和“${getShortText(latestSimulation.choiceB, 18)}”放在一起比较过。`,
+      desc: `今天的沙盘里，你把“${getShortText(todaysSimulation.choiceA, 18)}”和“${getShortText(todaysSimulation.choiceB, 18)}”放在一起比较过。`,
       cta: '继续看下一步',
-      prompt: '结合我上次的沙盘选择，帮我看今天更适合先验证哪一步。',
+      prompt: '结合我今天的沙盘选择，帮我看更适合先验证哪一步。',
       meta: `${memoryCount} 份线索`,
       contextLines,
+      insights,
     };
   }
 
@@ -628,6 +814,7 @@ const buildMemoryRecall = (input: {
       prompt: '结合我上一轮牌面，帮我继续看现在最需要注意的一点。',
       meta: `${memoryCount} 份线索`,
       contextLines,
+      insights,
     };
   }
 
@@ -639,6 +826,7 @@ const buildMemoryRecall = (input: {
       prompt: `结合${activeProfile.name}的命理档案，帮我看今天最适合关注的状态。`,
       meta: `${memoryCount} 份线索`,
       contextLines,
+      insights,
     };
   }
 
@@ -649,6 +837,7 @@ const buildMemoryRecall = (input: {
     prompt: '今日运势',
     meta: '新档案',
     contextLines,
+    insights,
   };
 };
 
@@ -668,7 +857,6 @@ export default function Home() {
     theme,
     setTheme,
     diaryEntries,
-    simulatorState,
     simulationHistory,
     profiles,
     activeProfileId,
@@ -687,6 +875,7 @@ export default function Home() {
     engagement,
     setEngagement,
     dailyLetterDate,
+    guardianMessages,
     setAppEvents,
   } = useAppContext();
 
@@ -735,8 +924,8 @@ export default function Home() {
     const parsed = new Date(entry.date);
     return !Number.isNaN(parsed.getTime()) && getLocalDateKey(parsed) === todayKey;
   });
-  const simulatedRecently = Boolean(simulatorState.result);
-  const missionCount = [askedToday, wroteDiaryToday, simulatedRecently].filter(Boolean).length;
+  const simulatedToday = Boolean(getTodaysSimulation(simulationHistory, todayKey));
+  const missionCount = [askedToday, wroteDiaryToday, simulatedToday].filter(Boolean).length;
   const hasClaimedDailyReward = dailyRewardDate === todayKey;
   const canClaimDailyReward = missionCount >= 3 && !hasClaimedDailyReward;
   const canClaimReturnReward = engagement.activeDays >= 2 && engagement.returnRewardDate !== todayKey;
@@ -754,7 +943,7 @@ export default function Home() {
     hasBaziProfile: profiles.length > 0,
     wroteDiaryToday,
     hasGuardianLetterToday,
-    simulatedRecently,
+    simulatedRecently: simulatedToday,
     activeDays: engagement.activeDays,
   });
 
@@ -766,6 +955,7 @@ export default function Home() {
     () => buildMemoryRecall({ tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId }),
     [tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId],
   );
+  const visibleMemoryInsights = memoryRecall.insights.slice(0, plusActive ? 3 : 1);
   const memoryContextText = memoryRecall.contextLines.length
     ? `已知用户上下文（可以轻轻引用，不要机械复述）：\n${memoryRecall.contextLines.join('\n')}`
     : '';
@@ -841,6 +1031,10 @@ export default function Home() {
     () => tarotReadings.filter((reading) => Date.now() - new Date(reading.date).getTime() < 7 * 86400000),
     [tarotReadings],
   );
+  const weekDiaries = useMemo(() => getRecentItems(diaryEntries), [diaryEntries]);
+  const weekGuardianMessages = useMemo(() => getRecentGuardianMessages(guardianMessages), [guardianMessages]);
+  const weeklyMaterialCount = weekReadings.length + weekDiaries.length + weekGuardianMessages.length;
+  const weeklyReviewReady = weeklyMaterialCount >= 3;
 
   const weeklyReportText = useMemo(() => {
     if (weekReadings.length === 0) return '本周还没有足够牌迹，先抽一张今日牌。';
@@ -873,6 +1067,15 @@ export default function Home() {
 
     return `这周你更常问「${topTheme?.count ? topTheme.label : '自我状态'}」，代表牌是「${topCard}」。`;
   }, [weekReadings, plusActive]);
+  const weeklyReviewText = useMemo(() => {
+    if (weeklyMaterialCount === 0) return '本周还没有足够线索，先抽一张今日牌。';
+    if (!plusActive && weeklyReviewReady) {
+      return `本周已经沉淀 ${weeklyMaterialCount} 条材料。Plus 会把牌迹、日记和守护回应整理成完整 7 日复盘。`;
+    }
+    const diaryLine = weekDiaries[0] ? `最近日记是${getMoodLabel(weekDiaries[0].mood)}` : '日记线索还在等待补充';
+    const guardianLine = weekGuardianMessages[0] ? '守护回应已经纳入复盘' : '守护回应还未形成稳定线索';
+    return `${weeklyReportText} ${diaryLine}，${guardianLine}。`;
+  }, [weekDiaries, weekGuardianMessages, weeklyMaterialCount, weeklyReviewReady, weeklyReportText, plusActive]);
 
   const scrollConversationToBottom = (behavior: ScrollBehavior = 'smooth') => {
     const run = () => {
@@ -1062,6 +1265,7 @@ export default function Home() {
             {
               role: 'user',
               content: [
+                TAROT_SYSTEM_PROMPT,
                 memoryContextText,
                 shouldDraw
                   ? buildPrompt(question, cards, isInternetMode)
@@ -1100,7 +1304,7 @@ export default function Home() {
             date: new Date().toISOString(),
             question,
             cards: cardsText,
-            summary: answer.replace(/\s+/g, ' ').slice(0, 140),
+            summary: answer.trim(),
             cardImage: image,
             cardImages: images,
           },
@@ -1163,15 +1367,27 @@ export default function Home() {
   const handleShareReadingCard = async (reading: TarotReading) => {
     const canvas = document.createElement('canvas');
     canvas.width = 1080;
-    canvas.height = 1440;
+    canvas.height = 10;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const bg = ctx.createLinearGradient(0, 0, 1080, 1440);
+    ctx.font = '800 38px sans-serif';
+    const questionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', 488);
+    ctx.font = '800 30px sans-serif';
+    const cardLines = getCanvasTextLines(ctx, reading.cards || '未记录牌面', 488);
+    ctx.font = '500 30px sans-serif';
+    const summaryLines = getCanvasTextLines(ctx, reading.summary || '这次牌面已经留在档案里。', 896);
+    const sideTextBottom = 318 + questionLines.length * 52 + 56 + cardLines.length * 44;
+    const summaryTop = Math.max(880, sideTextBottom + 80);
+    const canvasHeight = Math.max(1440, summaryTop + summaryLines.length * 52 + 190);
+
+    canvas.height = canvasHeight;
+
+    const bg = ctx.createLinearGradient(0, 0, 1080, canvasHeight);
     bg.addColorStop(0, '#0b1020');
     bg.addColorStop(1, '#070912');
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, 1080, 1440);
+    ctx.fillRect(0, 0, 1080, canvasHeight);
 
     ctx.fillStyle = 'rgba(244,207,131,0.14)';
     ctx.beginPath();
@@ -1194,29 +1410,55 @@ export default function Home() {
     });
 
     if (loaded) ctx.drawImage(image, 92, 230, 360, 560);
+    ctx.fillStyle = '#F4CF83';
+    ctx.font = '800 24px sans-serif';
+    ctx.fillText('提问', 500, 268);
     ctx.fillStyle = '#ffffff';
-    ctx.font = '800 42px sans-serif';
-    wrapCanvasText(ctx, reading.question, 500, 300, 430, 58, 4);
+    ctx.font = '800 38px sans-serif';
+    const questionBottom = drawCanvasLines(ctx, questionLines, 500, 318, 52);
+    ctx.fillStyle = '#F4CF83';
+    ctx.font = '800 24px sans-serif';
+    ctx.fillText('牌面', 500, questionBottom + 34);
     ctx.fillStyle = '#F4CF83';
     ctx.font = '800 30px sans-serif';
-    wrapCanvasText(ctx, reading.cards, 500, 580, 430, 44, 3);
+    drawCanvasLines(ctx, cardLines, 500, questionBottom + 82, 44);
+    ctx.fillStyle = '#F4CF83';
+    ctx.font = '800 28px sans-serif';
+    ctx.fillText('星轨解读', 92, summaryTop - 44);
     ctx.fillStyle = 'rgba(255,255,255,0.78)';
     ctx.font = '500 30px sans-serif';
-    wrapCanvasText(ctx, reading.summary, 92, 900, 880, 52, 6);
+    drawCanvasLines(ctx, summaryLines, 92, summaryTop, 52);
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) return;
-    const file = new File([blob], `星轨牌迹-${Date.now()}.png`, { type: 'image/png' });
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ title: '我的星轨牌迹', files: [file] });
-      return;
+    ctx.fillStyle = 'rgba(244,207,131,0.58)';
+    ctx.font = '600 24px sans-serif';
+    ctx.fillText('星轨 AstroRail · 每一次牌迹都值得完整留下', 92, canvasHeight - 76);
+
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('分享图生成失败');
+      const file = new File([blob], `星轨牌迹-${Date.now()}.png`, { type: 'image/png' });
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ title: '我的星轨牌迹', files: [file] });
+          return;
+        } catch (error: any) {
+          if (error?.name === 'AbortError') return;
+          console.warn('Native share failed, falling back to download:', error);
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.name;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (error) {
+      console.error('Share image failed:', error);
+      window.alert('分享图生成失败，请稍后再试。');
     }
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.name;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -1715,6 +1957,30 @@ export default function Home() {
                   <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
                     {memoryRecall.desc}
                   </p>
+                  <div className="mt-3 grid gap-1.5">
+                    {visibleMemoryInsights.map((insight) => (
+                      <div
+                        key={`${insight.label}-${insight.text}`}
+                        className="grid gap-0.5 rounded-[16px] border border-[#eadcc8]/64 bg-white/42 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:border-white/[0.06] dark:bg-white/[0.045]"
+                      >
+                        <span className="text-[10px] font-semibold text-[#a06b22] dark:text-[#f4cf83]">
+                          {insight.label}
+                        </span>
+                        <span className="line-clamp-2 text-[11px] leading-relaxed text-[#746653] dark:text-white/52">
+                          {insight.text}
+                        </span>
+                      </div>
+                    ))}
+                    {!plusActive && memoryRecall.insights.length > visibleMemoryInsights.length && (
+                      <button
+                        type="button"
+                        onClick={() => openUpgradePrompt('history')}
+                        className="h-8 rounded-[16px] border border-[#eadcc8]/64 bg-[#f8ecd7]/52 px-3 text-[11px] font-semibold text-[#9b641e] transition-colors hover:bg-[#f2dfbf]/70 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-[#f4cf83]"
+                      >
+                        解锁完整 3 条记忆线索
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={handleMemoryRecallAction}
@@ -1722,6 +1988,36 @@ export default function Home() {
                   className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
                 >
                   {memoryRecall.cta}
+                </button>
+              </div>
+            </motion.section>
+          )}
+
+          {visibleMessages.length === 0 && weeklyReviewReady && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.12, type: 'spring', stiffness: 220, damping: 24 }}
+              className="order-2 rounded-[24px] border border-[#d9b56d]/34 bg-[#fff4df]/70 p-3 shadow-[0_14px_34px_rgba(120,82,24,0.10)] dark:border-[#f4cf83]/16 dark:bg-[#f4cf83]/[0.055]"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">
+                    <CalendarCheck size={13} />
+                    <span>7 日星轨复盘</span>
+                    <span className="rounded-full bg-[#f1dfbd]/80 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
+                      {weeklyMaterialCount} 条材料
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/54">
+                    {plusActive ? '完整趋势、证据和行动建议已经可看。' : '你已经有材料做复盘了，免费版先看摘要，Plus 解锁完整报告。'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowReadingLog(true)}
+                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
+                >
+                  查看复盘
                 </button>
               </div>
             </motion.section>
@@ -1782,7 +2078,7 @@ export default function Home() {
                   <div className="grid grid-cols-3 gap-2">
                     <DailyMission icon={<Sparkles size={13} />} done={askedToday} title={'\u95ee\u4e00\u4ef6\u4e8b'} onClick={() => handleDailyMissionShortcut('ask')} />
                     <DailyMission icon={<Gift size={13} />} done={wroteDiaryToday} title={'\u5199\u5fc3\u60c5'} onClick={() => handleDailyMissionShortcut('diary')} />
-                    <DailyMission icon={<Crown size={13} />} done={simulatedRecently} title={'\u505a\u9009\u62e9'} onClick={() => handleDailyMissionShortcut('simulator')} />
+                    <DailyMission icon={<Crown size={13} />} done={simulatedToday} title={'\u505a\u9009\u62e9'} onClick={() => handleDailyMissionShortcut('simulator')} />
                   </div>
                   <div className="mt-3 rounded-[22px] bg-[#f5eadb]/72 p-4 dark:bg-white/[0.055]">
                     <div className="flex items-center justify-between gap-3">
@@ -1961,7 +2257,10 @@ export default function Home() {
         open={showReadingLog}
         onClose={() => setShowReadingLog(false)}
         readings={tarotReadings}
-        weeklyReportText={weeklyReportText}
+        messages={messages}
+        diaryEntries={diaryEntries}
+        guardianMessages={guardianMessages}
+        weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
         onUpgrade={() => openUpgradePrompt('weekly')}
@@ -2328,7 +2627,7 @@ export default function Home() {
                 <div className="grid grid-cols-3 gap-2">
                   <DailyMission icon={<Sparkles size={13} />} done={askedToday} title="问一件事" />
                   <DailyMission icon={<Gift size={13} />} done={wroteDiaryToday} title="写心情" />
-                  <DailyMission icon={<Crown size={13} />} done={simulatedRecently} title="做选择" />
+                  <DailyMission icon={<Crown size={13} />} done={simulatedToday} title="做选择" />
                 </div>
                 <div className="mt-3 rounded-[24px] border border-apple-border bg-apple-surface p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -2507,7 +2806,10 @@ export default function Home() {
         open={showReadingLog}
         onClose={() => setShowReadingLog(false)}
         readings={tarotReadings}
-        weeklyReportText={weeklyReportText}
+        messages={messages}
+        diaryEntries={diaryEntries}
+        guardianMessages={guardianMessages}
+        weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
         onUpgrade={() => openUpgradePrompt('weekly')}
@@ -2848,6 +3150,28 @@ function UpgradePromptModal({
       cta: '生成完整周报',
     },
   }[reason];
+  const paidWhy = {
+    energy: {
+      title: '这条线索正在变清楚',
+      desc: 'Plus 不是单纯多几次提问，而是让这次问题能接着历史继续追问，不用每次从头讲。',
+      cta: '继续这条线索',
+    },
+    history: {
+      title: '把你的牌迹留下来',
+      desc: '免费版适合体验，Plus 适合长期记录。它会保留更多牌迹，并把反复出现的问题整理成可复盘的线索。',
+      cta: '留下我的长期档案',
+    },
+    weekly: {
+      title: '你已经有材料做 7 日复盘了',
+      desc: 'Plus 会把牌迹、日记和守护回访接成一份完整报告，让你看到自己真正反复卡住的地方。',
+      cta: '查看完整复盘',
+    },
+  }[reason];
+  const valuePillars = [
+    { title: '长期记忆', desc: '持续沉淀' },
+    { title: '7 日复盘', desc: '看清反复主题' },
+    { title: '守护回访', desc: '每天接住近况' },
+  ];
 
   return createPortal(
     <AnimatePresence>
@@ -2872,8 +3196,8 @@ function UpgradePromptModal({
                   <Crown size={21} />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-base font-black text-apple-text">{copy.title}</div>
-                  <p className="mt-1 text-sm leading-relaxed text-apple-text-muted">{copy.desc}</p>
+                  <div className="text-base font-black text-apple-text">{paidWhy.title}</div>
+                  <p className="mt-1 text-sm leading-relaxed text-apple-text-muted">{paidWhy.desc}</p>
                   <p className="mt-2 text-xs leading-relaxed text-apple-text-muted">
                     星轨不是只给一次答案，而是把你反复出现的情绪、问题和选择慢慢记下来。
                   </p>
@@ -2884,6 +3208,14 @@ function UpgradePromptModal({
               </button>
             </div>
             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+              {valuePillars.map((item) => (
+                <div key={item.title} className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
+                  <div className="font-black text-apple-text">{item.title}</div>
+                  <div>{item.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden">
               <div className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
                 <div className="font-black text-apple-text">继续问</div>
                 <div>不打断</div>
@@ -2911,7 +3243,7 @@ function UpgradePromptModal({
                 onClick={onGoPlus}
                 className="rounded-full border border-apple-border bg-apple-surface-hover py-3 text-sm font-bold text-apple-text"
               >
-                {copy.cta}
+                {paidWhy.cta}
               </button>
             </div>
           </motion.div>
@@ -3022,6 +3354,9 @@ function ReadingLog({
   open,
   onClose,
   readings,
+  messages,
+  diaryEntries,
+  guardianMessages,
   weeklyReportText,
   weekCount,
   plusActive,
@@ -3032,6 +3367,9 @@ function ReadingLog({
   open: boolean;
   onClose: () => void;
   readings: TarotReading[];
+  messages: Message[];
+  diaryEntries: DiaryEntry[];
+  guardianMessages: CompanionMessage[];
   weeklyReportText: string;
   weekCount: number;
   plusActive: boolean;
@@ -3039,9 +3377,28 @@ function ReadingLog({
   onShare: (reading: TarotReading) => void;
   onContinue: (prompt: string) => void;
 }) {
+  const [expandedTimelineIds, setExpandedTimelineIds] = useState<Set<string>>(() => new Set());
+  const [expandedReadingIds, setExpandedReadingIds] = useState<Set<string>>(() => new Set());
   if (typeof document === 'undefined') return null;
-  const archiveReport = buildTarotArchiveReport(readings);
+  const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages);
   const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
+  const getDisplaySummary = (reading: TarotReading) => getFullReadingSummary(reading, messages);
+  const toggleTimeline = (id: string) => {
+    setExpandedTimelineIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleReading = (id: string) => {
+    setExpandedReadingIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return createPortal(
     <AnimatePresence>
@@ -3076,7 +3433,7 @@ function ReadingLog({
                     <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
                       本周档案
                     </div>
-                    <div className="mt-1 truncate text-xl font-black text-apple-text">{archiveReport.title}</div>
+                    <div className="mt-1 text-xl font-black leading-snug text-apple-text">{archiveReport.title}</div>
                     <div className="mt-1 text-xs text-apple-text-muted">
                       {archiveReport.dateRangeLabel} · {weekCount} 次牌迹
                     </div>
@@ -3090,6 +3447,27 @@ function ReadingLog({
                 </div>
 
                 <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{weeklyReportText}</p>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {archiveReport.signals.slice(0, plusActive ? 3 : 2).map((signal) => (
+                    <div key={signal.label} className="rounded-[18px] border border-apple-border bg-apple-surface/64 p-3">
+                      <div className="text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]">{signal.label}</div>
+                      <div className="mt-1 line-clamp-1 text-xs font-black text-apple-text">{signal.value}</div>
+                      <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{signal.desc}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {archiveReport.evidence.length > 0 && (
+                  <div className="mt-3 rounded-[20px] bg-apple-surface/60 p-3">
+                    <div className="mb-2 text-[11px] font-black text-apple-text">本周证据</div>
+                    <div className="grid gap-1.5">
+                      {archiveReport.evidence.slice(0, plusActive ? 3 : 1).map((item) => (
+                        <div key={item} className="text-[11px] leading-relaxed text-apple-text-muted">{item}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {archiveReport.keywords.map((keyword) => (
@@ -3108,16 +3486,35 @@ function ReadingLog({
                     <div className="text-xs leading-relaxed text-apple-text-muted">还没有可以沉淀的牌迹，先抽一张今日牌。</div>
                   ) : (
                     <div className="space-y-2">
-                      {visibleTimeline.map((item) => (
-                        <div key={item.id} className="grid grid-cols-[44px_minmax(0,1fr)] gap-2">
-                          <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
-                          <div className="min-w-0 border-l border-[#F4CF83]/24 pl-3">
-                            <div className="truncate text-xs font-black text-apple-text">{item.title}</div>
-                            <div className="mt-0.5 truncate text-[11px] font-bold text-[#B97B28] dark:text-[#F4CF83]">{item.card}</div>
-                            <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{item.summary}</div>
+                      {visibleTimeline.map((item) => {
+                        const expanded = expandedTimelineIds.has(item.id);
+                        const canCollapse = shouldCollapseReadingText(item.summary, 118);
+                        return (
+                          <div key={item.id} className="grid grid-cols-[44px_minmax(0,1fr)] gap-2">
+                            <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
+                            <div className="min-w-0 border-l border-[#F4CF83]/24 pl-3">
+                              <div className="text-xs font-black leading-snug text-apple-text">{item.title}</div>
+                              <div className="mt-0.5 text-[11px] font-bold leading-snug text-[#B97B28] dark:text-[#F4CF83]">{item.card}</div>
+                              <div
+                                className={clsx(
+                                  'mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-apple-text-muted',
+                                  canCollapse && !expanded && 'line-clamp-3',
+                                )}
+                              >
+                                {item.summary}
+                              </div>
+                              {canCollapse && (
+                                <button
+                                  onClick={() => toggleTimeline(item.id)}
+                                  className="mt-1 rounded-full px-0 text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]"
+                                >
+                                  {expanded ? '收起' : '展开完整解读'}
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {!plusActive && archiveReport.timeline.length > visibleTimeline.length && (
@@ -3166,17 +3563,17 @@ function ReadingLog({
                           <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-bold text-apple-text">{reading.question}</div>
-                          <div className="mt-1 truncate text-xs text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
-                          <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-apple-text-muted">
-                            {reading.summary}
+                          <div className="text-sm font-bold leading-snug text-apple-text">{reading.question}</div>
+                          <div className="mt-1 text-xs leading-snug text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
+                          <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted">
+                            {getDisplaySummary(reading)}
                           </p>
                           <div className="mt-2 flex items-center justify-between gap-2">
                             <div className="text-[10px] text-apple-text-muted">
                               {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
                             </div>
                             <button
-                              onClick={() => onShare(reading)}
+                              onClick={() => onShare({ ...reading, summary: getDisplaySummary(reading) })}
                               className="rounded-full border border-apple-border bg-apple-surface px-2.5 py-1 text-[10px] font-bold text-apple-text-muted"
                             >
                               生成分享图
@@ -3197,32 +3594,37 @@ function ReadingLog({
   );
 }
 
-function wrapCanvasText(
+function getCanvasTextLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const paragraphs = String(text || '').split(/\n+/).map((part) => part.trim()).filter(Boolean);
+  const lines: string[] = [];
+
+  paragraphs.forEach((paragraph, index) => {
+    let line = '';
+    paragraph.split('').forEach((char) => {
+      const testLine = line + char;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        lines.push(line);
+        line = char;
+      } else {
+        line = testLine;
+      }
+    });
+    if (line) lines.push(line);
+    if (index < paragraphs.length - 1) lines.push('');
+  });
+
+  return lines.length ? lines : [''];
+}
+
+function drawCanvasLines(
   ctx: CanvasRenderingContext2D,
-  text: string,
+  lines: string[],
   x: number,
   y: number,
-  maxWidth: number,
   lineHeight: number,
-  maxLines: number,
 ) {
-  const chars = text.split('');
-  let line = '';
-  let lines = 0;
-  for (const char of chars) {
-    const testLine = line + char;
-    if (ctx.measureText(testLine).width > maxWidth && line) {
-      ctx.fillText(line, x, y);
-      line = char;
-      y += lineHeight;
-      lines += 1;
-      if (lines >= maxLines - 1) {
-        ctx.fillText(`${line}...`, x, y);
-        return;
-      }
-    } else {
-      line = testLine;
-    }
-  }
-  if (line) ctx.fillText(line, x, y);
+  lines.forEach((line, index) => {
+    if (line) ctx.fillText(line, x, y + index * lineHeight);
+  });
+  return y + lines.length * lineHeight;
 }

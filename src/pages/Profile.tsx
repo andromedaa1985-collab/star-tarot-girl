@@ -94,6 +94,21 @@ const SPIRITUAL_ANCHORS = [
   { title: '被陪着走完', desc: '每周复盘和守护信件把一次占卜变成一段可回看的陪伴。' },
 ];
 
+const PLUS_VALUE_PILLARS = [
+  {
+    title: '长期记忆',
+    desc: '牌迹、日记、档案、沙盘会沉淀成一个持续可追问的个人上下文。',
+  },
+  {
+    title: '7 日复盘',
+    desc: '把反复主题、情绪底色和行动建议整理出来，不只是单次占卜。',
+  },
+  {
+    title: '守护回访',
+    desc: '每日来信会回应最近真实线索，而不是泛泛安慰。',
+  },
+];
+
 type PayMethodId = (typeof PAY_METHODS)[number]['id'];
 type PaymentStatus = 'idle' | 'creating' | 'opened' | 'checking' | 'waiting' | 'paid' | 'failed';
 const TESTER_REDEEM_CODE = 'ASTRORAIL-TEST-2026';
@@ -131,6 +146,26 @@ export default function Profile() {
   const paymentReturnType = searchParams.get('payment') || '';
   const plusParam = searchParams.get('plus') || '';
   const planParam = searchParams.get('plan') || '';
+  const shopPlans = SHOP_PLANS.map((plan) => {
+    if (plan.id === 'plus_monthly') {
+      return {
+        ...plan,
+        label: '星轨 Plus',
+        badge: '长期记忆',
+        title: '让星轨真正记得你',
+        desc: '适合会反复问同一段关系、工作或选择的人。Plus 会把牌迹、日记和守护回访接成长期档案。',
+        bullets: ['7 日复盘整理反复主题和行动建议', '更多牌迹长期保存，适合连续追问', '守护回访会回应最近真实线索'],
+      };
+    }
+    if (plan.id === 'tarot_deep_report') {
+      return {
+        ...plan,
+        title: '把这一次问题讲完整',
+        desc: '单次报告适合一个已经很清楚的问题；如果你会连续回访同一主题，Plus 更划算。',
+      };
+    }
+    return plan;
+  });
   const userSegment = getUserSegment({
     plusActive,
     activeDays: engagement.activeDays,
@@ -139,7 +174,7 @@ export default function Profile() {
     simulationHistory: simulationHistory.length,
     guardianMessages: guardianMessages.filter((message) => message.role === 'user').length,
   });
-  const hasPlanParam = SHOP_PLANS.some((plan) => plan.id === planParam);
+  const hasPlanParam = shopPlans.some((plan) => plan.id === planParam);
   const recommendedPlanId = hasPlanParam
     ? planParam
     : tarotReadings.length >= 3 || diaryEntries.length >= 2 || simulationHistory.length >= 1
@@ -150,7 +185,7 @@ export default function Profile() {
     memorySeedCount > 0
       ? `你已经留下 ${memorySeedCount} 份线索。开通后，这些记录会变成可继续追问的上下文。`
       : '先从一份报告或档案开始，后面每次追问都不用重新铺垫背景。';
-  const selectedPlan = SHOP_PLANS.find((plan) => plan.id === selectedPlanId) || SHOP_PLANS[0];
+  const selectedPlan = shopPlans.find((plan) => plan.id === selectedPlanId) || shopPlans[0];
   const selectedPayMethodMeta = PAY_METHODS.find((method) => method.id === selectedPayMethod) || PAY_METHODS[0];
 
   const toggleSetting = (key: keyof typeof settings) => {
@@ -547,6 +582,14 @@ export default function Profile() {
                   </div>
                 </div>
               </div>
+              <div className="mt-4 grid gap-2">
+                {PLUS_VALUE_PILLARS.map((item) => (
+                  <div key={item.title} className="rounded-[20px] border border-apple-border bg-apple-surface-hover/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="text-sm font-black text-apple-text">{item.title}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{item.desc}</div>
+                  </div>
+                ))}
+              </div>
               {trialAvailable && (
                 <button
                   onClick={handleStartTrial}
@@ -589,7 +632,7 @@ export default function Profile() {
                 </div>
               </div>
               <div className="mt-5 space-y-3">
-                {SHOP_PLANS.map((plan) => (
+                {shopPlans.map((plan) => (
                   <button
                     key={plan.id}
                     type="button"
