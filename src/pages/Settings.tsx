@@ -357,7 +357,7 @@ export default function Settings() {
               )}
             </div>
           </div>
-          <SettingRow icon={<Shield size={18} />} title="隐私设置" onClick={() => navigate('/app/settings/privacy')} />
+          <SettingRow icon={<Shield size={18} />} title="隐私与存档" onClick={() => navigate('/app/settings/privacy')} />
           <SettingRow icon={<Bell size={18} />} title="通知管理" onClick={() => navigate('/app/settings/notifications')} />
         </div>
 

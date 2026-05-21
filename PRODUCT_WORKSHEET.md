@@ -21,12 +21,12 @@
 | P0-2 | 最高 | 深度复盘 | 付费缺少强理由 | 新增“7 日星轨复盘”：整合最近牌面、日记、守护聊天，生成趋势、反复主题、行动建议 | `src/pages/Home.tsx`, `src/pages/Profile.tsx`, `src/lib/membership.ts` | 用户有 3 条以上记录时出现复盘入口；Plus 展示完整报告 | 已完成 |
 | P0-3 | 最高 | AI 提示词 | AI 味可能重、泛泛安慰 | 统一 DeepSeek prompt：要求引用用户历史、给具体行动、避免模板话 | `src/pages/Home.tsx`, `src/pages/Diary.tsx`, `src/pages/Guardian.tsx`, `src/pages/Simulator.tsx` | 生成内容包含“根据你之前...”但不机械复述；每次至少 1 条可执行建议 | 已完成 |
 | P1-1 | 高 | 付费页 | 价格理由不够直观 | 重写 Plus 弹窗文案：不卖“次数”，卖“长期档案、深度复盘、守护陪伴” | `src/pages/Profile.tsx`, `src/components/FeatureGate.tsx` | 未付费用户能在 10 秒内理解 Plus 多了什么 | 已完成 |
-| P1-2 | 高 | 转化触发 | 付费入口出现时机偏硬 | 在用户第 3 次塔罗、第 2 篇日记、第 4 天回访时触发软转化卡 | `src/lib/engagement.ts`, `src/pages/Home.tsx` | 触发卡只在有上下文时出现，不打断抽牌主流程 | 待做 |
-| P1-3 | 高 | 隐私信任 | 用户会写敏感内容 | 新增“隐私与存档”简洁页：说明 key 不在前端、存档可导出/删除、AI 非医疗法律建议 | `src/pages/Settings.tsx`, `src/pages/Privacy.tsx` | 设置页能一键看到隐私说明和导出入口 | 待做 |
-| P2-1 | 中 | 日记 | 日记价值还像记录本 | 做“情绪关键词趋势”：从最近日记提取主题，复盘页使用 | `src/pages/Diary.tsx`, `src/lib/engagement.ts` | 日记超过 2 篇后能显示 3 个高频主题 | 待做 |
+| P1-2 | 高 | 转化触发 | 付费入口出现时机偏硬 | 在用户第 3 次塔罗、第 2 篇日记、第 4 天回访时触发软转化卡 | `src/lib/engagement.ts`, `src/pages/Home.tsx` | 触发卡只在有上下文时出现，不打断抽牌主流程 | 已完成 |
+| P1-3 | 高 | 隐私信任 | 用户会写敏感内容 | 新增“隐私与存档”简洁页：说明 key 不在前端、存档可导出/删除、AI 非医疗法律建议 | `src/pages/Settings.tsx`, `src/pages/Privacy.tsx` | 设置页能一键看到隐私说明和导出入口 | 已完成 |
+| P2-1 | 中 | 日记 | 日记价值还像记录本 | 做“情绪关键词趋势”：从最近日记提取主题，复盘页使用 | `src/pages/Diary.tsx`, `src/lib/engagement.ts` | 日记超过 2 篇后能显示 3 个高频主题 | 已完成 |
 | P2-2 | 中 | 守护 | 守护功能付费感不稳 | 守护每日信改成“回应昨天/最近问题”的来信，而不是泛泛陪伴 | `src/pages/Guardian.tsx` | 每日信至少引用 1 个近期主题 | 已完成 |
-| P2-3 | 中 | 八字/塔罗联动 | 功能像并列工具 | 在塔罗解读中轻量引用活跃八字档案，不强行玄学堆叠 | `src/pages/Home.tsx`, `src/pages/Bazi.tsx` | 有八字档案时，深度解读能出现“你的档案倾向...” | 待做 |
-| P3-1 | 低 | 运营 | 缺少价格实验 | 保留 9.9 / 19.9 两档文案实验位，不急着改支付逻辑 | `src/pages/Profile.tsx`, `server.ts` | 价格文案集中配置，后续易改 | 待做 |
+| P2-3 | 中 | 八字/塔罗联动 | 功能像并列工具 | 在塔罗解读中轻量引用活跃八字档案，不强行玄学堆叠 | `src/pages/Home.tsx`, `src/pages/Bazi.tsx` | 有八字档案时，深度解读能出现“你的档案倾向...” | 已完成 |
+| P3-1 | 低 | 运营 | 缺少价格实验 | 保留 9.9 / 19.9 两档文案实验位，不急着改支付逻辑 | `src/pages/Profile.tsx`, `server.ts` | 价格文案集中配置，后续易改 | 已完成 |
 
 ## 第一轮交付顺序
 

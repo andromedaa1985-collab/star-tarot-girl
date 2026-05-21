@@ -36,8 +36,84 @@ export interface NextBestAction {
   prompt?: string;
 }
 
+export interface SoftConversionTrigger {
+  id: 'tarot_3' | 'diary_2' | 'day_4';
+  title: string;
+  desc: string;
+  cta: string;
+  reason: 'history' | 'weekly';
+}
+
+export interface DiaryThemeSource {
+  id: string;
+  date: string;
+  mood: 'great' | 'good' | 'neutral' | 'bad' | 'awful';
+  content: string;
+  tags?: string[];
+}
+
+export interface DiaryThemeTrend {
+  id: string;
+  label: string;
+  entryCount: number;
+  score: number;
+  moodSummary: string;
+  evidence: string;
+  keywords: string[];
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_EVENTS = 240;
+const DIARY_THEME_WINDOW_MS = 30 * DAY_MS;
+
+const DIARY_THEME_BUCKETS = [
+  {
+    id: 'pressure',
+    label: '压力与焦虑',
+    keywords: ['焦虑', '压力', '烦', '崩溃', '担心', '害怕', '内耗', '紧张', '不安', '累', '疲惫'],
+  },
+  {
+    id: 'work',
+    label: '工作与责任',
+    keywords: ['工作', '项目', '职场', '老板', '同事', '任务', '加班', '责任', '绩效', '面试', '学习'],
+  },
+  {
+    id: 'relationship',
+    label: '关系与边界',
+    keywords: ['关系', '恋爱', '喜欢', '爱', '分手', '伴侣', '朋友', '家人', '父母', '边界', '沟通'],
+  },
+  {
+    id: 'choice',
+    label: '选择与方向',
+    keywords: ['选择', '方向', '决定', '纠结', '要不要', '该不该', '机会', '未来', '迷茫', '目标'],
+  },
+  {
+    id: 'self',
+    label: '自我照顾',
+    keywords: ['自己', '自我', '休息', '照顾', '身体', '睡眠', '失眠', '吃饭', '疗愈', '安全感'],
+  },
+  {
+    id: 'money',
+    label: '金钱与安全',
+    keywords: ['钱', '工资', '收入', '花钱', '消费', '房租', '存款', '财务', '安全感', '稳定'],
+  },
+] as const;
+
+const MOOD_WEIGHT: Record<DiaryThemeSource['mood'], number> = {
+  great: 1,
+  good: 1,
+  neutral: 1,
+  bad: 2,
+  awful: 3,
+};
+
+const MOOD_LABEL: Record<DiaryThemeSource['mood'], string> = {
+  great: '偏明亮',
+  good: '较稳定',
+  neutral: '较平',
+  bad: '偏低落',
+  awful: '很辛苦',
+};
 
 export function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -97,6 +173,197 @@ export function getDaysSince(dateKey: string | null, now = new Date()) {
   const target = new Date(`${dateKey}T00:00:00`).getTime();
   if (!Number.isFinite(target)) return 999;
   return Math.floor((new Date(getLocalDateKey(now)).getTime() - target) / DAY_MS);
+}
+
+function isUpgradePromptCoolingDown(value: string | null, now = new Date()) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return false;
+  return getLocalDateKey(parsed) === getLocalDateKey(now);
+}
+
+function getDiaryEntryTime(date: string) {
+  const direct = Date.parse(date);
+  if (Number.isFinite(direct)) return direct;
+  const [year, month, day] = date.split('-').map(Number);
+  const fallback = new Date(year || 1970, (month || 1) - 1, day || 1).getTime();
+  return Number.isFinite(fallback) ? fallback : 0;
+}
+
+function compactDiaryText(text: string, limit = 32) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+function summarizeDiaryMoods(entries: DiaryThemeSource[]) {
+  const ranked = Object.entries(
+    entries.reduce<Record<string, number>>((acc, entry) => {
+      const label = MOOD_LABEL[entry.mood] || '未记录';
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+
+  return ranked[0]?.[0] || '未记录';
+}
+
+export function buildDiaryThemeTrends(
+  entries: DiaryThemeSource[],
+  options: { limit?: number; days?: number; now?: number } = {},
+): DiaryThemeTrend[] {
+  const limit = options.limit || 3;
+  const windowMs = options.days ? options.days * DAY_MS : DIARY_THEME_WINDOW_MS;
+  const now = options.now || Date.now();
+  const recentEntries = [...entries]
+    .filter((entry) => now - getDiaryEntryTime(entry.date) <= windowMs)
+    .sort((a, b) => getDiaryEntryTime(b.date) - getDiaryEntryTime(a.date));
+  const scope = recentEntries.length > 0 ? recentEntries : [...entries].sort((a, b) => getDiaryEntryTime(b.date) - getDiaryEntryTime(a.date));
+
+  if (scope.length === 0) return [];
+
+  const trends = DIARY_THEME_BUCKETS.map((bucket) => {
+    const matchedEntries: DiaryThemeSource[] = [];
+    const matchedKeywords = new Set<string>();
+    let score = 0;
+
+    scope.forEach((entry) => {
+      const tags = entry.tags || [];
+      const text = `${entry.content} ${tags.join(' ')}`;
+      let entryScore = 0;
+
+      bucket.keywords.forEach((keyword) => {
+        const tagMatched = tags.some((tag) => tag.includes(keyword) || keyword.includes(tag));
+        const textMatched = text.includes(keyword);
+        if (tagMatched) entryScore += 3;
+        else if (textMatched) entryScore += 1;
+        if (tagMatched || textMatched) matchedKeywords.add(keyword);
+      });
+
+      if (entryScore > 0) {
+        matchedEntries.push(entry);
+        score += entryScore + MOOD_WEIGHT[entry.mood];
+      }
+    });
+
+    const latest = matchedEntries[0];
+    return {
+      id: bucket.id,
+      label: bucket.label,
+      entryCount: matchedEntries.length,
+      score,
+      moodSummary: summarizeDiaryMoods(matchedEntries),
+      evidence: latest ? `最近写到「${compactDiaryText(latest.content)}」` : '',
+      keywords: [...matchedKeywords].slice(0, 4),
+    } satisfies DiaryThemeTrend;
+  }).filter((trend) => trend.score > 0);
+
+  const fallbackTags = scope
+    .flatMap((entry) => entry.tags || [])
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .reduce<Map<string, number>>((acc, tag) => {
+      acc.set(tag, (acc.get(tag) || 0) + 1);
+      return acc;
+    }, new Map<string, number>());
+
+  const fallbackTrends = [...fallbackTags.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([tag, count]) => ({
+      id: `tag:${tag}`,
+      label: tag,
+      entryCount: count,
+      score: count,
+      moodSummary: summarizeDiaryMoods(scope.filter((entry) => entry.tags?.includes(tag))),
+      evidence: scope.find((entry) => entry.tags?.includes(tag))?.content
+        ? `最近写到「${compactDiaryText(scope.find((entry) => entry.tags?.includes(tag))?.content || '')}」`
+        : '',
+      keywords: [tag],
+    } satisfies DiaryThemeTrend));
+
+  const merged = [...trends, ...fallbackTrends]
+    .filter((trend, index, list) => list.findIndex((item) => item.label === trend.label) === index)
+    .sort((a, b) => b.score - a.score || b.entryCount - a.entryCount)
+    .slice(0, limit);
+
+  if (merged.length >= limit || scope.length < 2) return merged;
+
+  const fallbackPool = [
+    {
+      id: 'mood-flow',
+      label: '情绪波动',
+      entryCount: scope.length,
+      score: scope.reduce((sum, entry) => sum + MOOD_WEIGHT[entry.mood], 0),
+      moodSummary: summarizeDiaryMoods(scope),
+      evidence: scope[0] ? `最近写到「${compactDiaryText(scope[0].content)}」` : '',
+      keywords: ['情绪', '节奏'],
+    },
+    {
+      id: 'life-rhythm',
+      label: '生活节奏',
+      entryCount: scope.length,
+      score: Math.max(1, scope.length - 1),
+      moodSummary: summarizeDiaryMoods(scope),
+      evidence: scope[1] ? `也写到「${compactDiaryText(scope[1].content)}」` : '',
+      keywords: ['日常', '节奏'],
+    },
+    {
+      id: 'self-story',
+      label: '自我叙事',
+      entryCount: scope.length,
+      score: Math.max(1, scope.length - 2),
+      moodSummary: summarizeDiaryMoods(scope),
+      evidence: scope[2] ? `还有「${compactDiaryText(scope[2].content)}」` : '',
+      keywords: ['自己', '感受'],
+    },
+  ] satisfies DiaryThemeTrend[];
+
+  return [...merged, ...fallbackPool]
+    .filter((trend, index, list) => list.findIndex((item) => item.label === trend.label) === index)
+    .slice(0, limit);
+}
+
+export function getSoftConversionTrigger(input: {
+  plusActive: boolean;
+  tarotReadings: number;
+  diaryEntries: number;
+  activeDays: number;
+  lastUpgradePromptAt: string | null;
+  weeklyReviewReady: boolean;
+}) {
+  if (input.plusActive || isUpgradePromptCoolingDown(input.lastUpgradePromptAt)) return null;
+
+  if (input.weeklyReviewReady && input.tarotReadings >= 3) {
+    return {
+      id: 'tarot_3',
+      title: '你已经有一条可复盘的牌迹线',
+      desc: `已经留下 ${input.tarotReadings} 次牌迹，适合把反复出现的问题整理成 7 日复盘。`,
+      cta: '看看完整复盘',
+      reason: 'weekly',
+    } satisfies SoftConversionTrigger;
+  }
+
+  if (input.diaryEntries >= 2) {
+    return {
+      id: 'diary_2',
+      title: '日记已经能看出情绪底色了',
+      desc: `你写下了 ${input.diaryEntries} 篇日记，Plus 会把它和牌迹接起来，找出反复卡住的地方。`,
+      cta: '解锁深度复盘',
+      reason: 'weekly',
+    } satisfies SoftConversionTrigger;
+  }
+
+  if (input.activeDays >= 4 && input.tarotReadings + input.diaryEntries > 0) {
+    return {
+      id: 'day_4',
+      title: '星轨已经陪你回访了几天',
+      desc: `连续沉淀到第 ${input.activeDays} 天后，长期记忆和守护回访会比单次占卜更有用。`,
+      cta: '查看 Plus 价值',
+      reason: 'history',
+    } satisfies SoftConversionTrigger;
+  }
+
+  return null;
 }
 
 export function getUserSegment(input: {

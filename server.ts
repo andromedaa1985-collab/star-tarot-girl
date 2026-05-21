@@ -4,65 +4,9 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
 import { registerAuthRoutes } from "./api/authRoutes";
+import { PAYMENT_PLANS, type PaymentPlan } from "./src/lib/pricing";
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
-
-const PAYMENT_PLANS = [
-  {
-    id: "tarot_deep_report",
-    name: "星轨深度牌阵报告",
-    amount: "3.90",
-    description: "一次五张牌阵、温柔解读、可追问与报告沉淀",
-    entitlement: { type: "report", report: "tarot", energyBonus: 6 },
-    limits: { tarotReadings: 1, followups: 5 },
-    features: ["五张牌阵深度解读", "本次牌面可连续追问", "沉淀为一张可复盘报告"],
-  },
-  {
-    id: "plus_monthly",
-    name: "星轨 Plus 月卡",
-    amount: "9.90",
-    description: "长期记忆、每周复盘、无限追问当前牌面与陪伴成长",
-    entitlement: { type: "membership", plan: "plus", days: 31, energyFloor: 20 },
-    limits: { tarotReadings: 200, dailyCheckInEnergy: 2, dailyMissionEnergy: 6 },
-    features: ["每周情绪与牌面复盘", "200 条牌迹长期保存", "Plus 期间抽牌不扣能量", "专属牌面与陪伴细节"],
-  },
-  {
-    id: "relationship_report",
-    name: "双人关系合盘报告",
-    amount: "6.90",
-    description: "吸引点、冲突雷区、沟通方式与 7 日相处任务",
-    entitlement: { type: "report", report: "relationship", energyBonus: 8 },
-    limits: { profiles: 2, followups: 6 },
-    features: ["双人关系合盘", "冲突雷区与沟通建议", "关系时间线"],
-  },
-  {
-    id: "relationship_weekly",
-    name: "7 日关系陪伴包",
-    amount: "12.90",
-    description: "完整合盘、每日观察任务与一周复盘",
-    entitlement: { type: "report", report: "relationship_weekly", energyBonus: 10 },
-    limits: { profiles: 2, days: 7, followups: 8 },
-    features: ["完整关系合盘", "7 日相处任务", "一周后关系复盘"],
-  },
-  {
-    id: "couple_plus_monthly",
-    name: "双人 Plus 月卡",
-    amount: "16.90",
-    description: "长期记忆、关系陪伴、完整合盘与 Plus 权益",
-    entitlement: { type: "membership", plan: "plus", days: 31, energyFloor: 30 },
-    limits: { tarotReadings: 260, relationshipReports: 6, dailyMissionEnergy: 8 },
-    features: ["Plus 月卡权益", "完整关系合盘", "7 日关系陪伴", "更多关系复盘次数"],
-  },
-  {
-    id: "bazi_full_archive",
-    name: "八字完整命理档案",
-    amount: "19.90",
-    description: "八字排盘、用神、近期运势参考与长期档案",
-    entitlement: { type: "report", report: "bazi", energyBonus: 12 },
-    limits: { profiles: 1, followups: 10 },
-    features: ["完整命理档案", "近期运势参考", "适合长期复盘和提问"],
-  },
-];
 
 const alipayOrders = new Map<string, any>();
 const paymentOrders = alipayOrders;
@@ -105,7 +49,7 @@ function md5(value: string) {
   return crypto.createHash("md5").update(value, "utf8").digest("hex");
 }
 
-function createOrder(plan: (typeof PAYMENT_PLANS)[number], provider: string) {
+function createOrder(plan: PaymentPlan, provider: string) {
   const orderId = `AR${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   paymentOrders.set(orderId, {
     id: orderId,

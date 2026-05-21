@@ -17,6 +17,7 @@ import {
   startPlusTrial,
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
+import { SHOP_PLANS } from '../lib/pricing';
 
 const AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=b6e3f4',
@@ -24,63 +25,6 @@ const AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Jack&backgroundColor=ffdfbf',
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Mimi&backgroundColor=d1d4f9',
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Leo&backgroundColor=ffd5dc',
-];
-
-const SHOP_PLANS = [
-  {
-    id: 'tarot_deep_report',
-    label: '深度牌阵报告',
-    price: '3.9',
-    badge: '轻量入门',
-    title: '把这次卡住的事讲清楚',
-    desc: '适合心里反复打转、但还没办法落到纸面的时候。一次买断，不绑月卡。',
-    bullets: ['五张牌拆开现状、阻碍和建议', '把模糊情绪变成可复盘文字', '赠送 6 点能量，买完马上继续问'],
-  },
-  {
-    id: 'plus_monthly',
-    label: 'Plus 月卡',
-    price: '9.9',
-    badge: '最适合长期用',
-    title: '以后不用每次从头解释',
-    desc: '如果你会反复问同一段关系、工作或选择，Plus 会把牌迹和日记接成一条只属于你的长期线。',
-    bullets: ['周报整理你的高频问题和情绪趋势', '200 条牌迹长期保存', '让桌宠和解读更像认识你的人'],
-  },
-  {
-    id: 'relationship_report',
-    label: '双人关系合盘',
-    price: '6.9',
-    badge: '适合情侣',
-    title: '把“我们合不合”讲明白',
-    desc: '适合两个人一起看。解锁吸引点、冲突雷区、沟通方式和关系时间线。',
-    bullets: ['看见彼此最容易靠近的地方', '提前知道容易吵的雷区', '沉淀一条关系时间线'],
-  },
-  {
-    id: 'relationship_weekly',
-    label: '7 日关系陪伴',
-    price: '12.9',
-    badge: '更适合暧昧期',
-    title: '别只看合不合，看接下来怎么相处',
-    desc: '完整合盘加 7 天观察任务，每天给一个低压力行动，适合还没确定、正在磨合或想复盘的关系。',
-    bullets: ['包含完整关系合盘', '7 天相处任务和进度记录', '一周后更容易看清这段关系的稳定度'],
-  },
-  {
-    id: 'couple_plus_monthly',
-    label: '双人 Plus',
-    price: '16.9',
-    badge: '关系长期用',
-    title: '把这段关系留成长期档案',
-    desc: '适合反复问同一个人的用户。包含 Plus 长期记忆、完整关系合盘和 7 日关系陪伴。',
-    bullets: ['Plus 月卡权益', '解锁完整关系合盘和 7 日陪伴', '更适合情侣、暧昧和复合观察'],
-  },
-  {
-    id: 'bazi_full_archive',
-    label: '八字命理档案',
-    price: '19.9',
-    badge: '完整档案',
-    title: '把底层命盘先定下来',
-    desc: '适合想建立长期自我叙事的人。保存完整命理底稿后，后面的塔罗、日记和近期运势追问都会更有底色。',
-    bullets: ['八字、用神、流年提示', '近期运势可结合当前时间推断', '给长期陪伴一个稳定底盘'],
-  },
 ];
 
 const PAY_METHODS = [
@@ -146,26 +90,7 @@ export default function Profile() {
   const paymentReturnType = searchParams.get('payment') || '';
   const plusParam = searchParams.get('plus') || '';
   const planParam = searchParams.get('plan') || '';
-  const shopPlans = SHOP_PLANS.map((plan) => {
-    if (plan.id === 'plus_monthly') {
-      return {
-        ...plan,
-        label: '星轨 Plus',
-        badge: '长期记忆',
-        title: '让星轨真正记得你',
-        desc: '适合会反复问同一段关系、工作或选择的人。Plus 会把牌迹、日记和守护回访接成长期档案。',
-        bullets: ['7 日复盘整理反复主题和行动建议', '更多牌迹长期保存，适合连续追问', '守护回访会回应最近真实线索'],
-      };
-    }
-    if (plan.id === 'tarot_deep_report') {
-      return {
-        ...plan,
-        title: '把这一次问题讲完整',
-        desc: '单次报告适合一个已经很清楚的问题；如果你会连续回访同一主题，Plus 更划算。',
-      };
-    }
-    return plan;
-  });
+  const shopPlans = SHOP_PLANS;
   const userSegment = getUserSegment({
     plusActive,
     activeDays: engagement.activeDays,

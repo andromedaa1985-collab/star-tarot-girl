@@ -5,7 +5,7 @@ import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, L
 import { useNavigate } from 'react-router-dom';
 import { useAppContext, DiaryEntry, ReviewEntry } from '../store';
 import clsx from 'clsx';
-import { recordAppEvent } from '../lib/engagement';
+import { buildDiaryThemeTrends, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
@@ -111,6 +111,7 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
   const lines = cleanContent.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const sourceText = `${cleanContent} ${entries.map((entry) => `${entry.content} ${(entry.tags || []).join(' ')}`).join(' ')}`;
   const keywordCounts = new Map<string, number>();
+  const diaryTrends = buildDiaryThemeTrends(entries, { limit: 3 });
 
   entries.forEach((entry) => {
     entry.tags?.forEach((tag) => {
@@ -122,10 +123,12 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
     if (sourceText.includes(keyword)) keywordCounts.set(keyword, (keywordCounts.get(keyword) || 0) + 1);
   });
 
-  const keywords = [...keywordCounts.entries()]
+  const keywords = [
+    ...diaryTrends.map((trend) => trend.label),
+    ...[...keywordCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([keyword]) => keyword)
-    .slice(0, 5);
+  ].filter((keyword, index, list) => list.indexOf(keyword) === index).slice(0, 5);
 
   const sortedEntries = [...entries].sort((a, b) => parseDateKey(a.date).getTime() - parseDateKey(b.date).getTime());
   const timeline = sortedEntries.slice(-4).map((entry) => ({
@@ -175,6 +178,7 @@ export default function Diary() {
   const latestMoodLabel = MOODS.find(mood => mood.value === latestMood)?.label || '未记录';
   const reviewWindow = getReviewWindow(reviewRange, trustedNow);
   const scopedDiaryEntries = getEntriesInRange(diaryEntries, reviewWindow.startDate, reviewWindow.endDate);
+  const diaryThemeTrends = buildDiaryThemeTrends(diaryEntries, { limit: 3, days: 30, now: trustedNow.getTime() });
   const reviewRangeText = formatDateRange(reviewWindow.startDate, reviewWindow.endDate);
   const plusActive = isPlusActive(membership, trustedNow);
   const isPremiumReviewRange = reviewRange !== 'today';
@@ -388,6 +392,38 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <DiaryStat label="最近心情" value={latestMoodLabel} />
           </div>
         </section>
+
+        {diaryEntries.length >= 3 && diaryThemeTrends.length > 0 && (
+          <section className="rounded-3xl border border-apple-border bg-apple-surface/82 p-4 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[#11151f]/82 dark:shadow-[0_10px_32px_rgba(0,0,0,0.34)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-bold text-apple-text">
+                  <Tags size={15} className="text-apple-gold" />
+                  情绪关键词趋势
+                </div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-apple-text-muted">
+                  根据近 30 天日记提取，后续复盘会优先引用这些线索。
+                </div>
+              </div>
+              <div className="shrink-0 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+                {diaryEntries.length} 篇
+              </div>
+            </div>
+            <div className="grid gap-2">
+              {diaryThemeTrends.map((trend) => (
+                <div key={trend.id} className="rounded-[20px] border border-apple-border bg-apple-bg/44 px-3 py-2 dark:border-white/10 dark:bg-black/14">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-sm font-black text-apple-text">{trend.label}</div>
+                    <div className="shrink-0 text-[11px] font-bold text-apple-gold">{trend.entryCount} 次</div>
+                  </div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-apple-text-muted">
+                    {trend.moodSummary} · {trend.evidence || '继续写几篇，趋势会更清楚。'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Actions */}
         <div className="grid grid-cols-2 gap-4">

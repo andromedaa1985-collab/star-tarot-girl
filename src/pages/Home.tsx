@@ -49,7 +49,7 @@ import {
   isTesterActive,
   startPlusTrial,
 } from '../lib/membership';
-import { getNextBestAction, recordAppEvent } from '../lib/engagement';
+import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT } from '../lib/aiPrompting';
@@ -327,6 +327,33 @@ const shouldCreateNewReading = (question: string, hasCurrentReading: boolean) =>
   if (hasCurrentReading && includesKeyword(question, CURRENT_READING_KEYWORDS)) return false;
   if (includesKeyword(question, NEW_READING_KEYWORDS)) return true;
   return !hasCurrentReading;
+};
+
+const getActiveProfile = (profiles: UserProfile[], activeProfileId: string | null) =>
+  profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+
+const getBaziResultSummary = (baziResult: any | null | undefined) => {
+  if (!baziResult || typeof baziResult !== 'object') return '';
+
+  const pattern = baziResult.pattern?.name ? `格局倾向：${baziResult.pattern.name}` : '';
+  const strength = baziResult.wuxing?.strength ? `五行状态：${baziResult.wuxing.strength}` : '';
+  const favorable = Array.isArray(baziResult.wuxing?.favorable) && baziResult.wuxing.favorable.length
+    ? `喜用参考：${baziResult.wuxing.favorable.join('、')}`
+    : '';
+  const dailyLuck = baziResult.dailyLuck?.summary ? `近期气象：${getShortText(baziResult.dailyLuck.summary, 42)}` : '';
+
+  return [pattern, strength, favorable, dailyLuck].filter(Boolean).join('；');
+};
+
+const buildProfileTarotContext = (profile: UserProfile | null, baziResult: any | null | undefined) => {
+  if (!profile) return '';
+  const baziSummary = getBaziResultSummary(baziResult);
+  return [
+    '活跃八字档案（只能轻量引用，不要把塔罗变成排盘报告）：',
+    `姓名：${profile.name}；性别：${profile.gender === 'female' ? '女' : '男'}；出生：${profile.birthDate} ${profile.birthTime}；出生地：${profile.birthLocation || '未填写'}；现居：${profile.currentLocation || '未填写'}。`,
+    baziSummary ? `档案倾向：${baziSummary}。` : '档案倾向：出生资料已保存，但完整排盘摘要还未生成。',
+    '回答要求：如果这次问题涉及状态、关系、选择或行动，请自然加入一句“你的档案倾向...”或同等表达；只点到为止，不要强行下命定结论。',
+  ].join('\n');
 };
 
 const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boolean) => {
@@ -627,12 +654,15 @@ const buildTarotArchiveReport = (
   messages: Message[] = [],
   diaryEntries: DiaryEntry[] = [],
   guardianMessages: CompanionMessage[] = [],
+  activeProfile: UserProfile | null = null,
+  baziResult: any | null = null,
 ): TarotArchiveReport => {
   const sorted = [...readings].sort((a, b) => getMemoryTime(b.date) - getMemoryTime(a.date));
   const recent = getRecentItems(sorted);
   const scope = recent.length > 0 ? recent : sorted.slice(0, 7);
   const recentDiaries = getRecentItems(diaryEntries);
   const recentGuardian = getRecentGuardianMessages(guardianMessages);
+  const diaryTrends = buildDiaryThemeTrends(recentDiaries, { limit: 3 });
   const recordCount = scope.length + recentDiaries.length + recentGuardian.length;
   const first = scope[scope.length - 1];
   const last = scope[0];
@@ -661,8 +691,9 @@ const buildTarotArchiveReport = (
 
   const keywords = [
     ...keywordScores.sort((a, b) => b.count - a.count).map((item) => item.label),
+    ...diaryTrends.map((trend) => trend.label),
     ...cardRank.slice(0, 2),
-  ].slice(0, 5);
+  ].filter((keyword, index, list) => list.indexOf(keyword) === index).slice(0, 5);
 
   const timeline = scope.slice(0, 5).map((reading) => ({
     id: reading.id,
@@ -682,6 +713,8 @@ const buildTarotArchiveReport = (
     }, {}),
   ).sort((a, b) => b[1] - a[1]);
   const topDiaryMood = diaryMoodRank[0]?.[0] || '等待日记';
+  const topDiaryTrend = diaryTrends[0];
+  const profileArchiveSummary = activeProfile ? getBaziResultSummary(baziResult) : '';
   const latestGuardian = recentGuardian[0];
   const signals = [
     {
@@ -691,17 +724,36 @@ const buildTarotArchiveReport = (
     },
     {
       label: '情绪底色',
-      value: recentDiaries.length ? `${topDiaryMood} · ${recentDiaries.length} 篇` : '等待日记',
-      desc: recentDiaries.length ? `最近日记提到「${getShortText(recentDiaries[0].content, 28)}」。` : '写下心情后，复盘会更像在看真实的你。',
+      value: topDiaryTrend
+        ? `${topDiaryTrend.label} · ${topDiaryTrend.entryCount} 次`
+        : recentDiaries.length
+          ? `${topDiaryMood} · ${recentDiaries.length} 篇`
+          : '等待日记',
+      desc: topDiaryTrend
+        ? `${topDiaryTrend.moodSummary}，${topDiaryTrend.evidence}。`
+        : recentDiaries.length
+          ? `最近日记提到「${getShortText(recentDiaries[0].content, 28)}」。`
+          : '写下心情后，复盘会更像在看真实的你。',
     },
     {
       label: '守护回声',
       value: recentGuardian.length ? `${recentGuardian.length} 封来信` : '等待守护',
       desc: latestGuardian ? `最近守护提到「${getShortText(latestGuardian.text, 32)}」。` : '守护聊天会成为周报里的陪伴线索。',
     },
-  ];
+    activeProfile
+      ? {
+          label: '档案倾向',
+          value: activeProfile.name,
+          desc: profileArchiveSummary
+            ? `你的档案倾向显示：${getShortText(profileArchiveSummary, 42)}。`
+            : '已保存出生档案，后续牌迹会沿着这份个人上下文沉淀。',
+        }
+      : null,
+  ].filter(Boolean) as TarotArchiveReport['signals'];
   const evidence = [
     scope[0] ? `最近牌迹：${getShortText(scope[0].question, 34)} / ${getShortText(scope[0].cards, 24)}` : '',
+    topDiaryTrend ? `日记趋势：${topDiaryTrend.label}，${topDiaryTrend.evidence}` : '',
+    activeProfile ? `活跃档案：${activeProfile.name}${profileArchiveSummary ? `，${getShortText(profileArchiveSummary, 46)}` : ''}` : '',
     recentDiaries[0] ? `最近日记：${getMoodLabel(recentDiaries[0].mood)}，${getShortText(recentDiaries[0].content, 42)}` : '',
     latestGuardian ? `守护回应：${getShortText(latestGuardian.text, 46)}` : '',
   ].filter(Boolean);
@@ -710,9 +762,11 @@ const buildTarotArchiveReport = (
       ? ['先抽一张今日牌，让第一条牌迹成为档案起点。', '问题越具体，后续复盘越能看出变化。']
       : [
           `先把这周的问题收束到「${themeLabel}」，不要同时审判所有方向。`,
+          activeProfile ? `结合「${activeProfile.name}」的档案倾向时，只取一个现实切入点，不要把自己交给结论。` : '',
+          topDiaryTrend ? `日记里的「${topDiaryTrend.label}」适合转成一个今天能照顾到自己的小动作。` : '',
           `代表牌「${topCard}」出现后，适合写下一个今天就能验证的小动作。`,
           scope.length >= 3 ? '下一次追问可以直接问“我反复卡住的地方是什么”。' : '再留下两三次牌迹后，时间线会更有参考价值。',
-        ];
+        ].filter(Boolean);
 
   return {
     title: scope.length > 0 ? `${themeLabel}观察档案` : '新的牌迹档案',
@@ -856,6 +910,7 @@ export default function Home() {
     setCardImage,
     theme,
     setTheme,
+    baziResult,
     diaryEntries,
     simulationHistory,
     profiles,
@@ -955,10 +1010,15 @@ export default function Home() {
     () => buildMemoryRecall({ tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId }),
     [tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId],
   );
+  const activeProfile = useMemo(() => getActiveProfile(profiles, activeProfileId), [profiles, activeProfileId]);
   const visibleMemoryInsights = memoryRecall.insights.slice(0, plusActive ? 3 : 1);
   const memoryContextText = memoryRecall.contextLines.length
     ? `已知用户上下文（可以轻轻引用，不要机械复述）：\n${memoryRecall.contextLines.join('\n')}`
     : '';
+  const profileTarotContextText = useMemo(
+    () => buildProfileTarotContext(activeProfile, baziResult),
+    [activeProfile, baziResult],
+  );
   const companionBubbleText = isDrawingCards
     ? '别盯着牌背看，它会紧张。'
     : isThinking
@@ -1035,6 +1095,14 @@ export default function Home() {
   const weekGuardianMessages = useMemo(() => getRecentGuardianMessages(guardianMessages), [guardianMessages]);
   const weeklyMaterialCount = weekReadings.length + weekDiaries.length + weekGuardianMessages.length;
   const weeklyReviewReady = weeklyMaterialCount >= 3;
+  const softConversionTrigger = getSoftConversionTrigger({
+    plusActive,
+    tarotReadings: tarotReadings.length,
+    diaryEntries: diaryEntries.length,
+    activeDays: engagement.activeDays,
+    lastUpgradePromptAt: engagement.lastUpgradePromptAt,
+    weeklyReviewReady,
+  });
 
   const weeklyReportText = useMemo(() => {
     if (weekReadings.length === 0) return '本周还没有足够牌迹，先抽一张今日牌。';
@@ -1074,8 +1142,11 @@ export default function Home() {
     }
     const diaryLine = weekDiaries[0] ? `最近日记是${getMoodLabel(weekDiaries[0].mood)}` : '日记线索还在等待补充';
     const guardianLine = weekGuardianMessages[0] ? '守护回应已经纳入复盘' : '守护回应还未形成稳定线索';
-    return `${weeklyReportText} ${diaryLine}，${guardianLine}。`;
-  }, [weekDiaries, weekGuardianMessages, weeklyMaterialCount, weeklyReviewReady, weeklyReportText, plusActive]);
+    const profileLine = activeProfile
+      ? `活跃档案是${activeProfile.name}${getBaziResultSummary(baziResult) ? '，会轻量参与塔罗判断' : ''}`
+      : '命理档案还未形成线索';
+    return `${weeklyReportText} ${diaryLine}，${guardianLine}，${profileLine}。`;
+  }, [weekDiaries, weekGuardianMessages, weeklyMaterialCount, weeklyReviewReady, weeklyReportText, plusActive, activeProfile, baziResult]);
 
   const scrollConversationToBottom = (behavior: ScrollBehavior = 'smooth') => {
     const run = () => {
@@ -1130,6 +1201,16 @@ export default function Home() {
     setShowUpgradePrompt(true);
     setEngagement((current) => ({ ...current, lastUpgradePromptAt: new Date().toISOString() }));
     setAppEvents((events) => recordAppEvent(events, 'upgrade_prompt', { reason }));
+  };
+
+  const dismissSoftConversion = () => {
+    setEngagement((current) => ({ ...current, lastUpgradePromptAt: new Date().toISOString() }));
+    setAppEvents((events) => recordAppEvent(events, 'upgrade_prompt', { reason: 'soft_dismiss' }));
+  };
+
+  const handleSoftConversion = () => {
+    if (!softConversionTrigger) return;
+    openUpgradePrompt(softConversionTrigger.reason);
   };
 
   const handleStartTrial = () => {
@@ -1267,6 +1348,7 @@ export default function Home() {
               content: [
                 TAROT_SYSTEM_PROMPT,
                 memoryContextText,
+                profileTarotContextText,
                 shouldDraw
                   ? buildPrompt(question, cards, isInternetMode)
                   : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
@@ -2023,6 +2105,47 @@ export default function Home() {
             </motion.section>
           )}
 
+          {visibleMessages.length === 0 && softConversionTrigger && (
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.16, type: 'spring', stiffness: 220, damping: 24 }}
+              className="order-2 rounded-[24px] border border-[#2347d9]/18 bg-[#f5f7ff]/72 p-3 shadow-[0_14px_34px_rgba(48,73,160,0.08)] dark:border-[#7c9cff]/16 dark:bg-[#7c9cff]/[0.055]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#3558d4] dark:text-[#b8c7ff]">
+                    <Crown size={13} />
+                    <span>Plus 时机到了</span>
+                  </div>
+                  <h3 className="mt-1 line-clamp-1 text-[14px] font-semibold text-[#241c14] dark:text-white/86">
+                    {softConversionTrigger.title}
+                  </h3>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                    {softConversionTrigger.desc}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={dismissSoftConversion}
+                    className="rounded-full p-2 text-[#83715c] hover:bg-black/[0.04] dark:text-white/45 dark:hover:bg-white/[0.07]"
+                    aria-label="稍后再看"
+                  >
+                    <X size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSoftConversion}
+                    className="rounded-[16px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.14)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
+                  >
+                    {softConversionTrigger.cta}
+                  </button>
+                </div>
+              </div>
+            </motion.section>
+          )}
+
           {visibleMessages.length === 0 && !showDailyPanel && (
           <section className="order-2 space-y-2">
             <div className="grid grid-cols-2 gap-2">
@@ -2260,6 +2383,8 @@ export default function Home() {
         messages={messages}
         diaryEntries={diaryEntries}
         guardianMessages={guardianMessages}
+        activeProfile={activeProfile}
+        baziResult={baziResult}
         weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
@@ -2809,6 +2934,8 @@ export default function Home() {
         messages={messages}
         diaryEntries={diaryEntries}
         guardianMessages={guardianMessages}
+        activeProfile={activeProfile}
+        baziResult={baziResult}
         weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
@@ -3357,6 +3484,8 @@ function ReadingLog({
   messages,
   diaryEntries,
   guardianMessages,
+  activeProfile,
+  baziResult,
   weeklyReportText,
   weekCount,
   plusActive,
@@ -3370,6 +3499,8 @@ function ReadingLog({
   messages: Message[];
   diaryEntries: DiaryEntry[];
   guardianMessages: CompanionMessage[];
+  activeProfile: UserProfile | null;
+  baziResult: any | null;
   weeklyReportText: string;
   weekCount: number;
   plusActive: boolean;
@@ -3380,7 +3511,7 @@ function ReadingLog({
   const [expandedTimelineIds, setExpandedTimelineIds] = useState<Set<string>>(() => new Set());
   const [expandedReadingIds, setExpandedReadingIds] = useState<Set<string>>(() => new Set());
   if (typeof document === 'undefined') return null;
-  const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages);
+  const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages, activeProfile, baziResult);
   const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
   const getDisplaySummary = (reading: TarotReading) => getFullReadingSummary(reading, messages);
   const toggleTimeline = (id: string) => {
@@ -3449,7 +3580,7 @@ function ReadingLog({
                 <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{weeklyReportText}</p>
 
                 <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  {archiveReport.signals.slice(0, plusActive ? 3 : 2).map((signal) => (
+                  {archiveReport.signals.slice(0, plusActive ? 4 : 2).map((signal) => (
                     <div key={signal.label} className="rounded-[18px] border border-apple-border bg-apple-surface/64 p-3">
                       <div className="text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]">{signal.label}</div>
                       <div className="mt-1 line-clamp-1 text-xs font-black text-apple-text">{signal.value}</div>
