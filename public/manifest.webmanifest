@@ -1,0 +1,54 @@
+{
+  "name": "星轨塔罗少女",
+  "short_name": "星轨",
+  "description": "塔罗、日记、守护回访与命理档案结合的中文陪伴应用。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1020",
+  "theme_color": "#f4cf83",
+  "categories": ["lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "/details-new.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/image-280.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/detail-card-hero.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日塔罗",
+      "short_name": "塔罗",
+      "description": "打开今日塔罗入口",
+      "url": "/app"
+    },
+    {
+      "name": "日记复盘",
+      "short_name": "日记",
+      "description": "记录今天的情绪和事件",
+      "url": "/app/diary"
+    },
+    {
+      "name": "命理档案",
+      "short_name": "命理",
+      "description": "查看八字与五行档案",
+      "url": "/app/bazi"
+    }
+  ]
+}
