@@ -114,7 +114,12 @@ const preloadImage = (src: string) =>
 const preloadImages = (sources: string[]) =>
   Promise.all(Array.from(new Set(sources)).map((src) => preloadImage(src))).then(() => undefined);
 
-const QUICK_PROMPTS = ['今日运势', '感情指引', '事业发展', '最近的烦恼'];
+const QUICK_PROMPTS = [
+  { label: '感情卡住', prompt: '我现在这段关系最需要看清什么？' },
+  { label: '工作选择', prompt: '我最近工作或事业上最该先处理哪一步？' },
+  { label: '二选一', prompt: '我正在纠结一个选择，帮我看下一步怎么判断。' },
+  { label: '状态低落', prompt: '我最近状态有点乱，今天最该先稳住什么？' },
+];
 
 const SPREADS = [
   { name: '单张指引', prompt: '帮我抽一张单张指引牌' },
@@ -124,10 +129,10 @@ const SPREADS = [
 ];
 
 const COMPOSER_SUGGESTIONS = [
-  { label: '今日运势', prompt: '今日运势' },
-  { label: '恋爱十字', prompt: '用恋爱十字牌阵看看这段关系' },
-  { label: '圣三角', prompt: '用圣三角牌阵看过去、现在和未来' },
-  { label: '事业岔路', prompt: '用事业岔路牌阵帮我判断选择' },
+  { label: '感情卡住', prompt: '我现在这段关系最需要看清什么？' },
+  { label: '工作选择', prompt: '我最近工作或事业上最该先处理哪一步？' },
+  { label: '二选一', prompt: '我正在纠结一个选择，帮我看下一步怎么判断。' },
+  { label: '状态低落', prompt: '我最近状态有点乱，今天最该先稳住什么？' },
 ];
 
 const COMPANION_OUTFITS = [
@@ -2241,14 +2246,14 @@ export default function Home() {
           {visibleMessages.length === 0 && !showDailyPanel && (
           <section className="order-2 space-y-2">
             <div className="grid grid-cols-2 gap-2">
-              {QUICK_PROMPTS.map((prompt) => (
+              {QUICK_PROMPTS.map((item) => (
                 <button
-                  key={prompt}
-                  onClick={() => handleSend(prompt)}
+                  key={item.label}
+                  onClick={() => handleSend(item.prompt)}
                   disabled={isThinking}
                   className="flex h-8 min-w-0 items-center justify-center rounded-[16px] border border-[#eadcc8]/64 bg-[#fff8ee]/58 px-2 text-[12px] font-medium text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] transition-colors hover:text-[#241c14] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-white/52 dark:hover:text-white"
                 >
-                  <span className="truncate">{prompt}</span>
+                  <span className="truncate">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -2782,14 +2787,14 @@ export default function Home() {
 
           <section className="relative z-10 -mt-1 space-y-1">
             <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
-              {QUICK_PROMPTS.map((prompt) => (
+              {QUICK_PROMPTS.map((item) => (
                 <button
-                  key={prompt}
-                  onClick={() => handleSend(prompt)}
+                  key={item.label}
+                  onClick={() => handleSend(item.prompt)}
                   disabled={isThinking}
                   className="flex h-6 shrink-0 items-center justify-center rounded-full bg-white/34 px-2 text-[10px] font-normal text-apple-text-muted shadow-[0_5px_12px_rgba(87,61,28,0.05),inset_0_1px_0_rgba(255,255,255,0.34)] transition-colors hover:text-apple-text disabled:opacity-50 dark:bg-white/[0.05]"
                 >
-                  <span className="truncate">{prompt}</span>
+                  <span className="truncate">{item.label}</span>
                 </button>
               ))}
               <button

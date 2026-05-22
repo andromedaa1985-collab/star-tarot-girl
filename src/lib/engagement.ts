@@ -394,10 +394,10 @@ export function getNextBestAction(input: {
   if (input.tarotReadings === 0) {
     return {
       id: 'tarot',
-      title: '先完成第一次占卜',
-      desc: '第一次牌迹会成为后续周报和长期记忆的起点。',
-      cta: '抽今日牌',
-      prompt: '今日运势',
+      title: '先把今天最卡的问题说出来',
+      desc: '不用懂牌阵，先选感情、工作、选择或状态里的一个小问题，第一条牌迹就会成为长期记忆的起点。',
+      cta: '开始第一次塔罗',
+      prompt: '我最近状态有点乱，今天最该先稳住什么？',
     } satisfies NextBestAction;
   }
 
@@ -405,7 +405,7 @@ export function getNextBestAction(input: {
     return {
       id: 'bazi',
       title: '补一份命理档案',
-      desc: '有档案后，日记复盘、守护寄语和沙盘会更像“懂你”。',
+      desc: '有档案后，日记复盘、守护回访和沙盘会更像“懂你”。',
       cta: '去建档案',
       route: '/app/bazi',
     } satisfies NextBestAction;
@@ -424,7 +424,7 @@ export function getNextBestAction(input: {
   if (!input.hasGuardianLetterToday) {
     return {
       id: 'guardian',
-      title: '领取今日守护寄语',
+      title: '领取今日守护回访',
       desc: '这是低成本回访点，适合每天回来打开一次。',
       cta: '去领取',
       route: '/app/guardian',
