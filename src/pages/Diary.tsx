@@ -10,6 +10,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
 import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -348,7 +349,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
     } catch (error: any) {
       console.error("Review Error:", error);
-      setReviewResult("复盘暂时失败了，但你的日记已经安全保存在这里。稍后再点一次就行。");
+      setReviewResult(SERVICE_FALLBACK.diaryReview);
     } finally {
       setIsReviewing(false);
     }

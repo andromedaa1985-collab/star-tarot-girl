@@ -19,6 +19,7 @@ import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
 import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
+import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 
 interface SimulationResult {
   choiceA: {
@@ -437,6 +438,7 @@ ${baziContext}
 `;
 
       let aiText = '';
+      let usedFallbackSimulation = false;
       try {
         const res = await fetch('/api/deepseek/chat', {
           method: 'POST',
@@ -459,14 +461,23 @@ ${baziContext}
       } catch (err) {
         console.error('DeepSeek Error:', err);
         aiText = '{}';
+        usedFallbackSimulation = true;
       }
 
-      const parsedResult = parseAiJson<Partial<SimulationResult>>(aiText);
-      const safeResult: SimulationResult =
-        parsedResult?.choiceA?.title && parsedResult?.choiceB?.title && parsedResult?.advice
-          ? parsedResult as SimulationResult
-          : createFallbackSimulation(choiceA, choiceB);
+      let parsedResult: Partial<SimulationResult> = {};
+      try {
+        parsedResult = parseAiJson<Partial<SimulationResult>>(aiText);
+      } catch (parseError) {
+        console.error('Simulation JSON Parse Error:', parseError);
+        usedFallbackSimulation = true;
+      }
+      const hasCompleteResult = Boolean(parsedResult?.choiceA?.title && parsedResult?.choiceB?.title && parsedResult?.advice);
+      const safeResult: SimulationResult = hasCompleteResult
+        ? parsedResult as SimulationResult
+        : createFallbackSimulation(choiceA, choiceB);
+      if (!hasCompleteResult) usedFallbackSimulation = true;
       setResult(safeResult);
+      setFormError(usedFallbackSimulation ? SERVICE_FALLBACK.simulator : null);
       setSimulationHistory(prev => [{
         id: crypto.randomUUID(),
         date: new Date().toISOString(),
@@ -482,7 +493,7 @@ ${baziContext}
       console.error('Simulation Error:', error);
       const fallback = createFallbackSimulation(choiceA, choiceB);
       setResult(fallback);
-      setFormError('推演暂时不稳定，我先给你一份保底判断，输入内容没有丢。');
+      setFormError(SERVICE_FALLBACK.simulator);
     } finally {
       setIsSimulating(false);
     }

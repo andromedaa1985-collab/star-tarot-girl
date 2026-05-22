@@ -11,6 +11,7 @@ import { hasFeatureAccess, isPlusActive } from '../lib/membership';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { parseAiJson } from '../lib/aiPrompting';
+import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -925,7 +926,34 @@ ${exactBaziStr}
 1. 神煞部分【必须完全使用我提供的精确神煞数据】，将其分类为“吉神相助”、“凶煞警惕”、“其他神煞”三类，【一个都不能漏掉】！绝对不能自己编造或遗漏。
 2. 请严格按照上述 JSON 结构返回，不要包含任何其他文字或Markdown标记。`;
 
+      const fallbackInterpretation: Partial<BaziResult> = {
+        pattern: {
+          name: `${weightedMetrics.strength}参考盘`,
+          description: '精确排盘已完成，智能格局文字暂时不稳定，先以五行、十神和神煞结果作为参考。',
+        },
+        wuxing: {
+          strength: weightedMetrics.strength,
+          favorable: weightedMetrics.favorable,
+          luckyColors: weightedMetrics.luckyColors,
+          luckyDirections: weightedMetrics.luckyDirections,
+          luckyNumbers: weightedMetrics.luckyNumbers,
+          elements: exactElements,
+        },
+        shensha: Object.entries(shenshaData).map(([category, items]) => ({
+          category,
+          items: items.length ? items : ['无明显神煞'],
+        })),
+        dailyLuck: {
+          score: 60,
+          summary: '智能流日文字暂时不稳定。今天先看一个现实动作：把最耗神的事拆成 10 分钟能开始的一步。',
+          luckyHours: '以实际作息为准',
+        },
+        personality: '精确排盘已保留。保底解读先看结构：日主、五行权重和十神分布比单一断语更值得参考。',
+        career: '事业或学业先不做绝对判断。今天适合选一个能验证的小动作，避免把长期压力一次压到自己身上。',
+        romance: '关系判断先看互动事实，不急着下命定结论。先观察对方是否有稳定回应，再决定下一步。',
+      };
       let aiText = "";
+      let usedPartialBaziFallback = false;
       
       try {
         const res = await fetch('/api/deepseek/chat', {
@@ -944,14 +972,24 @@ ${exactBaziStr}
           })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        aiText = data.choices[0].message.content;
+        if (!res.ok || data.error) throw new Error(data.error?.message || '八字推演请求失败');
+        const aiContent = data.choices?.[0]?.message?.content;
+        if (!aiContent) throw new Error('八字推演返回为空');
+        aiText = aiContent;
       } catch (err) {
         console.error("DeepSeek Error:", err);
-        aiText = "{}";
+        aiText = JSON.stringify(fallbackInterpretation);
+        usedPartialBaziFallback = true;
       }
 
-      const parsedResult = parseAiJson<Partial<BaziResult>>(aiText);
+      let parsedResult: Partial<BaziResult>;
+      try {
+        parsedResult = parseAiJson<Partial<BaziResult>>(aiText);
+      } catch (parseError) {
+        console.error("Bazi JSON Parse Error:", parseError);
+        parsedResult = fallbackInterpretation;
+        usedPartialBaziFallback = true;
+      }
       
       // Merge exact calculations with LLM interpretations
       const finalResult: BaziResult = {
@@ -981,9 +1019,10 @@ ${exactBaziStr}
         text: `你好，${baziFormData.name}。我已经为你排好了八字。关于你的命理，有什么想进一步了解的吗？`,
         timestamp: Date.now()
       }]);
+      if (usedPartialBaziFallback) setFormNotice(SERVICE_FALLBACK.baziPartial);
     } catch (error: any) {
       console.error("Bazi Calculation Error:", error);
-      setFormNotice(`推演暂时失败：${error.message || "稍后再试"}。你填的资料已经自动保存。`);
+      setFormNotice(getPublicServiceError(error, SERVICE_FALLBACK.baziCalculation));
     } finally {
       setIsCalculating(false);
     }
@@ -1051,7 +1090,7 @@ ${recentFortuneContext}
         aiText = data.choices[0].message.content;
       } catch (err) {
         console.error("DeepSeek Error:", err);
-        aiText = "天机不可泄露...";
+        aiText = SERVICE_FALLBACK.baziChat;
       }
 
       // Clean up any residual markdown
@@ -1069,7 +1108,7 @@ ${recentFortuneContext}
       setBaziMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'ai',
-        text: "星轨受到干扰，我暂时无法回答你的问题，请稍后再试。",
+        text: SERVICE_FALLBACK.baziChat,
         timestamp: Date.now()
       }]);
     } finally {

@@ -53,6 +53,7 @@ import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, rec
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 
 type DrawnCard = {
   name: string;
@@ -1334,6 +1335,7 @@ export default function Home() {
     let answer = shouldDraw
       ? fallbackAnswer(question, cards)
       : fallbackCurrentReadingAnswer(question, currentReading);
+    let usedFallbackAnswer = false;
     try {
       const response = await fetch('/api/deepseek/chat', {
         method: 'POST',
@@ -1360,11 +1362,16 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      answer = data?.choices?.[0]?.message?.content || answer;
+      if (!response.ok || data?.error) throw new Error(data?.error?.message || '塔罗解读请求失败');
+      const aiAnswer = data?.choices?.[0]?.message?.content;
+      if (!aiAnswer) throw new Error('塔罗解读返回为空');
+      answer = aiAnswer;
     } catch (error) {
       console.error('Tarot request failed:', error);
+      usedFallbackAnswer = true;
     }
     answer = cleanTarotAnswer(answer);
+    if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
 
     const drawingElapsed = Date.now() - drawingStartedAt;
     if (shouldDraw && drawingElapsed < DRAW_ANIMATION_MIN_MS) {

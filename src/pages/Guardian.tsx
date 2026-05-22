@@ -11,6 +11,7 @@ import {
   GUARDIAN_LETTER_SYSTEM_PROMPT,
   cleanAiText,
 } from '../lib/aiPrompting';
+import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -154,7 +155,7 @@ export default function Guardian() {
         aiText = data.choices[0].message.content;
       } catch (err) {
         console.error("DeepSeek Error:", err);
-        aiText = "星轨流转，愿你今日平安喜乐。";
+        aiText = SERVICE_FALLBACK.guardianLetter;
       }
 
       const cleanedText = cleanAiText(aiText);
@@ -166,7 +167,7 @@ export default function Guardian() {
 
     } catch (error) {
       console.error("Letter Generation Error:", error);
-      setDailyLetter("今天的星轨有点吵，但这不影响你往前走。先把今天最重要的一件小事做完，别急着证明自己，也别急着否定自己。");
+      setDailyLetter(SERVICE_FALLBACK.guardianLetter);
       setDailyLetterDate(todayStr);
       setShowLetter(true);
     } finally {
@@ -241,7 +242,7 @@ export default function Guardian() {
         aiText = data.choices[0].message.content;
       } catch (err) {
         console.error("DeepSeek Error:", err);
-        aiText = "我在这里，一直都在。";
+        aiText = SERVICE_FALLBACK.guardianChat;
       }
 
       const cleanedText = cleanAiText(aiText);
@@ -258,7 +259,7 @@ export default function Guardian() {
       setGuardianMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'ai',
-        text: "抱歉，星轨的波动让我暂时听不清你的声音，能再说一遍吗？",
+        text: SERVICE_FALLBACK.guardianChat,
         timestamp: Date.now()
       }]);
     } finally {
