@@ -369,10 +369,10 @@ const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boole
   return `用户问题：${question}
 抽到的塔罗牌：${formatCards(cards)}
 
-请用中文回答，语气客观但温柔，像一位塔罗少女在轻声陪伴用户，不吓人、不审判，也不堆玄学词。不要使用 Markdown 星号、加粗符号或井号标题。结构：
-1. 先用一句温柔但清醒的话说出核心。
-2. 解释牌意和问题的关系，注意给用户留一点余地。
-3. 给一个今天能执行的小建议。
+请用中文回答，语气客观但温柔，像一位塔罗少女在轻声陪伴用户，不吓人、不审判，也不堆玄学词。不要使用 Markdown 星号、加粗符号或井号标题。
+按“核心判断 → 牌面关系 → 今天先做”的顺序写，通常 3 段以内。
+第一句直接说出你看到的核心，不要铺垫“亲爱的”或“从牌面看”。
+最后必须给一个 10 分钟内能开始的小动作，尽量用“今天先...”开头。
 ${modeHint}`;
 };
 
@@ -408,7 +408,8 @@ const buildCurrentReadingPrompt = (
 
 ${currentContext}
 
-请不要重新抽牌，也不要假装出现了新牌。基于已有牌面继续解读，语气客观但温柔，像一位塔罗少女在轻声陪伴用户。不要使用 Markdown 星号、加粗符号或井号标题，回答要简洁、有行动建议。
+请不要重新抽牌，也不要假装出现了新牌。基于已有牌面继续解读，语气客观但温柔，像一位塔罗少女在轻声陪伴用户。不要使用 Markdown 星号、加粗符号或井号标题。
+回答控制在 3 段以内：先接住这次追问，再说明它和已有牌面的关系，最后给一个“今天先...”的小动作。
 ${modeHint}`;
 };
 
@@ -1022,43 +1023,6 @@ export default function Home() {
     () => buildProfileTarotContext(activeProfile, baziResult),
     [activeProfile, baziResult],
   );
-  const archiveSignals = useMemo(() => {
-    const guardianReplyCount = guardianMessages.filter((message) => message.role === 'ai').length;
-    return [
-      {
-        id: 'tarot',
-        label: '牌迹',
-        value: `${tarotReadings.length} 条`,
-        done: tarotReadings.length > 0,
-        desc: tarotReadings.length > 0 ? '已经能回看问题和牌面变化' : '先抽一张牌作为起点',
-      },
-      {
-        id: 'diary',
-        label: '日记',
-        value: `${diaryEntries.length} 篇`,
-        done: diaryEntries.length >= 2,
-        desc: diaryEntries.length >= 2 ? '可以提取情绪关键词趋势' : '写到 2 篇后会出现趋势',
-      },
-      {
-        id: 'profile',
-        label: '档案',
-        value: activeProfile ? activeProfile.name : '未建立',
-        done: Boolean(activeProfile),
-        desc: activeProfile ? '塔罗会轻量引用档案倾向' : '建档后解读会更个人化',
-      },
-      {
-        id: 'guardian',
-        label: '守护',
-        value: `${guardianReplyCount} 次`,
-        done: guardianReplyCount > 0,
-        desc: guardianReplyCount > 0 ? '回访线索已纳入周报' : '领取来信后形成回访线',
-      },
-    ];
-  }, [activeProfile, diaryEntries.length, guardianMessages, tarotReadings.length]);
-  const archiveMaturityScore = Math.min(100, archiveSignals.reduce((score, signal) => score + (signal.done ? 25 : 0), 0));
-  const archiveMaturityLabel =
-    archiveMaturityScore >= 75 ? '长期档案已成形' : archiveMaturityScore >= 50 ? '个人线索正在合流' : archiveMaturityScore >= 25 ? '已经有第一批线索' : '等待第一条线索';
-  const archiveNextSignal = archiveSignals.find((signal) => !signal.done);
   const companionBubbleText = isDrawingCards
     ? '别盯着牌背看，它会紧张。'
     : isThinking
@@ -2055,62 +2019,40 @@ export default function Home() {
             </div>
           </motion.section>
 
-          {visibleMessages.length === 0 && (
+          {visibleMessages.length === 0 && !showDailyPanel && (
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05, type: 'spring', stiffness: 220, damping: 24 }}
-              className="order-2 overflow-hidden rounded-[24px] border border-[#d5c3a9]/70 bg-[#fff9ef]/62 p-3 shadow-[0_16px_42px_rgba(88,60,28,0.09),inset_0_1px_0_rgba(255,255,255,0.68)] backdrop-blur-2xl dark:border-white/[0.07] dark:bg-white/[0.047]"
+              className="order-2 overflow-hidden rounded-[24px] border border-[#d9b56d]/42 bg-[#fff4df]/72 p-3 shadow-[0_16px_42px_rgba(88,60,28,0.10),inset_0_1px_0_rgba(255,255,255,0.70)] backdrop-blur-2xl dark:border-[#f4cf83]/16 dark:bg-[#f4cf83]/[0.055]"
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">
-                    <BookOpen size={13} />
-                    <span>星轨档案成熟度</span>
+                    <CalendarCheck size={13} />
+                    <span>今日先看</span>
+                    <span className="rounded-full bg-[#f1dfbd]/78 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
+                      {missionCount}/3
+                    </span>
                   </div>
-                  <h3 className="mt-1 truncate text-[15px] font-semibold text-[#2a2118] dark:text-white/86">
-                    {archiveMaturityLabel}
+                  <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
+                    {nextBestAction.title}
                   </h3>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                    {nextBestAction.desc}
+                  </p>
                 </div>
-                <div className="shrink-0 rounded-full bg-[#17130f] px-3 py-1.5 text-[12px] font-semibold text-[#f4cf83] dark:bg-[#f4cf83] dark:text-[#17130f]">
-                  {archiveMaturityScore}%
-                </div>
+                <button
+                  onClick={handleNextBestAction}
+                  disabled={isThinking}
+                  className="shrink-0 whitespace-nowrap rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                >
+                  {nextBestAction.cta}
+                </button>
               </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#eadcc8]/80 dark:bg-white/[0.08]">
-                <motion.div
-                  className="h-full rounded-full bg-gradient-to-r from-[#c88a34] via-[#f4cf83] to-[#7c9cff]"
-                  initial={false}
-                  animate={{ width: `${archiveMaturityScore}%` }}
-                />
+              <div className="mt-3 rounded-[18px] bg-[#f3e5ce]/58 px-3 py-2 text-[11px] leading-relaxed text-[#746653] dark:bg-white/[0.05] dark:text-white/50">
+                做完这一步，再写心情或做选择，今天的回访就会更像接着你的故事往下说。
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {archiveSignals.map((signal) => (
-                  <div
-                    key={signal.id}
-                    className={clsx(
-                      'rounded-[17px] border px-3 py-2',
-                      signal.done
-                        ? 'border-[#f4cf83]/28 bg-[#f4cf83]/12'
-                        : 'border-[#eadcc8]/64 bg-white/36 dark:border-white/[0.06] dark:bg-white/[0.04]',
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-black text-[#2a2118] dark:text-white/80">{signal.label}</span>
-                      <span className={clsx('text-[10px] font-bold', signal.done ? 'text-[#9b641e] dark:text-[#f4cf83]' : 'text-[#85745f] dark:text-white/45')}>
-                        {signal.done ? '已接入' : signal.value}
-                      </span>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-[#746653] dark:text-white/50">
-                      {signal.done ? signal.value : signal.desc}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              {archiveNextSignal && (
-                <div className="mt-3 rounded-[18px] bg-[#f3e5ce]/54 px-3 py-2 text-[11px] leading-relaxed text-[#746653] dark:bg-white/[0.05] dark:text-white/50">
-                  下一步：{archiveNextSignal.desc}
-                </div>
-              )}
             </motion.section>
           )}
 
