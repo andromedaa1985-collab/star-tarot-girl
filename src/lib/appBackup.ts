@@ -5,6 +5,7 @@ import {
   normalizeMembership,
   type MembershipState,
 } from './membership';
+import { normalizeGeneratedStorageValue } from './generationTrace';
 
 const BACKUP_FORMAT = 'astro-rail-local-archive';
 const BACKUP_VERSION = 1;
@@ -270,7 +271,7 @@ export function createAppBackup(): AppBackup {
 
   APP_STORAGE_KEYS.forEach((key) => {
     const value = readValue(key);
-    if (value !== undefined) data[key] = value;
+    if (value !== undefined) data[key] = normalizeGeneratedStorageValue(key, value);
   });
 
   return {
@@ -366,7 +367,7 @@ export function importAppBackup(backup: AppBackup): ImportResult {
   APP_STORAGE_KEYS.forEach((key) => {
     if (!(key in backup.data)) return;
 
-    const incoming = backup.data[key];
+    const incoming = normalizeGeneratedStorageValue(key, backup.data[key]);
     if (incoming === undefined) {
       skippedKeys.push(key);
       return;

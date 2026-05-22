@@ -12,6 +12,7 @@ import {
   cleanAiText,
 } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
+import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -90,10 +91,14 @@ export default function Guardian() {
     if (guardianMessages.length === 0) {
       const greeting = `你好，${userName}。我是你的星轨守护灵。我能看见你的命理星盘，也能感知你的情绪起伏。无论发生什么，我都在这里。`;
       setGuardianMessages([{
-        id: Date.now().toString(),
+        id: createRecordId('guardian'),
         role: 'ai',
         text: greeting,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('guardian_chat', {
+          model: 'system',
+          usedFallback: false,
+        }),
       }]);
     }
   }, []);
@@ -180,7 +185,7 @@ export default function Guardian() {
 
     const userText = input.trim();
     const newUserMsg = {
-      id: Date.now().toString(),
+      id: createRecordId('guardian'),
       role: 'user' as const,
       text: userText,
       timestamp: Date.now()
@@ -193,6 +198,7 @@ export default function Guardian() {
     setAppEvents((events) => recordAppEvent(events, 'guardian_chat'));
 
     try {
+      let usedFallbackChat = false;
       let baziContext = "用户暂未测算八字。";
       if (baziResult) {
         baziContext = `用户的八字格局是【${baziResult.pattern.name}】，五行喜用神是【${baziResult.wuxing.favorable.join('、')}】，性格特质是【${baziResult.personality}】。`;
@@ -243,24 +249,33 @@ export default function Guardian() {
       } catch (err) {
         console.error("DeepSeek Error:", err);
         aiText = SERVICE_FALLBACK.guardianChat;
+        usedFallbackChat = true;
       }
 
       const cleanedText = cleanAiText(aiText);
 
       setGuardianMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: createRecordId('guardian'),
         role: 'ai',
         text: cleanedText,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('guardian_chat', {
+          model: 'deepseek-chat',
+          usedFallback: usedFallbackChat,
+        }),
       }]);
 
     } catch (error) {
       console.error("Guardian Chat Error:", error);
       setGuardianMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: createRecordId('guardian'),
         role: 'ai',
         text: SERVICE_FALLBACK.guardianChat,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('guardian_chat', {
+          model: 'deepseek-chat',
+          usedFallback: true,
+        }),
       }]);
     } finally {
       setIsTyping(false);

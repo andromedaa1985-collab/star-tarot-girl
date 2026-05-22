@@ -20,6 +20,7 @@ import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
 import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
+import { createGenerationTrace } from '../lib/generationTrace';
 
 interface SimulationResult {
   choiceA: {
@@ -485,7 +486,11 @@ ${baziContext}
         choiceA,
         choiceB,
         advice: safeResult.advice || '',
-        result: safeResult
+        result: safeResult,
+        ...createGenerationTrace('simulator', {
+          model: 'deepseek-chat',
+          usedFallback: usedFallbackSimulation,
+        }),
       }, ...prev].slice(0, 30));
       setAppEvents((events) => recordAppEvent(events, 'simulation_run', { hasProfile: Boolean(currentBazi?.name) }));
 

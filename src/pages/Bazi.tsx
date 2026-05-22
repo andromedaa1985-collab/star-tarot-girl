@@ -12,6 +12,7 @@ import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { parseAiJson } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
+import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -173,6 +174,11 @@ function pickShareProfile(profile: UserProfile) {
 }
 
 interface BaziResult {
+  generationId?: string;
+  generationKind?: string;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
   bazi: {
     year: [string, string];
     month: [string, string];
@@ -774,7 +780,7 @@ export default function Bazi() {
     }
 
     const newProfile = {
-      id: Date.now().toString(),
+      id: createRecordId('profile'),
       ...payload,
     };
     setProfiles(prev => [...prev, newProfile]);
@@ -1009,15 +1015,23 @@ ${exactBaziStr}
         dailyLuck: parsedResult.dailyLuck,
         personality: parsedResult.personality,
         career: parsedResult.career,
-        romance: parsedResult.romance
+        romance: parsedResult.romance,
+        ...createGenerationTrace('bazi_calculation', {
+          model: 'deepseek-chat',
+          usedFallback: usedPartialBaziFallback,
+        }),
       };
 
       setBaziResult(finalResult);
       setBaziMessages([{
-        id: Date.now().toString(),
+        id: createRecordId('bazi'),
         role: 'ai',
         text: `你好，${baziFormData.name}。我已经为你排好了八字。关于你的命理，有什么想进一步了解的吗？`,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('bazi_calculation', {
+          model: 'system',
+          usedFallback: false,
+        }),
       }]);
       if (usedPartialBaziFallback) setFormNotice(SERVICE_FALLBACK.baziPartial);
     } catch (error: any) {
@@ -1037,7 +1051,7 @@ ${exactBaziStr}
     }
     
     const newUserMsg = {
-      id: Date.now().toString(),
+      id: createRecordId('bazi'),
       role: 'user' as const,
       text: chatInput,
       timestamp: Date.now()
@@ -1052,6 +1066,7 @@ ${exactBaziStr}
     );
 
     try {
+      let usedFallbackChat = false;
       const contextPrompt = `你是一位精通八字命理的国学大师，正在与缘主面对面交流。
 用户八字排盘结果如下：
 ${JSON.stringify(baziResult, null, 2)}
@@ -1091,25 +1106,34 @@ ${recentFortuneContext}
       } catch (err) {
         console.error("DeepSeek Error:", err);
         aiText = SERVICE_FALLBACK.baziChat;
+        usedFallbackChat = true;
       }
 
       // Clean up any residual markdown
       aiText = aiText.replace(/\*\*/g, '').replace(/#/g, '');
 
       setBaziMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: createRecordId('bazi'),
         role: 'ai',
         text: aiText,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('bazi_chat', {
+          model: 'deepseek-reasoner',
+          usedFallback: usedFallbackChat,
+        }),
       }]);
 
     } catch (error) {
       console.error("Chat Error:", error);
       setBaziMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: createRecordId('bazi'),
         role: 'ai',
         text: SERVICE_FALLBACK.baziChat,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...createGenerationTrace('bazi_chat', {
+          model: 'deepseek-reasoner',
+          usedFallback: true,
+        }),
       }]);
     } finally {
       setIsChatting(false);

@@ -13,6 +13,7 @@ import {
   type EngagementState,
 } from '../lib/engagement';
 import { saveAutoRecoveryPoint } from '../lib/appBackup';
+import { normalizeGeneratedStorageValue, type GenerationKind } from '../lib/generationTrace';
 
 // --- Constants & Data ---
 export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2500, 4000];
@@ -43,6 +44,11 @@ export interface Message {
   timestamp: number;
   cardImage?: string;
   cardImages?: string[];
+  generationId?: string;
+  generationKind?: GenerationKind;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
 }
 
 export interface UserProfile {
@@ -70,6 +76,11 @@ export interface TarotReading {
   summary: string;
   cardImage?: string;
   cardImages?: string[];
+  generationId?: string;
+  generationKind?: GenerationKind;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
 }
 
 export interface SimulationHistoryEntry {
@@ -80,6 +91,11 @@ export interface SimulationHistoryEntry {
   choiceB: string;
   advice: string;
   result: any;
+  generationId?: string;
+  generationKind?: GenerationKind;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
 }
 
 export interface DiaryEntry {
@@ -100,6 +116,11 @@ export interface ReviewEntry {
   endDate?: string;
   entryCount?: number;
   entryIds?: string[];
+  generationId?: string;
+  generationKind?: GenerationKind;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
 }
 
 export interface CompanionMessage {
@@ -107,6 +128,11 @@ export interface CompanionMessage {
   role: 'user' | 'ai';
   text: string;
   timestamp: number;
+  generationId?: string;
+  generationKind?: GenerationKind;
+  generatedAt?: string;
+  model?: string;
+  usedFallback?: boolean;
 }
 
 export interface AppSettings {
@@ -186,7 +212,7 @@ function readStoredJson<T>(key: string, fallback: T): T {
   try {
     const saved = localStorage.getItem(key);
     if (saved === null) return fallback;
-    return JSON.parse(saved) as T;
+    return normalizeGeneratedStorageValue(key, JSON.parse(saved)) as T;
   } catch {
     localStorage.removeItem(key);
     return fallback;

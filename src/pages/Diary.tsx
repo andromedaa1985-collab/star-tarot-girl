@@ -11,6 +11,7 @@ import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime
 import { isPlusActive } from '../lib/membership';
 import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
+import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -218,7 +219,7 @@ export default function Diary() {
     if (!newContent.trim()) return;
     
     const entry: DiaryEntry = {
-      id: Date.now().toString(),
+      id: createRecordId('diary'),
       date: getAppDateKey(getTrustedNow()),
       mood: newMood,
       content: newContent.trim(),
@@ -335,7 +336,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
       
       // Save to history (limit to 30)
       const newReview: ReviewEntry = {
-        id: Date.now().toString(),
+        id: createRecordId('review'),
         date: getAppDateKey(getTrustedNow()),
         content: finalResult,
         rangeLabel: reviewWindow.label,
@@ -343,6 +344,10 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         endDate: reviewWindow.endDate,
         entryCount: scopedDiaryEntries.length,
         entryIds: scopedEntryIds,
+        ...createGenerationTrace('diary_review', {
+          model: 'deepseek-chat',
+          usedFallback: false,
+        }),
       };
       setReviewHistory(prev => [newReview, ...prev].slice(0, 30));
       setAppEvents((events) => recordAppEvent(events, 'diary_review', { diaryCount: scopedDiaryEntries.length, range: reviewWindow.key }));

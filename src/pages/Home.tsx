@@ -54,6 +54,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
+import { createGenerationTrace } from '../lib/generationTrace';
 
 type DrawnCard = {
   name: string;
@@ -1378,11 +1379,17 @@ export default function Home() {
       await new Promise((resolve) => window.setTimeout(resolve, DRAW_ANIMATION_MIN_MS - drawingElapsed));
     }
 
+    const answerTrace = createGenerationTrace(shouldDraw ? 'tarot' : 'tarot_followup', {
+      model: 'deepseek-chat',
+      usedFallback: usedFallbackAnswer,
+    });
+
     const aiMessage = {
       id: crypto.randomUUID(),
       role: 'ai' as const,
       text: answer,
       timestamp: Date.now(),
+      ...answerTrace,
       ...(shouldDraw ? { cardImage: image, cardImages: images } : {}),
     };
 
@@ -1398,6 +1405,7 @@ export default function Home() {
             summary: answer.trim(),
             cardImage: image,
             cardImages: images,
+            ...answerTrace,
           },
           ...prev,
         ];
