@@ -18,7 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
-import { SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
+import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 
 interface SimulationResult {
   choiceA: {
@@ -461,11 +461,10 @@ ${baziContext}
         aiText = '{}';
       }
 
-      const cleanedText = aiText.replace(/```json\n?|\n?```/g, '').trim();
-      const parsedResult = JSON.parse(cleanedText);
-      const safeResult =
+      const parsedResult = parseAiJson<Partial<SimulationResult>>(aiText);
+      const safeResult: SimulationResult =
         parsedResult?.choiceA?.title && parsedResult?.choiceB?.title && parsedResult?.advice
-          ? parsedResult
+          ? parsedResult as SimulationResult
           : createFallbackSimulation(choiceA, choiceB);
       setResult(safeResult);
       setSimulationHistory(prev => [{

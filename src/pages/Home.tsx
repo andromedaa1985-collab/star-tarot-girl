@@ -52,7 +52,7 @@ import {
 import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
-import { TAROT_SYSTEM_PROMPT } from '../lib/aiPrompting';
+import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 
 type DrawnCard = {
   name: string;
@@ -377,10 +377,8 @@ const fallbackAnswer = (question: string, cards: DrawnCard[]) => {
 };
 
 const cleanTarotAnswer = (text: string) =>
-  text
-    .replace(/\*\*/g, '')
+  cleanAiText(text)
     .replace(/\*/g, '')
-    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -1377,13 +1375,11 @@ export default function Home() {
           messages: [
             {
               role: 'system',
-              content:
-                '你是星轨里的中文塔罗少女。回答要客观但温柔，像在轻声陪伴用户看清问题；不要恐吓、不要审判、不要冷冰冰地下结论。不要使用 Markdown 星号、加粗符号或井号标题。没有明确要求抽牌时，不要重新抽牌，只基于当前上下文继续解读。可以适度引用用户已留下的牌迹、日记、档案和沙盘线索，让回答像接着上次聊，但不要机械暴露数据清单。',
+              content: TAROT_SYSTEM_PROMPT,
             },
             {
               role: 'user',
               content: [
-                TAROT_SYSTEM_PROMPT,
                 memoryContextText,
                 profileTarotContextText,
                 shouldDraw

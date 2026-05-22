@@ -37,4 +37,51 @@ export const SIMULATOR_JSON_SYSTEM_PROMPT = `
 推演要客观、克制、有行动建议，不要夸大命运决定论，不要输出 Markdown 或 JSON 以外的文字。
 `.trim();
 
-export const cleanAiText = (text: string) => text.replace(/\*\*/g, '').replace(/#/g, '').trim();
+export const cleanAiText = (text: string) =>
+  String(text || '')
+    .replace(/```(?:json|text|markdown)?\s*([\s\S]*?)```/gi, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+export function extractAiJson(text: string) {
+  const cleaned = cleanAiText(text).replace(/^json\s*/i, '').trim();
+  const start = cleaned.indexOf('{');
+  if (start < 0) throw new Error('AI 响应里没有 JSON 对象。');
+
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let index = start; index < cleaned.length; index += 1) {
+    const char = cleaned[index];
+
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === '\\') {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return cleaned.slice(start, index + 1);
+    }
+  }
+
+  throw new Error('AI 响应里的 JSON 对象不完整。');
+}
+
+export function parseAiJson<T = unknown>(text: string): T {
+  return JSON.parse(extractAiJson(text)) as T;
+}

@@ -10,6 +10,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { hasFeatureAccess, isPlusActive } from '../lib/membership';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
+import { parseAiJson } from '../lib/aiPrompting';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -950,9 +951,7 @@ ${exactBaziStr}
         aiText = "{}";
       }
 
-      // Clean up potential markdown formatting from the response
-      const cleanedText = aiText.replace(/```json\n?|\n?```/g, '').trim();
-      const parsedResult = JSON.parse(cleanedText);
+      const parsedResult = parseAiJson<Partial<BaziResult>>(aiText);
       
       // Merge exact calculations with LLM interpretations
       const finalResult: BaziResult = {
