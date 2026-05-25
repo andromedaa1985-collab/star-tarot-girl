@@ -117,6 +117,7 @@ const preloadImages = (sources: string[]) =>
   Promise.all(Array.from(new Set(sources)).map((src) => preloadImage(src))).then(() => undefined);
 
 const QUICK_PROMPTS = [
+  { label: '今日运势', prompt: '今日运势' },
   { label: '感情卡住', prompt: '我现在这段关系最需要看清什么？' },
   { label: '工作选择', prompt: '我最近工作或事业上最该先处理哪一步？' },
   { label: '二选一', prompt: '我正在纠结一个选择，帮我看下一步怎么判断。' },
@@ -131,6 +132,7 @@ const SPREADS = [
 ];
 
 const COMPOSER_SUGGESTIONS = [
+  { label: '今日运势', prompt: '今日运势' },
   { label: '感情卡住', prompt: '我现在这段关系最需要看清什么？' },
   { label: '工作选择', prompt: '我最近工作或事业上最该先处理哪一步？' },
   { label: '二选一', prompt: '我正在纠结一个选择，帮我看下一步怎么判断。' },
@@ -1719,6 +1721,8 @@ export default function Home() {
           type="text"
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
+          onPointerDown={() => setComposerFocused(true)}
+          onClick={() => setComposerFocused(true)}
           onFocus={() => setComposerFocused(true)}
           onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
           onKeyDown={(event) => event.key === 'Enter' && handleSend()}
@@ -3002,6 +3006,7 @@ export default function Home() {
       </div>
 
       <div className="absolute inset-x-0 bottom-[86px] z-40 px-4">
+        {composerSuggestions}
         <div className="mx-auto flex w-full max-w-[540px] items-center gap-1.5 rounded-[28px] bg-[rgba(255,251,244,0.84)] p-1.5 shadow-[0_14px_40px_rgba(79,54,24,0.13),inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-2xl dark:bg-[rgba(14,18,27,0.84)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]">
           <button
             onClick={() => setIsInternetMode((value) => !value)}
@@ -3021,6 +3026,10 @@ export default function Home() {
               type="text"
               value={inputText}
               onChange={(event) => setInputText(event.target.value)}
+              onPointerDown={() => setComposerFocused(true)}
+              onClick={() => setComposerFocused(true)}
+              onFocus={() => setComposerFocused(true)}
+              onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
               onKeyDown={(event) => event.key === 'Enter' && handleSend()}
               disabled={isThinking}
               placeholder="说说你现在最想问的事"
