@@ -330,6 +330,89 @@ const CURRENT_READING_KEYWORDS = [
 const includesKeyword = (text: string, keywords: string[]) =>
   keywords.some((keyword) => text.toLowerCase().includes(keyword.toLowerCase()));
 
+const TAROT_CONTEXT_GENERAL_KEYWORDS = [
+  '结合我',
+  '结合我的',
+  '根据我',
+  '根据我的',
+  '联系我',
+  '联系我的',
+  '参考我',
+  '参考我的',
+  '对照我',
+  '对照我的',
+  '回顾',
+  '复盘',
+  '之前',
+  '以前',
+  '上次',
+  '前几天',
+  '反复',
+  '模式',
+  '历史记录',
+  '过往记录',
+  '我的记录',
+];
+
+const TAROT_CONTEXT_READING_KEYWORDS = ['牌迹', '上一次塔罗', '上次塔罗', '之前的牌', '之前抽', '旧牌'];
+const TAROT_CONTEXT_DIARY_KEYWORDS = ['日记', '心情记录', '情绪记录', '我写的', '最近写'];
+const TAROT_CONTEXT_SIMULATION_KEYWORDS = ['沙盘', '推演', '选择记录', '人生沙盘'];
+const TAROT_CONTEXT_PROFILE_KEYWORDS = ['档案', '八字', '命理', '五行', '出生', '排盘', '喜用神'];
+const TAROT_CONTEXT_GUARDIAN_KEYWORDS = ['守护', '来信', '守护回访', '守护聊天'];
+
+const pickContextLines = (lines: string[], matchers: string[], limit = 2) =>
+  lines.filter((line) => matchers.some((matcher) => line.includes(matcher))).slice(0, limit);
+
+const buildTarotContextPolicy = (
+  question: string,
+  memoryRecall: MemoryRecall,
+  profileTarotContextText: string,
+) => {
+  const wantsGeneralContext = includesKeyword(question, TAROT_CONTEXT_GENERAL_KEYWORDS);
+  const wantsReadingContext = includesKeyword(question, TAROT_CONTEXT_READING_KEYWORDS);
+  const wantsDiaryContext = includesKeyword(question, TAROT_CONTEXT_DIARY_KEYWORDS);
+  const wantsSimulationContext = includesKeyword(question, TAROT_CONTEXT_SIMULATION_KEYWORDS);
+  const wantsProfileContext = includesKeyword(question, TAROT_CONTEXT_PROFILE_KEYWORDS);
+  const wantsGuardianContext = includesKeyword(question, TAROT_CONTEXT_GUARDIAN_KEYWORDS);
+  const allowsExternalContext =
+    wantsGeneralContext ||
+    wantsReadingContext ||
+    wantsDiaryContext ||
+    wantsSimulationContext ||
+    wantsProfileContext ||
+    wantsGuardianContext;
+
+  if (!allowsExternalContext) {
+    return {
+      instruction:
+        '本次用户没有要求结合历史记录或其他模块。回答时禁止主动提及日记、八字档案、人生沙盘、守护聊天、几天前的旧事或其他模块；只根据本次问题和牌面回答。',
+      memoryText: '',
+      profileText: '',
+    };
+  }
+
+  const selectedLines = [
+    ...(wantsReadingContext ? pickContextLines(memoryRecall.contextLines, ['最近牌迹', '高频主题'], 2) : []),
+    ...(wantsDiaryContext ? pickContextLines(memoryRecall.contextLines, ['最近日记'], 1) : []),
+    ...(wantsSimulationContext ? pickContextLines(memoryRecall.contextLines, ['今日沙盘'], 1) : []),
+    ...(wantsGuardianContext ? pickContextLines(memoryRecall.contextLines, ['守护'], 1) : []),
+  ];
+  const contextLines = selectedLines.length
+    ? selectedLines
+    : memoryRecall.contextLines.filter((line) => !line.startsWith('命理档案')).slice(0, 2);
+
+  const memoryText = contextLines.length
+    ? `用户明确要求结合的上下文（最多引用 1 条最相关线索，不要逐条复述）：\n${contextLines.join('\n')}`
+    : '';
+
+  return {
+    instruction:
+      '本次用户明确要求结合历史记录或其他模块。可以引用最多 1 条最相关线索；如果线索和本次问题关系不强，就不要硬提。',
+    memoryText,
+    profileText: wantsProfileContext ? profileTarotContextText : '',
+  };
+};
+
 const shouldCreateNewReading = (question: string, hasCurrentReading: boolean) => {
   if (hasCurrentReading && includesKeyword(question, CURRENT_READING_KEYWORDS)) return false;
   if (includesKeyword(question, NEW_READING_KEYWORDS)) return true;
@@ -356,10 +439,10 @@ const buildProfileTarotContext = (profile: UserProfile | null, baziResult: any |
   if (!profile) return '';
   const baziSummary = getBaziResultSummary(baziResult);
   return [
-    '活跃八字档案（只能轻量引用，不要把塔罗变成排盘报告）：',
+    '用户明确要求结合命理档案时才使用以下资料（只能轻量引用，不要把塔罗变成排盘报告）：',
     `姓名：${profile.name}；性别：${profile.gender === 'female' ? '女' : '男'}；出生：${profile.birthDate} ${profile.birthTime}；出生地：${profile.birthLocation || '未填写'}；现居：${profile.currentLocation || '未填写'}。`,
     baziSummary ? `档案倾向：${baziSummary}。` : '档案倾向：出生资料已保存，但完整排盘摘要还未生成。',
-    '回答要求：如果这次问题涉及状态、关系、选择或行动，请自然加入一句“你的档案倾向...”或同等表达；只点到为止，不要强行下命定结论。',
+    '回答要求：只在用户明确要求结合档案、八字或命理时引用；只点到为止，不要强行下命定结论。',
   ].join('\n');
 };
 
@@ -1018,9 +1101,6 @@ export default function Home() {
   );
   const activeProfile = useMemo(() => getActiveProfile(profiles, activeProfileId), [profiles, activeProfileId]);
   const visibleMemoryInsights = memoryRecall.insights.slice(0, plusActive ? 3 : 1);
-  const memoryContextText = memoryRecall.contextLines.length
-    ? `已知用户上下文（可以轻轻引用，不要机械复述）：\n${memoryRecall.contextLines.join('\n')}`
-    : '';
   const profileTarotContextText = useMemo(
     () => buildProfileTarotContext(activeProfile, baziResult),
     [activeProfile, baziResult],
@@ -1338,6 +1418,7 @@ export default function Home() {
       : fallbackCurrentReadingAnswer(question, currentReading);
     let usedFallbackAnswer = false;
     try {
+      const tarotContextPolicy = buildTarotContextPolicy(question, memoryRecall, profileTarotContextText);
       const response = await fetch('/api/deepseek/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1352,8 +1433,9 @@ export default function Home() {
             {
               role: 'user',
               content: [
-                memoryContextText,
-                profileTarotContextText,
+                tarotContextPolicy.instruction,
+                tarotContextPolicy.memoryText,
+                tarotContextPolicy.profileText,
                 shouldDraw
                   ? buildPrompt(question, cards, isInternetMode)
                   : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
