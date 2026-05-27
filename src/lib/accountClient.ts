@@ -1,4 +1,5 @@
 import type { AppBackup } from './appBackup';
+import { apiFetch } from './apiClient';
 
 const SESSION_STORAGE_KEY = 'astroRailAccountSession';
 
@@ -26,7 +27,14 @@ async function readJsonResponse(response: Response) {
 
 function toPublicErrorMessage(message: unknown) {
   if (typeof message !== 'string' || !message.trim()) return '请求失败，请稍后再试。';
-  if (message.includes('AUTH_SESSION_SECRET') || message.includes('Netlify') || message.includes('Blobs')) {
+  if (
+    message.includes('AUTH_SESSION_SECRET') ||
+    message.includes('Netlify') ||
+    message.includes('Blobs') ||
+    message.includes('Vercel') ||
+    message.includes('Upstash') ||
+    message.includes('UPSTASH_REDIS_REST')
+  ) {
     return '账户服务暂时不可用，请稍后再试。';
   }
   return message;
@@ -54,7 +62,7 @@ export function clearAccountSession() {
 }
 
 export async function registerAccount(input: { email: string; password: string; displayName: string }) {
-  const response = await fetch('/api/auth/register', {
+  const response = await apiFetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -65,7 +73,7 @@ export async function registerAccount(input: { email: string; password: string; 
 }
 
 export async function loginAccount(input: { email: string; password: string }) {
-  const response = await fetch('/api/auth/login', {
+  const response = await apiFetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -76,7 +84,7 @@ export async function loginAccount(input: { email: string; password: string }) {
 }
 
 export async function refreshAccountSession(session: AccountSession) {
-  const response = await fetch('/api/auth/me', {
+  const response = await apiFetch('/api/auth/me', {
     headers: authHeaders(session.token),
     cache: 'no-store',
   });
@@ -87,7 +95,7 @@ export async function refreshAccountSession(session: AccountSession) {
 }
 
 export async function uploadCloudArchive(session: AccountSession, archive: AppBackup) {
-  const response = await fetch('/api/auth/archive', {
+  const response = await apiFetch('/api/auth/archive', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -109,7 +117,7 @@ export async function uploadCloudArchive(session: AccountSession, archive: AppBa
 }
 
 export async function downloadCloudArchive(session: AccountSession) {
-  const response = await fetch('/api/auth/archive', {
+  const response = await apiFetch('/api/auth/archive', {
     headers: authHeaders(session.token),
     cache: 'no-store',
   });

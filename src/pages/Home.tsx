@@ -55,6 +55,7 @@ import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
+import { apiFetch } from '../lib/apiClient';
 
 type DrawnCard = {
   name: string;
@@ -1421,7 +1422,7 @@ export default function Home() {
     let usedFallbackAnswer = false;
     try {
       const tarotContextPolicy = buildTarotContextPolicy(question, memoryRecall, profileTarotContextText);
-      const response = await fetch('/api/deepseek/chat', {
+      const response = await apiFetch('/api/deepseek/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

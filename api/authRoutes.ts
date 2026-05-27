@@ -1,12 +1,10 @@
 import type { Express, Request, Response } from "express";
 import crypto from "crypto";
-import fs from "fs/promises";
-import path from "path";
-import { getStore } from "@netlify/blobs";
+import { readStoreJson, writeStoreJson } from "./jsonStore.js";
 
 const ACCOUNT_STORE_NAME = "astro-rail-accounts";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const LOCAL_STORE_DIR = path.join(process.cwd(), ".data", "accounts");
+const LOCAL_STORE_DIR = ".data/accounts";
 
 type UserRecord = {
   id: string;
@@ -147,39 +145,12 @@ async function verifyPassword(password: string, user: UserRecord) {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
-function shouldUseNetlifyBlobs() {
-  return process.env.NETLIFY === "true" || Boolean(process.env.NETLIFY_BLOBS_CONTEXT);
-}
-
-function localPath(key: string) {
-  return path.join(LOCAL_STORE_DIR, `${key}.json`);
-}
-
 async function readJson<T>(key: string): Promise<T | null> {
-  if (shouldUseNetlifyBlobs()) {
-    const store = getStore(ACCOUNT_STORE_NAME);
-    return await store.get(key, { type: "json" }) as T | null;
-  }
-
-  try {
-    const content = await fs.readFile(localPath(key), "utf8");
-    return JSON.parse(content) as T;
-  } catch (error: any) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
+  return readStoreJson<T>(ACCOUNT_STORE_NAME, key, LOCAL_STORE_DIR);
 }
 
 async function writeJson(key: string, value: unknown) {
-  if (shouldUseNetlifyBlobs()) {
-    const store = getStore(ACCOUNT_STORE_NAME);
-    await store.setJSON(key, value);
-    return;
-  }
-
-  const target = localPath(key);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, JSON.stringify(value, null, 2), "utf8");
+  await writeStoreJson(ACCOUNT_STORE_NAME, key, value, LOCAL_STORE_DIR);
 }
 
 function emailIndexKey(email: string) {

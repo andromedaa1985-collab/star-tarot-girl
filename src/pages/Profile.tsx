@@ -18,6 +18,7 @@ import {
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
 import { SHOP_PLANS } from '../lib/pricing';
+import { apiFetch } from '../lib/apiClient';
 
 const AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=b6e3f4',
@@ -219,7 +220,7 @@ export default function Profile() {
     setPaymentStatus('checking');
     setPaymentMessage('正在确认订单状态...');
     try {
-      const response = await fetch(`/api/payments/orders/${encodeURIComponent(orderId)}`);
+      const response = await apiFetch(`/api/payments/orders/${encodeURIComponent(orderId)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || '订单状态查询失败');
 
@@ -277,7 +278,7 @@ export default function Profile() {
       let lastGatewayError = '';
       for (const gateway of ['xorpay', 'xunhupay']) {
         try {
-          const response = await fetch(`/api/payments/${gateway}/create`, {
+          const response = await apiFetch(`/api/payments/${gateway}/create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

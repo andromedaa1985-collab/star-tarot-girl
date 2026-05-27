@@ -19,3 +19,6 @@ coverage/
 /test*.js
 /test*.ts
 /.data/
+
+.vercel
+.env*

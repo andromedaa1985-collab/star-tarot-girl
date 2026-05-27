@@ -21,6 +21,7 @@ import { clsx } from 'clsx';
 import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
+import { apiFetch } from '../lib/apiClient';
 
 interface SimulationResult {
   choiceA: {
@@ -441,7 +442,7 @@ ${baziContext}
       let aiText = '';
       let usedFallbackSimulation = false;
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

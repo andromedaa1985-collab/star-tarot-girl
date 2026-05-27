@@ -13,6 +13,7 @@ import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrus
 import { parseAiJson } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
+import { apiFetch } from '../lib/apiClient';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -598,7 +599,7 @@ export default function Bazi() {
     const importInvite = async () => {
       try {
         setRelationshipShareStatus('正在读取邀请档案...');
-        const response = await fetch(`/api/relationship/invites/${encodeURIComponent(inviteToken)}`, {
+        const response = await apiFetch(`/api/relationship/invites/${encodeURIComponent(inviteToken)}`, {
           headers: { 'Cache-Control': 'no-store' },
         });
         const data = await response.json();
@@ -679,7 +680,7 @@ export default function Bazi() {
     }
     setIsCreatingInviteLink(true);
     try {
-      const response = await fetch('/api/relationship/invites', {
+      const response = await apiFetch('/api/relationship/invites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ profile: pickShareProfile(sourceProfile) }),
@@ -962,7 +963,7 @@ ${exactBaziStr}
       let usedPartialBaziFallback = false;
       
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1085,7 +1086,7 @@ ${recentFortuneContext}
 
       let aiText = "";
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

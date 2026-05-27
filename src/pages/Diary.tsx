@@ -12,6 +12,7 @@ import { isPlusActive } from '../lib/membership';
 import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
+import { apiFetch } from '../lib/apiClient';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -312,7 +313,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
       let aiText = "";
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

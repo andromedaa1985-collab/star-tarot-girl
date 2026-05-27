@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
+import { apiFetch } from './apiClient';
 
 export const APP_TIME_ZONE = 'Asia/Shanghai';
 
@@ -107,7 +108,7 @@ export async function syncTrustedTime() {
   syncPromise = (async () => {
     const startedAt = Date.now();
     try {
-      const response = await fetch('/api/time', {
+      const response = await apiFetch('/api/time', {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-store' },
       });

@@ -1,22 +1,25 @@
 {
   "name": "星轨塔罗少女",
   "short_name": "星轨",
+  "id": "/app",
   "description": "塔罗、日记、守护回访与命理档案结合的中文陪伴应用。",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "/app",
-  "scope": "/",
+  "scope": "/app",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#0b1020",
   "theme_color": "#f4cf83",
+  "prefer_related_applications": false,
   "categories": ["lifestyle", "productivity"],
   "icons": [
     {
       "src": "/details-new.png",
       "sizes": "1024x1024",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "/image-280.png",

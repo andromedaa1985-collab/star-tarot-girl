@@ -13,6 +13,7 @@ import {
 } from '../lib/aiPrompting';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
+import { apiFetch } from '../lib/apiClient';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -132,7 +133,7 @@ export default function Guardian() {
 
       let aiText = "";
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -221,7 +222,7 @@ export default function Guardian() {
 
       let aiText = "";
       try {
-        const res = await fetch('/api/deepseek/chat', {
+        const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

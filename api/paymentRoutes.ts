@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import type express from "express";
-import { getStore } from "@netlify/blobs";
-import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing";
+import { readStoreJson, writeStoreJson } from "./jsonStore.js";
+import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing.js";
 
 type PaymentOrder = {
   id: string;
@@ -16,6 +16,8 @@ type PaymentOrder = {
 };
 
 const memoryPaymentOrders = new Map<string, PaymentOrder>();
+const PAYMENT_ORDER_STORE_NAME = "astro-payment-orders";
+const PAYMENT_ORDER_LOCAL_DIR = ".data/payment-orders";
 
 const ALIPAY_GATEWAYS = {
   sandbox: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
@@ -347,30 +349,22 @@ function md5(value: string) {
   return crypto.createHash("md5").update(value, "utf8").digest("hex");
 }
 
-function getOrderStore() {
-  try {
-    return getStore("astro-payment-orders");
-  } catch {
-    return null;
-  }
-}
-
 async function savePaymentOrder(order: PaymentOrder) {
   memoryPaymentOrders.set(order.id, order);
   try {
-    await getOrderStore()?.setJSON(order.id, order);
+    await writeStoreJson(PAYMENT_ORDER_STORE_NAME, order.id, order, PAYMENT_ORDER_LOCAL_DIR);
   } catch (error) {
-    console.warn("Payment order blob save skipped:", error);
+    console.warn("Payment order save skipped:", error);
   }
 }
 
 async function getPaymentOrder(orderId?: string): Promise<PaymentOrder | null> {
   if (!orderId) return null;
   try {
-    const order = await getOrderStore()?.get(orderId, { type: "json" });
-    if (order) return order as PaymentOrder;
+    const order = await readStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, orderId, PAYMENT_ORDER_LOCAL_DIR);
+    if (order) return order;
   } catch (error) {
-    console.warn("Payment order blob read skipped:", error);
+    console.warn("Payment order read skipped:", error);
   }
   return memoryPaymentOrders.get(orderId) || null;
 }

@@ -561,7 +561,14 @@ function formatBackupTime(value: string | null | undefined, emptyLabel = '还没
 function getAccountErrorMessage(error: any, fallback = '账户请求失败，请稍后再试。') {
   const message = typeof error?.message === 'string' ? error.message : '';
   if (!message) return fallback;
-  if (message.includes('AUTH_SESSION_SECRET') || message.includes('Netlify') || message.includes('Blobs')) {
+  if (
+    message.includes('AUTH_SESSION_SECRET') ||
+    message.includes('Netlify') ||
+    message.includes('Blobs') ||
+    message.includes('Vercel') ||
+    message.includes('Upstash') ||
+    message.includes('UPSTASH_REDIS_REST')
+  ) {
     return '账户服务暂时不可用，请稍后再试。';
   }
   return message;

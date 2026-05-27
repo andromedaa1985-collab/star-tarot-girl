@@ -2,12 +2,13 @@ import express from "express";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
-import { registerAuthRoutes } from "./authRoutes";
-import { registerPaymentRoutes } from "./paymentRoutes";
+import { registerAuthRoutes } from "./authRoutes.js";
+import { registerPaymentRoutes } from "./paymentRoutes.js";
 
 dotenv.config();
 
 const app = express();
+app.disable("x-powered-by");
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false, limit: "5mb" }));
 registerAuthRoutes(app);
@@ -176,4 +177,8 @@ function sendApiError(res: express.Response, error: Error) {
   });
 }
 
-export default app;
+export { app };
+
+export default function handler(req: express.Request, res: express.Response) {
+  return app(req, res);
+}
