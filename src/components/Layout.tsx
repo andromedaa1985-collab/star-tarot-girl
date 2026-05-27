@@ -134,7 +134,7 @@ export default function Layout() {
   }, [location.pathname]);
 
   return (
-    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-apple-bg text-apple-text font-sans">
+    <div className="fixed inset-0 overflow-hidden bg-apple-bg text-apple-text font-sans">
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div
           className="absolute inset-0"

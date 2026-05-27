@@ -19,7 +19,8 @@
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-safe-left: env(safe-area-inset-left, 0px);
-  --app-bottom-pad: max(10px, var(--app-safe-bottom));
+  --app-bottom-pad: max(8px, calc(var(--app-safe-bottom) - 12px));
+  --app-safe-bottom-fill: max(48px, var(--app-safe-bottom));
 }
 
 .dark {
@@ -117,7 +118,10 @@ body,
 }
 
 html, body {
-  background-color: var(--color-apple-bg);
+  background-color: var(--app-bg);
+  background-image: var(--app-shell-image);
+  background-attachment: fixed;
+  background-size: cover;
   color: var(--color-apple-text);
   font-family: var(--font-sans);
   font-weight: 400;
@@ -126,6 +130,7 @@ html, body {
   margin: 0;
   padding: 0;
   color-scheme: light;
+  overscroll-behavior: none;
 }
 
 html.dark,

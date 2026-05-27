@@ -1623,6 +1623,235 @@ export default function Home() {
     ctx.fillText('星轨 AstroRail · 每一次牌迹都值得完整留下', 92, canvasHeight - 76);
 
     try {
+      const cardX = 86;
+      const cardY = 268;
+      const cardWidth = 344;
+      const cardHeight = 536;
+      const sideX = 486;
+      const sideWidth = 506;
+      const contentWidth = 908;
+
+      ctx.font = '800 38px sans-serif';
+      const posterQuestionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', sideWidth);
+      ctx.font = '800 30px sans-serif';
+      const posterCardLines = getCanvasTextLines(ctx, reading.cards || '未记录牌面', sideWidth);
+      ctx.font = '500 30px sans-serif';
+      const posterSummaryLines = getCanvasTextLines(ctx, reading.summary || '这次牌面已经留在档案里。', contentWidth);
+      const posterSideBottom = cardY + 96 + posterQuestionLines.length * 52 + 70 + posterCardLines.length * 44;
+      const posterSummaryTop = Math.max(cardY + cardHeight + 112, posterSideBottom + 90);
+      const posterHeight = Math.max(1480, posterSummaryTop + posterSummaryLines.length * 52 + 220);
+      canvas.height = posterHeight;
+
+      const drawRoundRect = (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        radius: number,
+        fillStyle?: string | CanvasGradient,
+        strokeStyle?: string,
+        lineWidth = 1,
+      ) => {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        if (fillStyle) {
+          ctx.fillStyle = fillStyle;
+          ctx.fill();
+        }
+        if (strokeStyle) {
+          ctx.strokeStyle = strokeStyle;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+        }
+      };
+
+      const clipRoundRect = (x: number, y: number, width: number, height: number, radius: number) => {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.clip();
+      };
+
+      const drawImageCover = (targetImage: HTMLImageElement, x: number, y: number, width: number, height: number) => {
+        const imageRatio = targetImage.naturalWidth / targetImage.naturalHeight;
+        const boxRatio = width / height;
+        let sourceX = 0;
+        let sourceY = 0;
+        let sourceWidth = targetImage.naturalWidth;
+        let sourceHeight = targetImage.naturalHeight;
+        if (imageRatio > boxRatio) {
+          sourceWidth = targetImage.naturalHeight * boxRatio;
+          sourceX = (targetImage.naturalWidth - sourceWidth) / 2;
+        } else {
+          sourceHeight = targetImage.naturalWidth / boxRatio;
+          sourceY = (targetImage.naturalHeight - sourceHeight) / 2;
+        }
+        ctx.drawImage(targetImage, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+      };
+
+      const bg = ctx.createLinearGradient(0, 0, 0, posterHeight);
+      bg.addColorStop(0, '#111626');
+      bg.addColorStop(0.46, '#090d18');
+      bg.addColorStop(1, '#050711');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, 1080, posterHeight);
+
+      const dawnGlow = ctx.createRadialGradient(230, 160, 20, 230, 160, 620);
+      dawnGlow.addColorStop(0, 'rgba(244,207,131,0.24)');
+      dawnGlow.addColorStop(0.36, 'rgba(244,207,131,0.08)');
+      dawnGlow.addColorStop(1, 'rgba(244,207,131,0)');
+      ctx.fillStyle = dawnGlow;
+      ctx.fillRect(0, 0, 1080, posterHeight);
+
+      const railGlow = ctx.createRadialGradient(900, 310, 10, 900, 310, 560);
+      railGlow.addColorStop(0, 'rgba(124,156,255,0.20)');
+      railGlow.addColorStop(0.42, 'rgba(124,156,255,0.07)');
+      railGlow.addColorStop(1, 'rgba(124,156,255,0)');
+      ctx.fillStyle = railGlow;
+      ctx.fillRect(0, 0, 1080, posterHeight);
+
+      ctx.strokeStyle = 'rgba(244,207,131,0.045)';
+      ctx.lineWidth = 1;
+      for (let y = 58; y < posterHeight; y += 78) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(1080, y);
+        ctx.stroke();
+      }
+      for (let x = 54; x < 1080; x += 78) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, posterHeight);
+        ctx.stroke();
+      }
+
+      let seed = Array.from(`${reading.id || reading.date || reading.question}`).reduce(
+        (value, char) => (value * 31 + char.charCodeAt(0)) >>> 0,
+        131,
+      );
+      const random = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      for (let index = 0; index < 150; index += 1) {
+        const x = random() * 1080;
+        const y = random() * posterHeight;
+        const radius = random() > 0.82 ? 1.6 : 0.8;
+        ctx.fillStyle = `rgba(255,248,224,${0.16 + random() * 0.34})`;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.save();
+      ctx.translate(805, 238);
+      ctx.rotate(-0.28);
+      ctx.strokeStyle = 'rgba(244,207,131,0.18)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 348, 92, 0, 0.1, Math.PI * 1.62);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(124,156,255,0.14)';
+      ctx.beginPath();
+      ctx.ellipse(-12, 8, 286, 66, 0, Math.PI * 0.68, Math.PI * 2.08);
+      ctx.stroke();
+      ctx.restore();
+
+      const posterPanel = ctx.createLinearGradient(54, 200, 1026, posterHeight - 110);
+      posterPanel.addColorStop(0, 'rgba(255,250,236,0.070)');
+      posterPanel.addColorStop(1, 'rgba(255,250,236,0.026)');
+      drawRoundRect(54, 206, 972, posterHeight - 336, 44, posterPanel, 'rgba(244,207,131,0.12)', 1.5);
+
+      ctx.fillStyle = '#F4CF83';
+      ctx.font = '800 48px sans-serif';
+      ctx.fillText('星轨牌迹', 86, 122);
+      ctx.fillStyle = 'rgba(255,255,255,0.70)';
+      ctx.font = '600 28px sans-serif';
+      ctx.fillText(new Date(reading.date).toLocaleDateString('zh-CN'), 86, 168);
+      ctx.fillStyle = 'rgba(244,207,131,0.36)';
+      ctx.fillRect(86, 195, 116, 3);
+
+      ctx.shadowColor = 'rgba(0,0,0,0.46)';
+      ctx.shadowBlur = 34;
+      ctx.shadowOffsetY = 20;
+      drawRoundRect(cardX - 18, cardY - 18, cardWidth + 36, cardHeight + 36, 34, 'rgba(255,250,236,0.075)', 'rgba(244,207,131,0.24)', 1.5);
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      if (loaded) {
+        ctx.save();
+        clipRoundRect(cardX, cardY, cardWidth, cardHeight, 24);
+        drawImageCover(image, cardX, cardY, cardWidth, cardHeight);
+        ctx.restore();
+      } else {
+        const cardPlaceholder = ctx.createLinearGradient(cardX, cardY, cardX + cardWidth, cardY + cardHeight);
+        cardPlaceholder.addColorStop(0, '#182033');
+        cardPlaceholder.addColorStop(1, '#070912');
+        drawRoundRect(cardX, cardY, cardWidth, cardHeight, 24, cardPlaceholder, 'rgba(244,207,131,0.26)', 1.5);
+        ctx.fillStyle = 'rgba(244,207,131,0.76)';
+        ctx.font = '800 28px sans-serif';
+        ctx.fillText('TAROT', cardX + 126, cardY + 274);
+      }
+      drawRoundRect(cardX, cardY, cardWidth, cardHeight, 24, undefined, 'rgba(255,255,255,0.30)', 2);
+
+      const sidePanel = ctx.createLinearGradient(sideX - 26, cardY - 18, 1012, cardY + cardHeight + 18);
+      sidePanel.addColorStop(0, 'rgba(255,250,236,0.095)');
+      sidePanel.addColorStop(1, 'rgba(255,250,236,0.036)');
+      drawRoundRect(sideX - 26, cardY - 18, 532, cardHeight + 36, 34, sidePanel, 'rgba(244,207,131,0.12)', 1);
+
+      ctx.fillStyle = '#F4CF83';
+      ctx.font = '800 24px sans-serif';
+      ctx.fillText('提问', sideX, cardY + 44);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 38px sans-serif';
+      const posterQuestionBottom = drawCanvasLines(ctx, posterQuestionLines, sideX, cardY + 96, 52);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.fillRect(sideX, posterQuestionBottom + 22, 420, 1);
+      ctx.fillStyle = '#F4CF83';
+      ctx.font = '800 24px sans-serif';
+      ctx.fillText('牌面', sideX, posterQuestionBottom + 72);
+      ctx.font = '800 31px sans-serif';
+      drawCanvasLines(ctx, posterCardLines, sideX, posterQuestionBottom + 122, 44);
+
+      const summaryPanel = ctx.createLinearGradient(70, posterSummaryTop - 92, 1010, posterHeight - 150);
+      summaryPanel.addColorStop(0, 'rgba(255,250,236,0.070)');
+      summaryPanel.addColorStop(1, 'rgba(255,250,236,0.030)');
+      drawRoundRect(70, posterSummaryTop - 92, 940, posterSummaryLines.length * 52 + 116, 36, summaryPanel, 'rgba(244,207,131,0.10)', 1);
+
+      ctx.fillStyle = '#F4CF83';
+      ctx.font = '800 28px sans-serif';
+      ctx.fillText('星轨解读', 92, posterSummaryTop - 44);
+      ctx.fillStyle = 'rgba(255,255,255,0.80)';
+      ctx.font = '500 30px sans-serif';
+      drawCanvasLines(ctx, posterSummaryLines, 92, posterSummaryTop, 52);
+
+      ctx.fillStyle = 'rgba(244,207,131,0.62)';
+      ctx.font = '700 24px sans-serif';
+      ctx.fillText('星轨 AstroRail · 每一次牌迹都值得完整留下', 86, posterHeight - 76);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.font = '500 18px sans-serif';
+      ctx.fillText('生成于你的星轨档案', 86, posterHeight - 43);
+
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('分享图生成失败');
       const file = new File([blob], `星轨牌迹-${Date.now()}.png`, { type: 'image/png' });
