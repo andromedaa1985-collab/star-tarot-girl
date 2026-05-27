@@ -55,11 +55,45 @@ type FloatingNavPosition = {
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+const SAFE_AREA_ENV_NAMES: Record<string, string> = {
+  '--app-safe-top': 'safe-area-inset-top',
+  '--app-safe-bottom': 'safe-area-inset-bottom',
+  '--app-safe-left': 'safe-area-inset-left',
+  '--app-safe-right': 'safe-area-inset-right',
+};
+
+const resolveEnvPixel = (envName: string, fallback = 0) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || !document.body) return fallback;
+  const probe = document.createElement('div');
+  probe.style.cssText = `position:absolute;visibility:hidden;pointer-events:none;contain:strict;padding-top:env(${envName}, 0px);`;
+  document.body.appendChild(probe);
+  const value = Number.parseFloat(window.getComputedStyle(probe).paddingTop);
+  probe.remove();
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const getCssPixelCustomProperty = (name: string, fallback = 0) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
+  const raw = window.getComputedStyle(document.documentElement).getPropertyValue(name);
+  const value = Number.parseFloat(raw);
+  if (Number.isFinite(value)) return value;
+  const envName = SAFE_AREA_ENV_NAMES[name];
+  return envName ? resolveEnvPixel(envName, fallback) : fallback;
+};
+
+const getSafeAreaInsets = () => ({
+  top: getCssPixelCustomProperty('--app-safe-top'),
+  bottom: getCssPixelCustomProperty('--app-safe-bottom'),
+  left: getCssPixelCustomProperty('--app-safe-left'),
+  right: getCssPixelCustomProperty('--app-safe-right'),
+});
+
 const getDefaultFloatingNavPosition = (): FloatingNavPosition => {
   if (typeof window === 'undefined') return { x: 320, y: 560 };
+  const safeArea = getSafeAreaInsets();
   return {
-    x: Math.max(TAROT_NAV_EDGE, window.innerWidth - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
-    y: Math.max(TAROT_NAV_EDGE, window.innerHeight - 260),
+    x: Math.max(TAROT_NAV_EDGE + safeArea.left, window.innerWidth - safeArea.right - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+    y: Math.max(TAROT_NAV_EDGE + safeArea.top, window.innerHeight - safeArea.bottom - 260),
   };
 };
 
@@ -73,11 +107,12 @@ const getFloatingNavBounds = (open: boolean) => {
     return { minX: TAROT_NAV_EDGE, maxX: 360, minY: TAROT_NAV_EDGE, maxY: 720 };
   }
   const openWidth = getFloatingNavWidth(open);
+  const safeArea = getSafeAreaInsets();
   return {
-    minX: open ? TAROT_NAV_EDGE + openWidth - TAROT_NAV_CLOSED_SIZE : TAROT_NAV_EDGE,
-    maxX: Math.max(TAROT_NAV_EDGE, window.innerWidth - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
-    minY: TAROT_NAV_EDGE,
-    maxY: Math.max(TAROT_NAV_EDGE, window.innerHeight - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+    minX: open ? TAROT_NAV_EDGE + safeArea.left + openWidth - TAROT_NAV_CLOSED_SIZE : TAROT_NAV_EDGE + safeArea.left,
+    maxX: Math.max(TAROT_NAV_EDGE + safeArea.left, window.innerWidth - safeArea.right - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
+    minY: TAROT_NAV_EDGE + safeArea.top,
+    maxY: Math.max(TAROT_NAV_EDGE + safeArea.top, window.innerHeight - safeArea.bottom - TAROT_NAV_CLOSED_SIZE - TAROT_NAV_EDGE),
   };
 };
 
@@ -99,7 +134,7 @@ export default function Layout() {
   }, [location.pathname]);
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-apple-bg text-apple-text font-sans">
+    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-apple-bg text-apple-text font-sans">
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div
           className="absolute inset-0"
@@ -119,7 +154,7 @@ export default function Layout() {
 
       <div className="relative z-10 flex h-full justify-center px-0 sm:px-5 md:py-5">
         <div className="app-stage h-full w-full max-w-[1180px] overflow-hidden shadow-[0_30px_120px_rgba(0,0,0,0.16)] backdrop-blur-2xl sm:rounded-[36px]" style={{ background: 'var(--app-stage-bg)' }}>
-          <main className="h-full overflow-hidden">
+          <main className="box-border h-full overflow-hidden pt-[var(--app-safe-top)]">
             <Outlet />
           </main>
         </div>
@@ -137,10 +172,10 @@ export default function Layout() {
 function BottomDock() {
   const { membership } = useAppContext();
   return (
-    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 isolate px-3 pb-[max(env(safe-area-inset-bottom),10px)]">
+    <nav className="pointer-events-none fixed inset-x-0 z-50 isolate px-3" style={{ bottom: 'var(--app-bottom-pad)' }}>
       <div
-        className="absolute inset-x-0 bottom-0 z-0 h-[84px]"
-        style={{ background: 'var(--app-dock-wash)' }}
+        className="absolute inset-x-0 z-0"
+        style={{ bottom: 'calc(-1 * var(--app-bottom-pad))', height: 'calc(84px + var(--app-bottom-pad))', background: 'var(--app-dock-wash)' }}
       />
       <div className="pointer-events-auto relative z-10 mx-auto flex h-[64px] w-full max-w-[540px] items-center justify-between gap-1 rounded-[30px] px-2 backdrop-blur-2xl" style={{ background: 'var(--app-dock-bg)', boxShadow: 'var(--app-dock-shadow)' }}>
         {navItems.map((item) => (
@@ -181,8 +216,13 @@ function TarotFloatingNav({ open, onToggle }: { open: boolean; onToggle: () => v
 
   const navWidth = getFloatingNavWidth(open);
   const displayPosition = clampFloatingNavPosition(position, open);
+  const safeArea = getSafeAreaInsets();
   const displayLeft = open
-    ? clampNumber(displayPosition.x - navWidth + TAROT_NAV_CLOSED_SIZE, TAROT_NAV_EDGE, window.innerWidth - navWidth - TAROT_NAV_EDGE)
+    ? clampNumber(
+        displayPosition.x - navWidth + TAROT_NAV_CLOSED_SIZE,
+        TAROT_NAV_EDGE + safeArea.left,
+        window.innerWidth - safeArea.right - navWidth - TAROT_NAV_EDGE,
+      )
     : displayPosition.x;
 
   React.useEffect(() => {

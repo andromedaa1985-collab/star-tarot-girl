@@ -1034,6 +1034,7 @@ export default function Home() {
   const [showReadingLog, setShowReadingLog] = useState(false);
   const [showWardrobe, setShowWardrobe] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showComposerTools, setShowComposerTools] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [isDrawingCards, setIsDrawingCards] = useState(false);
@@ -1132,8 +1133,8 @@ export default function Home() {
     ? 'left-1/2 top-[248px] h-[190px] w-[190px] -translate-x-1/2 sm:top-[236px] sm:h-[220px] sm:w-[220px]'
     : 'left-1/2 top-[292px] h-[132px] w-[132px] -translate-x-1/2 sm:h-[150px] sm:w-[150px]';
   const petDockClass = isFullBodyPet
-    ? 'bottom-[104px] left-2 h-[124px] w-[124px] sm:left-6 sm:h-[136px] sm:w-[136px]'
-    : 'bottom-[104px] left-4 h-[88px] w-[88px] sm:left-6';
+    ? 'bottom-[calc(var(--app-bottom-pad)+94px)] left-2 h-[124px] w-[124px] sm:left-6 sm:h-[136px] sm:w-[136px]'
+    : 'bottom-[calc(var(--app-bottom-pad)+94px)] left-4 h-[88px] w-[88px] sm:left-6';
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1534,6 +1535,10 @@ export default function Home() {
     setShowClearConfirm(false);
   };
 
+  const handleDeleteMessage = (messageId: string) => {
+    setMessages((prev) => prev.filter((message) => message.id !== messageId));
+  };
+
   const handleVoiceInput = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -1653,6 +1658,7 @@ export default function Home() {
 
   const openDailyTasksFromChat = () => {
     setShowDailyPanel(true);
+    setShowComposerTools(false);
     setShowScrollTop(false);
     setShowScrollBottom(true);
     const scrollToDaily = () => {
@@ -1663,7 +1669,7 @@ export default function Home() {
     window.setTimeout(scrollToDaily, 80);
   };
 
-  const showComposerSuggestions = composerFocused && !isThinking;
+  const showComposerSuggestions = composerFocused && !showComposerTools && !isThinking;
 
   const composerSuggestions = (
     <AnimatePresence initial={false}>
@@ -1678,7 +1684,10 @@ export default function Home() {
           <button
             type="button"
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setShowReadingLog(true)}
+            onClick={() => {
+              setShowComposerTools(false);
+              setShowReadingLog(true);
+            }}
             className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#f4cf83]/32 bg-[#f4cf83]/18 px-2.5 py-1.5 text-[11px] font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] transition-transform active:scale-[0.98] dark:border-[#f4cf83]/20 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83] sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
             aria-label="打开牌迹档案"
           >
@@ -1722,9 +1731,18 @@ export default function Home() {
           type="text"
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
-          onPointerDown={() => setComposerFocused(true)}
-          onClick={() => setComposerFocused(true)}
-          onFocus={() => setComposerFocused(true)}
+          onPointerDown={() => {
+            setShowComposerTools(false);
+            setComposerFocused(true);
+          }}
+          onClick={() => {
+            setShowComposerTools(false);
+            setComposerFocused(true);
+          }}
+          onFocus={() => {
+            setShowComposerTools(false);
+            setComposerFocused(true);
+          }}
           onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
           onKeyDown={(event) => event.key === 'Enter' && handleSend()}
           disabled={isThinking}
@@ -1754,17 +1772,20 @@ export default function Home() {
 
   const contextActionDock = (
     <AnimatePresence initial={false}>
-      {visibleMessages.length > 0 && !showComposerSuggestions && (
+      {visibleMessages.length > 0 && showComposerTools && !showComposerSuggestions && (
         <motion.div
           initial={{ opacity: 0, y: 10, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className="mx-auto mb-1.5 grid w-full max-w-[min(540px,calc(100vw-28px))] grid-cols-3 gap-1.5 rounded-[22px] border border-[#efe3cf]/72 bg-[#fff8ee]/82 p-1.5 shadow-[0_16px_42px_rgba(84,55,24,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/82 dark:shadow-[0_16px_42px_rgba(0,0,0,0.40),inset_0_1px_0_rgba(255,255,255,0.07)]"
+          className="mx-auto mb-1.5 grid w-full max-w-[min(540px,calc(100vw-28px))] grid-cols-2 gap-1.5 rounded-[22px] border border-[#efe3cf]/72 bg-[#fff8ee]/82 p-1.5 shadow-[0_16px_42px_rgba(84,55,24,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/82 dark:shadow-[0_16px_42px_rgba(0,0,0,0.40),inset_0_1px_0_rgba(255,255,255,0.07)]"
         >
           <button
             type="button"
-            onClick={() => setShowReadingLog(true)}
+            onClick={() => {
+              setShowComposerTools(false);
+              setShowReadingLog(true);
+            }}
             className="flex min-w-0 items-center gap-2 rounded-[18px] bg-[#f4cf83]/18 px-2 py-2 text-left text-[#8f5e1b] transition-transform active:scale-[0.98] dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
             aria-label="打开牌迹档案"
           >
@@ -1781,7 +1802,7 @@ export default function Home() {
             type="button"
             onClick={handleMemoryRecallAction}
             disabled={isThinking}
-            className="flex min-w-0 items-center gap-2 rounded-[18px] px-2 py-2 text-left text-[#6f6253] transition-transform active:scale-[0.98] disabled:opacity-55 dark:text-white/62"
+            className="hidden"
             aria-label="继续星轨记忆"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#f1dfbc]/78 text-[#9b641e] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]">
@@ -1811,6 +1832,24 @@ export default function Home() {
       )}
     </AnimatePresence>
   );
+
+  const composerToolToggle = visibleMessages.length > 0 ? (
+    <div className="pointer-events-none mx-auto flex w-full max-w-[540px] justify-center">
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          setComposerFocused(false);
+          setShowComposerTools((value) => !value);
+        }}
+        className="pointer-events-auto -mb-px flex h-6 w-12 items-center justify-center rounded-t-full border border-b-0 border-[#efe3cf]/78 bg-[#fffaf2]/90 text-[#8b765d] shadow-[0_-8px_22px_rgba(84,55,24,0.08),inset_0_1px_0_rgba(255,255,255,0.76)] backdrop-blur-2xl transition-transform active:scale-95 dark:border-white/[0.08] dark:bg-[#111522]/90 dark:text-white/58"
+        aria-label={showComposerTools ? '收起快捷工具' : '展开快捷工具'}
+        title={showComposerTools ? '收起快捷工具' : '展开快捷工具'}
+      >
+        {showComposerTools ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      </button>
+    </div>
+  ) : null;
 
   const companionPet = (wrapperClassName: string, docked = false) => (
     <div className={wrapperClassName}>
@@ -1857,19 +1896,73 @@ export default function Home() {
         <div className="absolute inset-0 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.34)_48%,transparent_72%)] opacity-45 dark:opacity-[0.04]" />
       </div>
 
+      <div className="absolute inset-x-0 top-0 z-50 border-b border-[#eadcc8]/68 bg-[#fff8ed]/86 shadow-[0_12px_34px_rgba(84,55,24,0.08)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#0d111d]/86 dark:shadow-[0_14px_38px_rgba(0,0,0,0.32)]">
+        <div className="mx-auto grid h-16 w-full max-w-[540px] grid-cols-[minmax(0,1fr)_minmax(86px,28vw)_minmax(0,1fr)] items-center gap-2 px-4">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-semibold tracking-[0.18em] text-[#9a6a28] dark:text-[#f4cf83]">
+              星轨塔罗
+            </p>
+            <div className="truncate text-[16px] font-semibold leading-tight text-[#241c14] dark:text-[#f8f2e7]">
+              LV.{bondLevel} {LEVEL_TITLES[bondLevel - 1]}
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
+                <motion.div
+                  className="h-full rounded-full bg-gradient-to-r from-[#c88a34] to-[#6f84e8]"
+                  initial={false}
+                  animate={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <span className="text-[10px] font-medium text-apple-text-muted">{progressPercent}%</span>
+            </div>
+          </div>
+          <div aria-hidden="true" />
+          <div className="flex min-w-0 items-center justify-end gap-1.5">
+            <button
+              onClick={() => openUpgradePrompt('energy')}
+              className="flex h-9 shrink-0 items-center gap-1 rounded-[16px] bg-[#f1dfbc] px-2.5 text-[#8e5d19] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
+              title={membershipLabel}
+            >
+              <Sparkles size={15} />
+              <span className="text-[13px] font-semibold">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
+            </button>
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
+              aria-label="切换日夜模式"
+              title="切换日夜模式"
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <button
+              onClick={() => setShowWardrobe(true)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
+              aria-label="打开衣柜"
+              title="衣柜"
+            >
+              <Shirt size={17} />
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className={clsx(
-          'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-4 no-scrollbar sm:px-6',
-          visibleMessages.length > 0 ? 'pb-[224px]' : 'pb-[132px]',
+          'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-[76px] no-scrollbar sm:px-6',
+          visibleMessages.length > 0
+            ? showComposerTools || showComposerSuggestions
+              ? 'pb-[calc(var(--app-bottom-pad)+214px)]'
+              : 'pb-[calc(var(--app-bottom-pad)+136px)]'
+            : 'pb-[calc(var(--app-bottom-pad)+122px)]',
         )}
       >
         <div
           className="mx-auto flex max-w-[540px] min-w-0 flex-col gap-3.5"
           style={{ width: 'min(540px, calc(100vw - 32px))' }}
         >
-          <header className="flex min-w-0 items-center justify-between gap-3 overflow-hidden rounded-[28px] border border-[#eadcc8]/80 bg-[#fff8ed]/82 px-3 py-3 shadow-[0_16px_46px_rgba(94,64,31,0.10),inset_0_1px_0_rgba(255,255,255,0.86)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-white/[0.065] dark:shadow-[0_18px_46px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <header className="hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <div className="h-11 w-11 shrink-0 overflow-hidden rounded-[18px] bg-[#efe0c7] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-white/[0.08]">
                 <img src={activeCompanionImage} alt="星轨塔罗" className="h-full w-full object-contain p-1" />
@@ -2453,16 +2546,26 @@ export default function Home() {
                       })()}
                     {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
                   </div>
-                  {message.role === 'ai' && (
-                    <div className="flex items-center gap-2 px-2">
+                  <div className={clsx('flex items-center gap-2 px-2', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+                    {message.role === 'ai' && (
+                      <>
                       <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="p-1 text-apple-text-muted" title="复制">
                         <Copy size={13} />
                       </button>
                       <button onClick={handleRegenerate} disabled={isThinking} className="p-1 text-apple-text-muted disabled:opacity-30" title="重新生成">
                         <RefreshCw size={13} />
                       </button>
-                    </div>
-                  )}
+                      </>
+                    )}
+                    <button
+                      onClick={() => handleDeleteMessage(message.id)}
+                      className="p-1 text-apple-text-muted transition-colors hover:text-[#b94a28]"
+                      title="删除这一条"
+                      aria-label="删除这一条消息"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </motion.div>
               ))}
               <div ref={endRef} className="h-8 shrink-0" />
@@ -2479,9 +2582,10 @@ export default function Home() {
         visibleMessages.length > 0,
       )}
 
-      <div className="absolute inset-x-0 bottom-[18px] z-50 px-4">
-        {contextActionDock}
+      <div className="absolute inset-x-0 bottom-[var(--app-bottom-pad)] z-50 px-4">
         {composerSuggestions}
+        {contextActionDock}
+        {composerToolToggle}
         {composer}
       </div>
 
@@ -2492,7 +2596,12 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => scrollConversationToBottom()}
-            className="absolute bottom-[178px] left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:left-[calc(50%_-_250px)]"
+            className={clsx(
+              'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:left-[calc(50%_-_250px)]',
+              showComposerTools || showComposerSuggestions
+                ? 'bottom-[calc(var(--app-bottom-pad)+168px)]'
+                : 'bottom-[calc(var(--app-bottom-pad)+112px)]',
+            )}
             aria-label="滚动到底部"
             title="滚动到底部"
           >
@@ -2508,7 +2617,12 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="absolute bottom-[226px] left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:left-[calc(50%_-_250px)]"
+            className={clsx(
+              'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:left-[calc(50%_-_250px)]',
+              showComposerTools || showComposerSuggestions
+                ? 'bottom-[calc(var(--app-bottom-pad)+216px)]'
+                : 'bottom-[calc(var(--app-bottom-pad)+160px)]',
+            )}
             aria-label="回到顶部"
             title="回到顶部"
           >
@@ -2622,7 +2736,7 @@ export default function Home() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="relative z-10 h-full overflow-y-auto px-4 pb-[174px] pt-4 no-scrollbar sm:px-6 sm:pt-6"
+        className="relative z-10 h-full overflow-y-auto px-4 pb-[calc(var(--app-bottom-pad)+164px)] pt-4 no-scrollbar sm:px-6 sm:pt-6"
       >
         <div className="mx-auto flex w-full max-w-[540px] flex-col gap-3">
           <header className="flex items-center justify-between gap-3">
@@ -3006,7 +3120,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="absolute inset-x-0 bottom-[86px] z-40 px-4">
+      <div className="absolute inset-x-0 bottom-[calc(var(--app-bottom-pad)+76px)] z-40 px-4">
         {composerSuggestions}
         <div className="mx-auto flex w-full max-w-[540px] items-center gap-1.5 rounded-[28px] bg-[rgba(255,251,244,0.84)] p-1.5 shadow-[0_14px_40px_rgba(79,54,24,0.13),inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-2xl dark:bg-[rgba(14,18,27,0.84)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]">
           <button
@@ -3064,7 +3178,7 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="absolute bottom-[184px] right-5 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-apple-surface text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl"
+            className="absolute bottom-[calc(var(--app-bottom-pad)+174px)] right-5 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-apple-surface text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl"
             aria-label="回到顶部"
             title="回到顶部"
           >
