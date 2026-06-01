@@ -18,7 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
-import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
+import { buildUserAddressInstruction, parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
@@ -313,7 +313,7 @@ function buildSimulationArchive({
 
 export default function Simulator() {
   const navigate = useNavigate();
-  const { baziFormData, simulatorState, setSimulatorState, simulationHistory, setSimulationHistory, profiles, activeProfileId, setAppEvents } = useAppContext();
+  const { baziFormData, simulatorState, setSimulatorState, simulationHistory, setSimulationHistory, profiles, activeProfileId, setAppEvents, userName, preferredAddress } = useAppContext();
   const [isSimulating, setIsSimulating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [selectedPresetCategory, setSelectedPresetCategory] = useState<SimulationPresetCategory>('迷茫');
@@ -339,6 +339,7 @@ export default function Simulator() {
 
   const activeProfile = profiles.find(p => p.id === activeProfileId);
   const currentBazi = activeProfile || baziFormData;
+  const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   const canSimulate = Boolean(dilemma.trim() && choiceA.trim() && choiceB.trim());
   const visiblePresets = SIMULATION_PRESETS.filter((preset) => preset.category === selectedPresetCategory);
 
@@ -414,6 +415,7 @@ export default function Simulator() {
 
 【用户基础信息】
 ${baziContext}
+${userAddressInstruction}
 
 【当前人生岔路口】
 困境描述：${dilemma}

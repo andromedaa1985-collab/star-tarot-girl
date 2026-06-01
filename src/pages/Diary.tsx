@@ -9,7 +9,7 @@ import { buildDiaryThemeTrends, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
-import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
 import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
@@ -161,7 +161,7 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
 export default function Diary() {
   useTrustedTime();
   const navigate = useNavigate();
-  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership } = useAppContext();
+  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
   const [isAdding, setIsAdding] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState<string | null>(null);
@@ -186,6 +186,7 @@ export default function Diary() {
   const reviewRangeText = formatDateRange(reviewWindow.startDate, reviewWindow.endDate);
   const plusActive = isPlusActive(membership, trustedNow);
   const isPremiumReviewRange = reviewRange !== 'today';
+  const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
 
   const openPlusForReview = () => {
     navigate('/app/profile?plus=1&plan=plus_monthly&from=diary_review');
@@ -292,6 +293,7 @@ export default function Diary() {
 请根据用户指定时间段内的日记记录（以及八字命理信息，如果有的话），进行深度的命运复盘。
 
 【用户档案信息】：
+${userAddressInstruction || '用户暂未设置偏好的称呼。'}
 ${activeProfile ? `姓名：${activeProfile.name}，性别：${activeProfile.gender === 'male' ? '男' : '女'}，出生日期：${activeProfile.birthDate} ${activeProfile.birthTime}，出生地：${activeProfile.birthLocation}` : '未提供'}
 
 【用户八字五行信息】：
@@ -321,7 +323,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             model: DEEPSEEK_TEXT_MODEL,
             messages: [
               { role: 'system', content: '你是一位精通心理学与命理学的命运复盘导师。' },
-              { role: 'user', content: `${DIARY_REVIEW_SYSTEM_PROMPT}\n\n${ACTIONABLE_MEMORY_RULES}\n\n${prompt}` }
+              { role: 'user', content: [DIARY_REVIEW_SYSTEM_PROMPT, userAddressInstruction, ACTIONABLE_MEMORY_RULES, prompt].filter(Boolean).join('\n\n') }
             ]
           })
         });

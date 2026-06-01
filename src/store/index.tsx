@@ -161,6 +161,10 @@ interface AppState {
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   userName: string;
   setUserName: React.Dispatch<React.SetStateAction<string>>;
+  preferredAddress: string;
+  setPreferredAddress: React.Dispatch<React.SetStateAction<string>>;
+  preferredAddressPromptDismissed: boolean;
+  setPreferredAddressPromptDismissed: React.Dispatch<React.SetStateAction<boolean>>;
   userAvatar: string | null;
   setUserAvatar: React.Dispatch<React.SetStateAction<string | null>>;
   companionOutfit: string;
@@ -245,6 +249,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   });
   const [userName, setUserName] = useState(() => readStoredJson('userName', '星轨旅人'));
+  const [preferredAddress, setPreferredAddress] = useState(() => readStoredJson('preferredAddress', ''));
+  const [preferredAddressPromptDismissed, setPreferredAddressPromptDismissed] = useState(() => {
+    const saved = localStorage.getItem('preferredAddressPromptDismissed');
+    if (saved !== null) return readStoredJson('preferredAddressPromptDismissed', false);
+    return Boolean(readStoredJson('preferredAddress', ''));
+  });
   const [userAvatar, setUserAvatar] = useState<string | null>(() => readStoredJson<string | null>('userAvatar', null));
   const [companionOutfit, setCompanionOutfit] = useState<string>(() => {
     const saved = localStorage.getItem('companionOutfit');
@@ -364,6 +374,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [userName]);
 
   React.useEffect(() => {
+    localStorage.setItem('preferredAddress', JSON.stringify(preferredAddress));
+  }, [preferredAddress]);
+
+  React.useEffect(() => {
+    localStorage.setItem('preferredAddressPromptDismissed', JSON.stringify(preferredAddressPromptDismissed));
+  }, [preferredAddressPromptDismissed]);
+
+  React.useEffect(() => {
     localStorage.setItem('userAvatar', JSON.stringify(userAvatar));
   }, [userAvatar]);
 
@@ -478,6 +496,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       communityPosts, setCommunityPosts,
       settings, setSettings,
       userName, setUserName,
+      preferredAddress, setPreferredAddress,
+      preferredAddressPromptDismissed, setPreferredAddressPromptDismissed,
       userAvatar, setUserAvatar,
       companionOutfit, setCompanionOutfit,
       theme, setTheme,

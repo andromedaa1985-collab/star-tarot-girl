@@ -1,10 +1,11 @@
 import React from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { Sparkles, User, Compass, Book, Moon, X, LockKeyhole } from 'lucide-react';
+import { Sparkles, User, Compass, Book, Moon, X, LockKeyhole, Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import clsx from 'clsx';
 import { useAppContext } from '../store';
 import { hasFeatureAccess, type PremiumFeature } from '../lib/membership';
+import { normalizeUserAddress } from '../lib/aiPrompting';
 
 const SimulatorIcon = ({ size = 20 }: { size?: number }) => (
   <svg
@@ -165,7 +166,125 @@ export default function Layout() {
       ) : (
         <BottomDock />
       )}
+      <PreferredAddressPrompt />
     </div>
+  );
+}
+
+function PreferredAddressPrompt() {
+  const {
+    userName,
+    preferredAddress,
+    setPreferredAddress,
+    preferredAddressPromptDismissed,
+    setPreferredAddressPromptDismissed,
+  } = useAppContext();
+  const [draftAddress, setDraftAddress] = React.useState('');
+  const shouldShow = !preferredAddress && !preferredAddressPromptDismissed;
+  const normalizedDraft = normalizeUserAddress(draftAddress);
+  const normalizedUserName = normalizeUserAddress(userName);
+  const defaultPreview = normalizedUserName && normalizedUserName !== '星轨旅人'
+    ? `默认会按昵称「${normalizedUserName}」来称呼你。`
+    : '默认不会强行喊名字，只在语气上更贴近你。';
+
+  React.useEffect(() => {
+    if (shouldShow) setDraftAddress('');
+  }, [shouldShow]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!normalizedDraft) return;
+    setPreferredAddress(normalizedDraft);
+    setPreferredAddressPromptDismissed(true);
+  };
+
+  const handleUseDefault = () => {
+    setPreferredAddress('');
+    setPreferredAddressPromptDismissed(true);
+  };
+
+  return (
+    <AnimatePresence>
+      {shouldShow && (
+        <motion.div
+          className="fixed inset-0 z-[90] flex items-end justify-center px-4 pb-[calc(18px+var(--app-safe-bottom))] pt-[calc(18px+var(--app-safe-top))] sm:items-center sm:p-6"
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="absolute inset-0 bg-black/45 backdrop-blur-[10px]" />
+          <motion.form
+            onSubmit={handleSubmit}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preferred-address-title"
+            className="relative w-full max-w-[390px] overflow-hidden rounded-[30px] border border-[#ead7bb]/85 bg-[#fff8ec]/95 p-5 text-[#2b2117] shadow-[0_24px_70px_rgba(43,33,23,0.28),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl dark:border-white/12 dark:bg-[#121824]/94 dark:text-white dark:shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.08)]"
+            initial={{ y: 28, scale: 0.96, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
+            exit={{ y: 24, scale: 0.97, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 32 }}
+          >
+            <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full bg-[#f1c86f]/20 blur-2xl dark:bg-[#6B8AFF]/18" />
+            <div className="relative">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#f2d58e] text-[#2c1d0d] shadow-[0_12px_28px_rgba(185,123,40,0.18)] dark:bg-[#f4cf83]">
+                  <Sparkles size={20} />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="preferred-address-title" className="text-lg font-bold leading-tight">
+                    想让星轨怎么称呼你？
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-[#736658] dark:text-white/66">
+                    她会在每日运势和解读里自然叫你一次。选默认后不再弹出，也可以在「我的 - 编辑个人资料」里调整。
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <label htmlFor="preferred-address-input" className="mb-2 block text-xs font-semibold text-[#9a641c] dark:text-[#f4cf83]">
+                  你爱听的称呼
+                </label>
+                <input
+                  id="preferred-address-input"
+                  type="text"
+                  value={draftAddress}
+                  onChange={(event) => setDraftAddress(event.target.value)}
+                  placeholder="比如：宝子、小鱼、姐姐"
+                  maxLength={16}
+                  autoFocus
+                  className="h-12 w-full rounded-2xl border border-[#dec8aa]/90 bg-white/78 px-4 text-[15px] font-medium text-[#2b2117] outline-none transition focus:border-[#b97b28]/55 focus:ring-4 focus:ring-[#d9a94f]/16 dark:border-white/10 dark:bg-white/[0.07] dark:text-white dark:placeholder:text-white/35 dark:focus:border-[#f4cf83]/45 dark:focus:ring-[#6B8AFF]/18"
+                />
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-[#ead7bb]/80 bg-white/45 px-4 py-3 text-xs leading-relaxed text-[#7a6d5f] dark:border-white/10 dark:bg-white/[0.05] dark:text-white/58">
+                {normalizedDraft
+                  ? `之后她会自然叫你「${normalizedDraft}」，但不会每段都重复。`
+                  : defaultPreview}
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleUseDefault}
+                  className="h-12 rounded-2xl border border-[#dfccb2]/90 bg-white/58 text-sm font-semibold text-[#665848] transition active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.06] dark:text-white/66"
+                >
+                  先用默认
+                </button>
+                <button
+                  type="submit"
+                  disabled={!normalizedDraft}
+                  className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#17130f] text-sm font-bold text-[#f4cf83] shadow-[0_14px_28px_rgba(23,19,15,0.18)] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-[#cfc4b4] disabled:text-white/70 disabled:shadow-none dark:bg-[#f4cf83] dark:text-[#17130f] dark:disabled:bg-white/12 dark:disabled:text-white/30"
+                >
+                  <Check size={17} />
+                  就叫这个
+                </button>
+              </div>
+            </div>
+          </motion.form>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

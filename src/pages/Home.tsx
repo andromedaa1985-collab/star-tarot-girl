@@ -55,7 +55,7 @@ import {
 import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
-import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { TAROT_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
 import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
@@ -1113,6 +1113,8 @@ export default function Home() {
     setMessages,
     cardImage,
     setCardImage,
+    userName,
+    preferredAddress,
     theme,
     setTheme,
     baziResult,
@@ -1196,6 +1198,7 @@ export default function Home() {
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
   const trialAvailable = canStartPlusTrial(membership);
+  const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   const dailyDeepCredits = getDailyFortuneDeepCredits(membership);
   const dailyDeepAccess = hasDailyFortuneDeepAccess(membership);
   const readingLimit = getReadingLimit(membership);
@@ -1576,7 +1579,10 @@ export default function Home() {
             },
             {
               role: 'user',
-              content: buildDailyFortuneDeepPrompt(sourceQuestion, readingContext, sourceAnswer, isInternetMode),
+              content: [
+                userAddressInstruction,
+                buildDailyFortuneDeepPrompt(sourceQuestion, readingContext, sourceAnswer, isInternetMode),
+              ].filter(Boolean).join('\n\n'),
             },
           ],
         }),
@@ -1699,6 +1705,7 @@ export default function Home() {
               role: 'user',
               content: [
                 tarotContextPolicy.instruction,
+                userAddressInstruction,
                 tarotContextPolicy.memoryText,
                 tarotContextPolicy.profileText,
                 shouldDraw

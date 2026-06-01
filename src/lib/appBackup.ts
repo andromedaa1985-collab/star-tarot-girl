@@ -25,6 +25,8 @@ export const APP_STORAGE_KEYS = [
   'communityPosts',
   'settings',
   'userName',
+  'preferredAddress',
+  'preferredAddressPromptDismissed',
   'userAvatar',
   'companionOutfit',
   'theme',

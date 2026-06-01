@@ -18,6 +18,7 @@ import {
   startPlusTrial,
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
+import { normalizeUserAddress } from '../lib/aiPrompting';
 import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
 import { apiFetch } from '../lib/apiClient';
 
@@ -64,7 +65,7 @@ const PLAN_REDIRECTS: Record<string, string> = {
 };
 
 export default function Profile() {
-  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
+  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
@@ -79,6 +80,7 @@ export default function Profile() {
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [redeemCode, setRedeemCode] = useState('');
   const [editName, setEditName] = useState(userName);
+  const [editPreferredAddress, setEditPreferredAddress] = useState(preferredAddress);
   const [editAvatar, setEditAvatar] = useState(userAvatar);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -128,6 +130,8 @@ export default function Profile() {
     if (editName.trim()) {
       setUserName(editName.trim());
     }
+    setPreferredAddress(normalizeUserAddress(editPreferredAddress));
+    setPreferredAddressPromptDismissed(true);
     setUserAvatar(editAvatar);
     setIsEditing(false);
   };
@@ -366,12 +370,15 @@ export default function Profile() {
           <h2 className="font-sans text-2xl font-bold mb-1 tracking-wider text-apple-text drop-shadow-md">{userName}</h2>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-apple-accent animate-pulse shadow-[0_0_8px_rgba(185,123,40,0.35)] dark:shadow-[0_0_8px_rgba(107,138,255,0.8)]"></span>
-            <p className="text-xs text-apple-accent font-mono tracking-widest">ID: 88481234</p>
+            <p className="text-xs text-apple-accent font-mono tracking-widest">
+              {preferredAddress ? `她会叫你：${preferredAddress}` : 'ID: 88481234'}
+            </p>
           </div>
         </div>
         <button 
           onClick={() => {
             setEditName(userName);
+            setEditPreferredAddress(preferredAddress);
             setEditAvatar(userAvatar);
             setIsEditing(true);
           }}
@@ -414,6 +421,21 @@ export default function Profile() {
                   placeholder="输入你的昵称"
                   maxLength={12}
                 />
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-xs font-medium text-apple-text-muted mb-2">想被怎么称呼</label>
+                <input
+                  type="text"
+                  value={editPreferredAddress}
+                  onChange={(e) => setEditPreferredAddress(e.target.value)}
+                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-all"
+                  placeholder="比如：宝子、小鱼、姐姐"
+                  maxLength={16}
+                />
+                <p className="mt-2 text-[11px] leading-relaxed text-apple-text-muted">
+                  留空则按昵称称呼。首次弹窗选择后，也可以回到这里重新调整。
+                </p>
               </div>
 
               <div className="mb-8">

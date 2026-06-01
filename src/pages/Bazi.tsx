@@ -10,7 +10,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { hasFeatureAccess, isPlusActive } from '../lib/membership';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
-import { parseAiJson } from '../lib/aiPrompting';
+import { buildUserAddressInstruction, normalizeUserAddress, parseAiJson } from '../lib/aiPrompting';
 import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
@@ -529,11 +529,13 @@ export default function Bazi() {
   useTrustedTime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { energy, setEnergy, membership, baziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId } = useAppContext();
+  const { energy, setEnergy, membership, baziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId, userName, preferredAddress } = useAppContext();
   const plusActive = isPlusActive(membership);
   const baziUnlocked = hasFeatureAccess(membership, 'bazi');
   const relationshipUnlocked = hasFeatureAccess(membership, 'relationship_report');
   const relationshipWeekUnlocked = hasFeatureAccess(membership, 'relationship_weekly');
+  const userAddress = normalizeUserAddress(preferredAddress) || normalizeUserAddress(userName) || baziFormData.name || '你';
+  const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   
   const [isCalculating, setIsCalculating] = useState(false);
   const [chatInput, setChatInput, clearChatDraft] = usePersistentDraft('draft:bazi:chat', '');
@@ -1028,7 +1030,7 @@ ${exactBaziStr}
       setBaziMessages([{
         id: createRecordId('bazi'),
         role: 'ai',
-        text: `你好，${baziFormData.name}。我已经为你排好了八字。关于你的命理，有什么想进一步了解的吗？`,
+        text: `你好，${userAddress}。我已经为你排好了八字。关于这份命理档案，有什么想进一步了解的吗？`,
         timestamp: Date.now(),
         ...createGenerationTrace('bazi_calculation', {
           model: 'system',
@@ -1072,6 +1074,8 @@ ${exactBaziStr}
       const contextPrompt = `你是一位精通八字命理的国学大师，正在与缘主面对面交流。
 用户八字排盘结果如下：
 ${JSON.stringify(baziResult, null, 2)}
+
+${userAddressInstruction}
 
 提问时的近期时间参考：
 ${recentFortuneContext}

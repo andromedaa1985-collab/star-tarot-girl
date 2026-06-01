@@ -51,6 +51,22 @@ export const SIMULATOR_JSON_SYSTEM_PROMPT = `
 推演要客观、克制、有行动建议，不要夸大命运决定论，不要输出 Markdown 或 JSON 以外的文字。
 `.trim();
 
+export function normalizeUserAddress(value: unknown) {
+  return String(value || '')
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/[「」]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 16);
+}
+
+export function buildUserAddressInstruction(preferredAddress: unknown, fallbackName?: unknown) {
+  const address = normalizeUserAddress(preferredAddress) || normalizeUserAddress(fallbackName);
+  if (!address || address === '星轨旅人') return '';
+
+  return `用户希望被称呼为「${address}」。回答时请在开头或很自然的位置轻轻叫一次这个称呼，让陪伴感更近；不要每段重复，不要油腻撒娇，不要把称呼当成模板口头禅。`;
+}
+
 export const cleanAiText = (text: string) =>
   String(text || '')
     .replace(/```(?:json|text|markdown)?\s*([\s\S]*?)```/gi, '$1')

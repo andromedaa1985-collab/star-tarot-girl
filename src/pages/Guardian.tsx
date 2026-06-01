@@ -9,7 +9,9 @@ import {
   ACTIONABLE_MEMORY_RULES,
   GUARDIAN_CHAT_SYSTEM_PROMPT,
   GUARDIAN_LETTER_SYSTEM_PROMPT,
+  buildUserAddressInstruction,
   cleanAiText,
+  normalizeUserAddress,
 } from '../lib/aiPrompting';
 import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
@@ -38,7 +40,7 @@ const moodLabels: Record<string, string> = {
 
 export default function Guardian() {
   const { 
-    userName, bondLevel, setBondExp,
+    userName, preferredAddress, bondLevel, setBondExp,
     diaryEntries, baziResult,
     tarotReadings, simulationHistory, profiles, activeProfileId,
     guardianMessages, setGuardianMessages,
@@ -56,6 +58,8 @@ export default function Guardian() {
   const todayStr = new Date().toLocaleDateString('zh-CN');
   const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
   const bondTitle = LEVEL_TITLES[bondLevel - 1] || LEVEL_TITLES[0];
+  const userAddress = normalizeUserAddress(preferredAddress) || normalizeUserAddress(userName) || '你';
+  const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
   const recentReadings = [...tarotReadings]
     .filter((reading) => Date.now() - getTime(reading.date) <= MEMORY_WINDOW_MS)
@@ -91,7 +95,7 @@ export default function Guardian() {
   // Initial greeting if empty
   useEffect(() => {
     if (guardianMessages.length === 0) {
-      const greeting = `你好，${userName}。我是你的星轨守护灵。我能看见你的命理星盘，也能感知你的情绪起伏。无论发生什么，我都在这里。`;
+      const greeting = `你好，${userAddress}。我是你的星轨守护灵。我能看见你的命理星盘，也能感知你的情绪起伏。无论发生什么，我都在这里。`;
       setGuardianMessages([{
         id: createRecordId('guardian'),
         role: 'ai',
@@ -122,6 +126,7 @@ export default function Guardian() {
       const prompt = `作为用户的【星轨守护灵】，请为ta写一封今天的【今日守护回访】。
 【上下文信息】：
 - 用户姓名：${userName}
+- 用户希望被称呼：${userAddress}
 - 羁绊等级：${bondTitle}
 - 命理信息：${baziContext}
 - 近期情绪：${diaryContext}
@@ -146,6 +151,7 @@ export default function Guardian() {
                 role: 'user',
                 content: [
                   GUARDIAN_LETTER_SYSTEM_PROMPT,
+                  userAddressInstruction,
                   '这封来信必须像今日回访，而不是泛泛寄语。',
                   guardianContextLines.length
                     ? `星轨近期记得：\n${guardianContextLines.join('\n')}`
@@ -210,6 +216,7 @@ export default function Guardian() {
 
 【当前用户状态】：
 - 姓名：${userName}
+- 希望被称呼：${userAddress}
 - 你们的羁绊等级：${bondLevel}级 (${bondTitle})
 - 用户的命理特征：${baziContext}
 
@@ -234,6 +241,7 @@ export default function Guardian() {
                 role: 'system',
                 content: [
                   GUARDIAN_CHAT_SYSTEM_PROMPT,
+                  userAddressInstruction,
                   systemPrompt,
                   guardianContextLines.length
                     ? `近期线索：\n${guardianContextLines.join('\n')}`
