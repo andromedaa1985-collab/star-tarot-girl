@@ -1,4 +1,5 @@
 export type ProductPlanId =
+  | 'daily_fortune_deep'
   | 'tarot_deep_report'
   | 'plus_monthly'
   | 'relationship_report'
@@ -17,6 +18,7 @@ export interface ProductPlan {
   desc: string;
   bullets: string[];
   description: string;
+  visibleInShop?: boolean;
   entitlement: Record<string, unknown>;
   limits: Record<string, unknown>;
   features: string[];
@@ -35,6 +37,26 @@ export type PaymentPlan = Pick<
 };
 
 export const SHOP_PLANS: ProductPlan[] = [
+  {
+    id: 'daily_fortune_deep',
+    label: '今日深解',
+    paymentName: '星轨今日运势深解',
+    price: '1.9',
+    amount: '1.90',
+    badge: '今日加深',
+    title: '把今天讲细一点',
+    desc: '适合看完今日运势后还想被多陪一会儿：把今天的情绪、关系、工作和晚间回看讲清楚。',
+    bullets: ['围绕今天这张牌继续展开', '情绪、关系、工作/金钱三个切口', '赠送 2 点能量，适合当天继续追问'],
+    description: '今日运势深解、当天节奏与行动提醒',
+    entitlement: { type: 'credit', credit: 'daily_fortune_deep', count: 1, energyBonus: 2 },
+    limits: { dailyFortuneDeep: 1, followups: 1 },
+    features: ['今日运势深解', '当天现实节奏提醒', '10 分钟行动与晚间回看'],
+    experiment: {
+      tier: 'entry',
+      variant: 'daily-deep-1-9',
+      hypothesis: '围绕主产品做低价加深，比泛卖深度牌阵更贴近日常使用习惯。',
+    },
+  },
   {
     id: 'tarot_deep_report',
     label: '深度牌阵报告',
@@ -81,6 +103,7 @@ export const SHOP_PLANS: ProductPlan[] = [
     paymentName: '双人关系合盘报告',
     price: '6.9',
     amount: '6.90',
+    visibleInShop: false,
     badge: '适合情侣',
     title: '把“我们合不合”讲明白',
     desc: '适合两个人一起看。解锁吸引点、冲突雷区、沟通方式和关系时间线。',
@@ -101,6 +124,7 @@ export const SHOP_PLANS: ProductPlan[] = [
     paymentName: '7 日关系陪伴包',
     price: '12.9',
     amount: '12.90',
+    visibleInShop: false,
     badge: '更适合暧昧期',
     title: '别只看合不合，看接下来怎么相处',
     desc: '完整合盘加 7 天观察任务，每天给一个低压力行动，适合还没确定、正在磨合或想复盘的关系。',
@@ -138,17 +162,17 @@ export const SHOP_PLANS: ProductPlan[] = [
   {
     id: 'bazi_full_archive',
     label: '八字命理档案',
-    paymentName: '八字完整命理档案',
+    paymentName: '八字完整命理档案包',
     price: '19.9',
     amount: '19.90',
-    badge: '完整档案',
-    title: '把底层命盘先定下来',
-    desc: '适合想建立长期自我叙事的人。保存完整命理底稿后，后面的塔罗、日记和近期运势追问都会更有底色。',
-    bullets: ['八字、用神、流年提示', '近期运势可结合当前时间推断', '给长期陪伴一个稳定底盘'],
-    description: '八字排盘、用神、近期运势参考与长期档案',
-    entitlement: { type: 'report', report: 'bazi', energyBonus: 12 },
-    limits: { profiles: 1, followups: 10 },
-    features: ['完整命理档案', '近期运势参考', '适合长期复盘和提问'],
+    badge: '完整档案包',
+    title: '把命盘和关系底稿一起定下来',
+    desc: '适合想建立长期自我叙事的人。包含完整八字档案、双人关系合盘和 7 日关系陪伴，后面的塔罗、日记和近期运势追问都会更有底色。',
+    bullets: ['八字、用神、流年提示', '包含完整关系合盘和 7 日陪伴', '给长期陪伴一个稳定底盘'],
+    description: '八字排盘、用神、近期运势参考、完整关系合盘与 7 日关系陪伴',
+    entitlement: { type: 'bundle', bundle: 'bazi_archive', reports: ['bazi', 'relationship', 'relationship_weekly'], energyBonus: 16 },
+    limits: { profiles: 2, followups: 10, relationshipDays: 7 },
+    features: ['完整命理档案', '完整关系合盘', '7 日关系陪伴', '近期运势参考'],
     experiment: {
       tier: 'archive',
       variant: 'bazi-archive-19-9',
@@ -157,7 +181,9 @@ export const SHOP_PLANS: ProductPlan[] = [
   },
 ];
 
-export const PAYMENT_PLANS: PaymentPlan[] = SHOP_PLANS.map((plan) => ({
+export const VISIBLE_SHOP_PLANS: ProductPlan[] = SHOP_PLANS.filter((plan) => plan.visibleInShop !== false);
+
+export const PAYMENT_PLANS: PaymentPlan[] = VISIBLE_SHOP_PLANS.map((plan) => ({
   id: plan.id,
   name: plan.paymentName,
   amount: plan.amount,

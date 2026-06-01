@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
+import { registerAnalyticsRoutes } from "./api/analyticsRoutes";
 import { registerAuthRoutes } from "./api/authRoutes";
 import { PAYMENT_PLANS, type PaymentPlan } from "./src/lib/pricing";
 
@@ -207,6 +208,7 @@ async function startServer() {
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: false, limit: "5mb" }));
   registerAuthRoutes(app);
+  registerAnalyticsRoutes(app);
 
   // API routes
   app.get("/api/health", (req, res) => {

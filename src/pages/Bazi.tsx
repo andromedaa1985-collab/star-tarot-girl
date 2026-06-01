@@ -714,11 +714,11 @@ export default function Bazi() {
   };
 
   const openRelationshipPayment = () => {
-    navigate('/app/profile?plus=1&plan=relationship_report');
+    navigate('/app/profile?plus=1&plan=bazi_full_archive');
   };
 
   const openRelationshipWeekPayment = () => {
-    navigate('/app/profile?plus=1&plan=relationship_weekly');
+    navigate('/app/profile?plus=1&plan=bazi_full_archive');
   };
 
   const openCouplePlusPayment = () => {
@@ -1340,7 +1340,7 @@ ${recentFortuneContext}
                         className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-3 text-sm font-black text-[#11131a] shadow-[0_12px_30px_rgba(185,123,40,0.22)] dark:shadow-[0_12px_30px_rgba(244,207,131,0.22)]"
                       >
                         <Sparkles size={16} />
-                        解锁完整关系合盘 ¥6.9
+                        解锁完整档案包 ¥19.9
                       </button>
                     </div>
                   )}
@@ -1400,7 +1400,7 @@ ${recentFortuneContext}
                       onClick={openRelationshipPayment}
                       className="mt-2 w-full rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-xs font-black text-apple-gold"
                     >
-                      解锁完整时间线
+                      解锁完整档案包
                     </button>
                   )}
                 </div>
@@ -1415,7 +1415,7 @@ ${recentFortuneContext}
                       </div>
                     </div>
                     {!relationshipWeekUnlocked && (
-                      <div className="rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-black text-apple-gold">¥12.9</div>
+                      <div className="rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-black text-apple-gold">档案包内</div>
                     )}
                   </div>
                   {relationshipWeekUnlocked && (
@@ -1481,7 +1481,7 @@ ${recentFortuneContext}
                         onClick={openRelationshipWeekPayment}
                         className="rounded-full bg-apple-gold py-2.5 text-xs font-black text-[#11131a]"
                       >
-                        解锁 7 日陪伴
+                        开通完整档案
                       </button>
                       <button
                         type="button"

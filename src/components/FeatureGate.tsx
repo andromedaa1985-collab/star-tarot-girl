@@ -39,18 +39,18 @@ const FEATURE_COPY: Record<PremiumFeature, { title: string; eyebrow: string; des
   },
   relationship_report: {
     title: '双人关系合盘',
-    eyebrow: '两个人一起看，更容易留下来',
-    desc: '先免费看看默契分；解锁后会拆出吸引点、冲突雷区、沟通方式和 7 日相处任务。',
-    cta: '解锁关系合盘',
-    planId: 'relationship_report',
-    gains: ['双人吸引力分析', '冲突雷区提醒', '双人视角建议'],
+    eyebrow: '已并入完整档案包',
+    desc: '先免费看看默契分；完整档案包会同时打开八字底稿、关系合盘和 7 日陪伴，不再把关系拆成零散小付费。',
+    cta: '解锁完整档案包',
+    planId: 'bazi_full_archive',
+    gains: ['双人吸引力分析', '冲突雷区提醒', '7 日关系陪伴'],
   },
   relationship_weekly: {
     title: '7 日关系陪伴',
-    eyebrow: '一次合盘之后，还要看接下来怎么相处',
-    desc: '解锁后会把这段关系拆成 7 天观察任务，适合情侣、暧昧期和复合前的冷静判断。',
-    cta: '解锁 7 日陪伴',
-    planId: 'relationship_weekly',
+    eyebrow: '和关系合盘一起解锁',
+    desc: '7 日陪伴现在作为完整档案包的一部分：先建立命盘和关系底稿，再慢慢观察这段关系怎么落到日常里。',
+    cta: '解锁完整档案包',
+    planId: 'bazi_full_archive',
     gains: ['每日相处任务', '关系时间线', '一周后复盘建议'],
   },
 };
@@ -91,24 +91,24 @@ export function FeatureGate({
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-y-auto px-5 py-10 text-apple-text">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(244,207,131,0.16),transparent_42%),linear-gradient(180deg,rgba(10,13,21,0.12),rgba(4,6,12,0.76))]" />
-      <div className="relative z-10 w-full max-w-md rounded-[34px] border border-white/10 bg-[#111722]/88 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[22px] border border-[#F4CF83]/28 bg-[#F4CF83]/12 text-[#F4CF83]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(244,207,131,0.24),transparent_42%),linear-gradient(180deg,rgba(255,248,237,0.70),rgba(231,218,199,0.62))] dark:bg-[radial-gradient(circle_at_top,rgba(244,207,131,0.16),transparent_42%),linear-gradient(180deg,rgba(10,13,21,0.12),rgba(4,6,12,0.76))]" />
+      <div className="relative z-10 w-full max-w-md rounded-[34px] border border-[#e5d3b7]/72 bg-[#fff8ee]/92 p-6 shadow-[0_24px_70px_rgba(96,66,28,0.22),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111722]/88 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[22px] border border-[#b97b28]/22 bg-[#f4cf83]/20 text-[#9a6a28] dark:border-[#F4CF83]/28 dark:bg-[#F4CF83]/12 dark:text-[#F4CF83]">
           <LockKeyhole size={26} />
         </div>
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#F4CF83]/20 bg-[#F4CF83]/10 px-3 py-1 text-xs font-bold text-[#F4CF83]">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#b97b28]/22 bg-[#f4cf83]/18 px-3 py-1 text-xs font-bold text-[#9a6a28] dark:border-[#F4CF83]/20 dark:bg-[#F4CF83]/10 dark:text-[#F4CF83]">
           <Sparkles size={14} />
           {paidCopy.eyebrow}
         </div>
         <h2 className="text-2xl font-black text-apple-text">{paidCopy.title}</h2>
         <p className="mt-3 text-sm leading-7 text-apple-text-muted">{paidCopy.desc}</p>
-        <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.045] p-4">
-          <div className="text-xs font-bold text-[#F4CF83]">解锁后不会从零开始</div>
+        <div className="mt-5 rounded-[24px] border border-[#e5d3b7]/72 bg-white/54 p-4 dark:border-white/10 dark:bg-white/[0.045]">
+          <div className="text-xs font-bold text-[#9a6a28] dark:text-[#F4CF83]">解锁后不会从零开始</div>
           <p className="mt-1 text-xs leading-6 text-apple-text-muted">{memoryHint}</p>
           <div className="mt-3 grid gap-2">
             {paidCopy.gains.map((gain) => (
               <div key={gain} className="flex items-center gap-2 text-xs text-apple-text">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#F4CF83]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[#b97b28] dark:bg-[#F4CF83]" />
                 <span>{gain}</span>
               </div>
             ))}
@@ -126,7 +126,7 @@ export function FeatureGate({
           <button
             type="button"
             onClick={() => navigate('/app')}
-            className="w-full rounded-full border border-white/10 bg-white/[0.04] py-3 font-bold text-apple-text-muted"
+            className="w-full rounded-full border border-[#e5d3b7]/72 bg-white/48 py-3 font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]"
           >
             先返回塔罗
           </button>

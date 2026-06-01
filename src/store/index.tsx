@@ -14,6 +14,7 @@ import {
 } from '../lib/engagement';
 import { saveAutoRecoveryPoint } from '../lib/appBackup';
 import { normalizeGeneratedStorageValue, type GenerationKind } from '../lib/generationTrace';
+import { trackAnalyticsEvent } from '../lib/analyticsClient';
 
 // --- Constants & Data ---
 export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2500, 4000];
@@ -310,6 +311,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   React.useEffect(() => {
     setAppEvents((events) => recordAppEvent(events, 'session_start', { activeDays: engagement.activeDays }));
   }, []);
+
+  React.useEffect(() => {
+    const latestEvent = appEvents[0];
+    if (!latestEvent) return;
+    void trackAnalyticsEvent(latestEvent);
+  }, [appEvents]);
 
   React.useEffect(() => {
     localStorage.setItem('theme', theme);

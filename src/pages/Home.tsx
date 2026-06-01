@@ -41,10 +41,13 @@ import {
 } from '../store';
 import {
   canStartPlusTrial,
+  consumeDailyFortuneDeepCredit,
   getDailyCheckInEnergy,
+  getDailyFortuneDeepCredits,
   getDailyMissionEnergy,
   getMembershipLabel,
   getReadingLimit,
+  hasDailyFortuneDeepAccess,
   isPlusActive,
   isTesterActive,
   startPlusTrial,
@@ -333,6 +336,24 @@ const CURRENT_READING_KEYWORDS = [
 const includesKeyword = (text: string, keywords: string[]) =>
   keywords.some((keyword) => text.toLowerCase().includes(keyword.toLowerCase()));
 
+const DAILY_FORTUNE_KEYWORDS = [
+  '今日运势',
+  '每日运势',
+  '今天运势',
+  '今天的运势',
+  '今日牌',
+  '每日牌',
+  '今日指引',
+  '每日指引',
+  '今天怎么样',
+  '今天如何',
+];
+
+const isDailyFortuneQuestion = (question: string) => {
+  const normalized = question.trim();
+  return normalized === '运势' || includesKeyword(normalized, DAILY_FORTUNE_KEYWORDS);
+};
+
 const TAROT_CONTEXT_GENERAL_KEYWORDS = [
   '结合我',
   '结合我的',
@@ -449,7 +470,72 @@ const buildProfileTarotContext = (profile: UserProfile | null, baziResult: any |
   ].join('\n');
 };
 
+const DAILY_FORTUNE_VOICE_RULES = `
+每日运势的声音：
+- 你不是在写报告，而是在陪用户过今天。像塔罗少女坐在旁边，把牌放到用户手心里慢慢讲。
+- 第一段先接住人，再讲牌。不要一上来写“核心在于”“牌面显示”“综合来看”“首先/其次/最后”。
+- 允许温柔，但不要油腻撒娇；允许安慰，但每句安慰都要贴着牌面和今天的现实处境。
+- 不要用模板标题，不要把段落写成“情绪上、关系上、工作上”的流水账。可以自然写到这些场景，但要像真实生活：起床后的疲惫、消息里的犹豫、任务开头的阻力、睡前的回看。
+- 如果是逆位，不要说成坏事；把它解释为能量卡住、向内、延迟、过度或需要减压。
+- 少用抽象词：成长、能量、课题、蜕变、宇宙、命运安排。多用可感知的细节：慢一点回消息、先喝水、把待办拆成一行、走到窗边透口气。
+- 每段都要有新信息。不要重复“你需要稳定自己”“先照顾自己”。
+- 结尾要像轻轻把用户送回现实：一个 10 分钟内能开始的小动作，加一句适合睡前回看的温柔话。
+`.trim();
+
+const buildDailyFortunePrompt = (question: string, cards: DrawnCard[], isInternetMode: boolean) => {
+  const modeHint = isInternetMode
+    ? '如果今天的建议涉及现实安排，请提醒用户还需要结合最新事实和自己的真实日程判断。'
+    : '不需要联网，专注今天的情绪节奏、现实选择和可执行动作。';
+
+  return `用户点的是每日运势，不需要反问，也不要要求用户补充背景。
+用户原始输入：${question}
+今天抽到的塔罗牌：${formatCards(cards)}
+
+请写一份中文“今日运势”。它是星轨塔罗少女每天递给用户的一小段陪伴：温柔、安慰、细致，但仍然清醒。
+${DAILY_FORTUNE_VOICE_RULES}
+
+回答目标约 650 个中文字符，通常 580 到 720 字；牌意复杂时最多 760 字，不要为了显得丰满而硬加内容。分成 4 到 6 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。
+
+你需要自然完成一条情绪弧线：先用一句具体、柔软的话接住今天的状态；再把这张牌的正逆位、画面感或传统含义讲清楚，但要像聊天，不要像词典解释；接着让牌落到今天会遇到的真实时刻，比如身体和情绪什么时候会乱、关系里哪里要慢一点、工作学习或金钱安排上什么地方要先收口；然后说出今天最容易踩的一个坑，以及用户可以怎么温柔地绕开它；最后给一个 10 分钟内可以开始的小动作，再留一句睡前回看的话。
+
+不要主动提及日记、八字档案、人生沙盘、守护聊天或几天前的旧事，除非用户明确要求结合。
+不要下绝对结论，不要恐吓，不提供医疗、法律、投资等专业判断。
+${modeHint}`;
+};
+
+const buildDailyFortuneDeepPrompt = (
+  question: string,
+  reading: Pick<TarotReading, 'cards' | 'summary'>,
+  sourceAnswer: string,
+  isInternetMode: boolean,
+) => {
+  const modeHint = isInternetMode
+    ? '如果建议涉及现实安排，请提醒用户仍要对照最新事实和自己的真实日程。'
+    : '不需要联网，专注今天的身体节奏、关系边界、工作安排和情绪照顾。';
+
+  return `用户已经看过免费版今日运势，现在点了“今日深解”。不要重新抽牌。
+原始问题：${question}
+今天牌面：${reading.cards}
+免费版解读：${sourceAnswer || reading.summary}
+
+请继续写一份更完整的“今日深解”。语气是星轨塔罗少女：温柔、会安慰人，但不空泛；像陪用户把一天慢慢铺开。
+不要重复免费版，也不要重新抽牌。不要使用 Markdown 星号、加粗、井号标题或编号清单。
+${DAILY_FORTUNE_VOICE_RULES}
+
+长度约 1000 到 1500 个中文字符；如果需要，可以略长一点。用自然短段落写，不要写成“上午/下午/晚上”的课程表，但要让用户能感到一天的节奏在展开。
+
+请自然包含这些内容：先回应免费版里已经出现的核心情绪，不要推翻它；讲清今天这张牌最想让用户放轻一点的地方；让早些时候、中段、晚上分别更适合怎么安排注意力自然地浮现出来；给出情绪/身体、关系沟通、工作学习或金钱安排的具体提醒；如果今天出现逆位、卡顿或反复消耗，要告诉用户怎么温柔处理；最后给一个 10 分钟内可以开始的小动作，以及一句适合睡前回看的话。
+
+不要主动提及日记、八字档案、人生沙盘、守护聊天或几天前的旧事，除非用户明确要求结合。
+不要恐吓、不要下绝对结论，不提供医疗、法律、投资等专业判断。
+${modeHint}`;
+};
+
 const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boolean) => {
+  if (isDailyFortuneQuestion(question)) {
+    return buildDailyFortunePrompt(question, cards, isInternetMode);
+  }
+
   const modeHint = isInternetMode
     ? '如果问题涉及现实信息，请提醒用户需要结合最新事实判断。'
     : '不需要联网，专注情绪、选择和自我理解。';
@@ -464,8 +550,34 @@ const buildPrompt = (question: string, cards: DrawnCard[], isInternetMode: boole
 ${modeHint}`;
 };
 
+const fallbackDailyFortuneDeepAnswer = (question: string, reading: Pick<TarotReading, 'cards' | 'summary'>) =>
+  `那我把今天这张牌再轻轻展开一点。你不用把这份深解当成命令，它更像一盏小灯：不是催你马上振作，而是陪你看清今天哪里可以慢一点，哪里值得认真一点。
+
+今天这组牌是「${reading.cards || '今日牌'}」。它不是在说你必须立刻变得积极，而是在提醒你：今天真正要照顾的，是你心里那个已经撑了一阵子的部分。你可以继续往前走，但别一边往前走，一边假装自己完全不累。
+
+早些时候，先别让手机和待办把你整个人拎起来跑。你可以先喝几口水，把桌面上最碍眼的一样东西归位，或者只打开今天最重要的那个页面。你要的不是马上高效，而是先让身体知道：今天是从你这里开始的，不是从别人的催促里开始的。
+
+一天走到中段的时候，现实事务会开始变吵：消息要回、任务要排、某个选择又在心里晃。今天别把所有事都摊开审判一遍，只选一件会影响后续的小事先推进：回复一条关键消息、确认一个时间、把一个任务拆成第一步。你会发现，真正让你焦虑的不是任务本身，而是它一直悬在那里。
+
+关系里，今天要少一点“我是不是哪里不够好”的自我追问。如果有人让你紧张，你可以先不急着解释，也不必把每一次沉默都翻译成坏消息。温柔不是立刻满足别人，温柔也包括给自己留一点缓冲。
+
+如果今天反复卡住，先别骂自己。卡住有时候是在提醒你：你需要换一个更小的入口，而不是再用力一点。今天先做 10 分钟：写下“我最想从哪件小事里拿回掌控感”，然后马上做它的第一步。睡前可以回看一句话：我今天没有完美也没关系，我已经把自己往回接了一点。`;
+
 const fallbackAnswer = (question: string, cards: DrawnCard[]) => {
   const first = cards[0];
+  if (isDailyFortuneQuestion(question)) {
+    return `今天先别急着把自己推成一个很有秩序的人。你可以慢一点，先把散掉的注意力收回来。不是所有事都要在今天被你证明清楚，有些答案会在你重新坐稳以后，才愿意露出一点边。
+
+你抽到的是「${first.name}（${first.position}）」。这张牌放在每日运势里，像是在轻轻提醒你：今天真正重要的不是表现得多稳定，而是发现自己哪里已经有点累了。尤其当它以「${first.position}」出现时，它不是来吓你的，更像是在说，有些力量暂时不适合硬推，要先回到身体和情绪能承受的速度里。
+
+刚醒、刚开始工作，或者被某条消息打断的时候，你可能会有一点“我又乱了”的感觉。先别急着马上恢复完美状态。你可以先喝水，坐稳，把呼吸放下来，再决定要不要回应。今天你的效率不是从逼迫里来的，而是从一点点重新找回手感里来的。
+
+关系里，如果有人催你回应、评价你，或者让你觉得“我是不是又做得不够好”，可以先不要立刻解释。工作或学习上，也别把今天做成一张很满的清单。把“我要处理完”改成“我先打开、先写三行、先确认一个时间”，今天会松一点。
+
+今天容易踩的坑，是用反复确认来换安全感：反复刷消息、反复想某句话、反复检查自己有没有做错。它会让你越来越累，却不一定真的让事情更清楚。你可以允许自己先不把所有不确定都揉成答案。
+
+今天先做一件很小的事：花 10 分钟写下“我今天只要先完成哪一步，就算没有白过”，然后立刻做第一步。小到打开文档、洗个杯子、发一句确认都可以。睡前回看时，只记住一句：我今天没有一下子变好，但我有把自己往回接住一点。`;
+  }
   return `一句话说：你现在真正卡住的不是答案，而是还没决定要承受哪一种代价。\n\n你抽到的是「${first.name}（${first.position}）」。这张牌提醒你，${question.includes('感情') ? '关系里最重要的不是猜对方，而是看自己有没有被稳定对待。' : '先把问题拆小，别试图一次解决整个人生。'}\n\n今天只做一件事：写下你最害怕的结果，再写下如果它发生了你能怎么收场。能收场，就没那么可怕。`;
 };
 
@@ -1044,6 +1156,9 @@ export default function Home() {
   const [floatingExp, setFloatingExp] = useState<number | null>(null);
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<'energy' | 'history' | 'weekly'>('energy');
+  const [showDailyDeepPaywall, setShowDailyDeepPaywall] = useState(false);
+  const [dailyDeepExpandedIds, setDailyDeepExpandedIds] = useState<Set<string>>(() => new Set());
+  const [dailyDeepImpressionIds, setDailyDeepImpressionIds] = useState<Set<string>>(() => new Set());
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1080,6 +1195,8 @@ export default function Home() {
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
   const trialAvailable = canStartPlusTrial(membership);
+  const dailyDeepCredits = getDailyFortuneDeepCredits(membership);
+  const dailyDeepAccess = hasDailyFortuneDeepAccess(membership);
   const readingLimit = getReadingLimit(membership);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
@@ -1276,6 +1393,29 @@ export default function Home() {
     if (!isThinking) setAutoScrollOnNextMessage(false);
   }, [messages.length, isThinking, autoScrollOnNextMessage]);
 
+  useEffect(() => {
+    const unseenDailyMessages = visibleMessages.filter(
+      (message, index, list) =>
+        message.role === 'ai' &&
+        !dailyDeepExpandedIds.has(message.id) &&
+        !dailyDeepImpressionIds.has(message.id) &&
+        isDailyFortuneQuestion(getPreviousUserQuestion(list, index)),
+    );
+    if (unseenDailyMessages.length === 0) return;
+
+    setDailyDeepImpressionIds((current) => {
+      const next = new Set(current);
+      unseenDailyMessages.forEach((message) => next.add(message.id));
+      return next;
+    });
+    setAppEvents((events) =>
+      unseenDailyMessages.reduce(
+        (nextEvents, message) => recordAppEvent(nextEvents, 'daily_deep_impression', { messageId: message.id }),
+        events,
+      ),
+    );
+  }, [visibleMessages, dailyDeepExpandedIds, dailyDeepImpressionIds, setAppEvents]);
+
   const addExp = (amount: number) => {
     const nextExp = bondExp + amount;
     setBondExp(nextExp);
@@ -1368,6 +1508,123 @@ export default function Home() {
     navigate(mission === 'diary' ? '/app/diary' : '/app/simulator');
   };
 
+  const getPreviousUserQuestion = (list: Message[], index: number) => {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const candidate = list[cursor];
+      if (candidate?.role === 'user') return candidate.text;
+    }
+    return '';
+  };
+
+  const isDailyFortuneResult = (message: Message, index: number, list: Message[]) => {
+    if (message.role !== 'ai' || dailyDeepExpandedIds.has(message.id)) return false;
+    const previousQuestion = getPreviousUserQuestion(list, index);
+    return isDailyFortuneQuestion(previousQuestion);
+  };
+
+  const handleOpenDailyDeepPlan = (planId: 'daily_fortune_deep' | 'plus_monthly') => {
+    setShowDailyDeepPaywall(false);
+    setAppEvents((events) => recordAppEvent(events, 'daily_deep_plan_click', { planId }));
+    navigate(`/app/profile?plus=1&plan=${planId}`);
+  };
+
+  const handleDailyDeepDive = async (sourceMessage: Message, sourceIndex: number) => {
+    if (isThinking) return;
+    if (!dailyDeepAccess) {
+      setShowDailyDeepPaywall(true);
+      setAppEvents((events) => recordAppEvent(events, 'daily_deep_paywall_open', { source: 'cta' }));
+      return;
+    }
+
+    const sourceQuestion = getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
+    const linkedReading =
+      tarotReadings.find((reading) => reading.generationId && reading.generationId === sourceMessage.generationId) ||
+      tarotReadings.find((reading) => isDailyFortuneQuestion(reading.question) && reading.cardImage === sourceMessage.cardImage) ||
+      tarotReadings.find((reading) => isDailyFortuneQuestion(reading.question));
+    const readingContext = {
+      cards: linkedReading?.cards || '今天这张牌',
+      summary: linkedReading?.summary || cleanTarotAnswer(sourceMessage.text),
+    };
+    const sourceAnswer = cleanTarotAnswer(sourceMessage.text);
+    const userMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      text: '展开今日深解',
+      timestamp: Date.now(),
+    };
+
+    setIsThinking(true);
+    setAutoScrollOnNextMessage(true);
+    setMessages((prev) => [...prev, userMessage]);
+
+    let answer = fallbackDailyFortuneDeepAnswer(sourceQuestion, readingContext);
+    let usedFallbackAnswer = false;
+    try {
+      const response = await apiFetch('/api/deepseek/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          temperature: 0.82,
+          max_tokens: 1900,
+          isInternetMode,
+          messages: [
+            {
+              role: 'system',
+              content: TAROT_SYSTEM_PROMPT,
+            },
+            {
+              role: 'user',
+              content: buildDailyFortuneDeepPrompt(sourceQuestion, readingContext, sourceAnswer, isInternetMode),
+            },
+          ],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) throw new Error(data?.error?.message || '今日深解请求失败');
+      const aiAnswer = data?.choices?.[0]?.message?.content;
+      if (!aiAnswer) throw new Error('今日深解返回为空');
+      answer = aiAnswer;
+    } catch (error) {
+      console.error('Daily fortune deep request failed:', error);
+      usedFallbackAnswer = true;
+    }
+
+    answer = cleanTarotAnswer(answer);
+    if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
+    if (!plusActive && !testerActive) {
+      setMembership((current) => consumeDailyFortuneDeepCredit(current));
+    }
+    setAppEvents((events) =>
+      recordAppEvent(events, 'daily_deep_generate', {
+        access: plusActive || testerActive ? 'membership' : 'credit',
+      }),
+    );
+
+    const answerTrace = createGenerationTrace('tarot_followup', {
+      model: 'deepseek-chat',
+      usedFallback: usedFallbackAnswer,
+    });
+    const aiMessage = {
+      id: crypto.randomUUID(),
+      role: 'ai' as const,
+      text: answer,
+      timestamp: Date.now(),
+      cardImage: sourceMessage.cardImage || linkedReading?.cardImage,
+      cardImages: sourceMessage.cardImages || linkedReading?.cardImages,
+      ...answerTrace,
+    };
+
+    setMessages((prev) => [...prev, aiMessage]);
+    setDailyDeepExpandedIds((current) => {
+      const next = new Set(current);
+      next.add(sourceMessage.id);
+      return next;
+    });
+    addExp(12);
+    setIsThinking(false);
+  };
+
   const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
@@ -1381,6 +1638,7 @@ export default function Home() {
     const mode = options.mode ?? 'auto';
     const shouldDraw =
       mode === 'draw' || (mode === 'auto' && shouldCreateNewReading(question, hasCurrentReading));
+    const isDailyFortune = shouldDraw && isDailyFortuneQuestion(question);
     const cards = shouldDraw ? drawCards(getDrawCount(question)) : [];
     const currentImages = currentReading?.cardImages?.length
       ? currentReading.cardImages
@@ -1428,6 +1686,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'deepseek-chat',
+          temperature: isDailyFortune ? 0.78 : 0.68,
+          max_tokens: isDailyFortune ? 1100 : 900,
           isInternetMode,
           messages: [
             {
@@ -1504,7 +1764,14 @@ export default function Home() {
         spread: cards.length,
         plus: plusActive,
         energySpent: plusActive ? 0 : 1,
+        dailyFortune: isDailyFortune,
       }));
+      if (isDailyFortune) {
+        setAppEvents((events) => recordAppEvent(events, 'daily_fortune_draw', {
+          plus: plusActive,
+          energySpent: plusActive ? 0 : 1,
+        }));
+      }
       addExp(Math.floor(Math.random() * 8) + 8);
     } else {
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
@@ -2107,6 +2374,62 @@ export default function Home() {
       </div>
     </div>
   );
+
+  const renderDailyDeepCta = (message: Message, index: number, list: Message[]) => {
+    if (!isDailyFortuneResult(message, index, list)) return null;
+    const unlockedLabel = plusActive
+      ? 'Plus 已含今日深解'
+      : dailyDeepCredits > 0
+        ? `已拥有 ${dailyDeepCredits} 次今日深解`
+        : '今日深解 · ¥1.9';
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-[330px] rounded-[22px] border border-[#f4cf83]/28 bg-[#fff8ee]/78 p-3 shadow-[0_12px_30px_rgba(84,55,24,0.10)] backdrop-blur-2xl dark:border-[#f4cf83]/16 dark:bg-white/[0.055]"
+      >
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f4cf83]/18 text-[#b97b28] dark:text-[#f4cf83]">
+            <Sparkles size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-black text-apple-text">想让我把今天讲细一点吗</div>
+            <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+              展开情绪、关系、工作节奏和晚间回看；不重新抽牌，只沿着今天这张牌继续陪你看。
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 rounded-full border border-[#eadcc8]/72 bg-[#f7ead8]/78 p-1 shadow-[inset_0_1px_2px_rgba(90,62,28,0.08)] dark:border-white/[0.08] dark:bg-white/[0.055]">
+          {dailyDeepAccess ? (
+            <button
+              onClick={() => handleDailyDeepDive(message, index)}
+              disabled={isThinking}
+              className="flex h-10 w-full items-center justify-center rounded-full bg-[#17130f] px-3 text-xs font-black text-[#f4cf83] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+            >
+              展开今日深解
+            </button>
+          ) : (
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                onClick={() => setShowDailyDeepPaywall(true)}
+                disabled={isThinking}
+                className="flex h-10 items-center justify-center rounded-full bg-[#17130f] px-3 text-xs font-black text-[#f4cf83] shadow-[0_10px_24px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+              >
+                {unlockedLabel}
+              </button>
+              <button
+                onClick={() => handleOpenDailyDeepPlan('plus_monthly')}
+                className="flex h-10 items-center justify-center rounded-full px-3 text-xs font-black text-[#9a6a28] transition-colors hover:bg-white/48 dark:text-[#f4cf83] dark:hover:bg-white/[0.06]"
+              >
+                月卡每天看
+              </button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
 
   return (
     <div className="relative h-full overflow-hidden bg-[#f2eadf] text-[#241c14] dark:bg-[#07080f] dark:text-[#f8f2e7]">
@@ -2711,7 +3034,7 @@ export default function Home() {
 
           {visibleMessages.length > 0 && (
             <section className="order-2 flex flex-col gap-3 pt-1">
-              {visibleMessages.map((message) => (
+              {visibleMessages.map((message, index) => (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -2795,6 +3118,7 @@ export default function Home() {
                       <Trash2 size={13} />
                     </button>
                   </div>
+                  {renderDailyDeepCta(message, index, visibleMessages)}
                 </motion.div>
               ))}
               <div ref={endRef} className="h-8 shrink-0" />
@@ -2896,6 +3220,68 @@ export default function Home() {
         onGoPlus={handleOpenPlusPage}
         onClose={() => setShowUpgradePrompt(false)}
       />
+
+      <AnimatePresence>
+        {showDailyDeepPaywall && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[130] flex items-end justify-center bg-black/42 p-4 backdrop-blur-sm sm:items-center"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.98 }}
+              className="w-full max-w-sm rounded-[32px] border border-[#f4cf83]/22 bg-[#fff8ee]/94 p-5 shadow-2xl backdrop-blur-2xl dark:bg-[#121724]/94"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-black tracking-[0.2em] text-[#b97b28] dark:text-[#f4cf83]">TODAY DEEP</div>
+                  <h3 className="mt-2 text-xl font-black text-apple-text">把今天这张牌讲细一点</h3>
+                </div>
+                <button
+                  onClick={() => setShowDailyDeepPaywall(false)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.045] text-apple-text-muted dark:bg-white/[0.07]"
+                  aria-label="关闭"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-apple-text-muted">
+                免费版负责给你今天的方向；今日深解会继续展开情绪、关系、工作/金钱节奏，还有晚上适合回看的那句话。
+              </p>
+              <div className="mt-4 grid gap-2">
+                {['上午/下午/晚上节奏', '关系沟通和消耗提醒', '10 分钟行动与晚间回看'].map((item) => (
+                  <div key={item} className="flex items-center gap-2 rounded-2xl bg-white/58 px-3 py-2 text-sm font-semibold text-apple-text dark:bg-white/[0.06]">
+                    <Check size={15} className="text-[#b97b28] dark:text-[#f4cf83]" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 rounded-full border border-[#eadcc8]/80 bg-[#f7ead8]/82 p-1 shadow-[inset_0_1px_2px_rgba(90,62,28,0.08)] dark:border-white/[0.08] dark:bg-white/[0.055]">
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    onClick={() => handleOpenDailyDeepPlan('daily_fortune_deep')}
+                    className="rounded-full bg-[#17130f] py-3 text-sm font-black text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.18)] dark:bg-[#f4cf83] dark:text-[#17130f]"
+                  >
+                    今日 ¥1.9
+                  </button>
+                  <button
+                    onClick={() => handleOpenDailyDeepPlan('plus_monthly')}
+                    className="rounded-full py-3 text-sm font-black text-[#9a6a28] transition-colors hover:bg-white/48 dark:text-[#f4cf83] dark:hover:bg-white/[0.06]"
+                  >
+                    月卡 ¥9.9
+                  </button>
+                </div>
+              </div>
+              <p className="mt-3 text-center text-[11px] leading-relaxed text-apple-text-muted">
+                不卖焦虑，不做“付费化解”。只是把今天这张牌讲得更完整一点。
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showClearConfirm && (

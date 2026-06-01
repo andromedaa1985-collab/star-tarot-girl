@@ -1,6 +1,11 @@
 export type AppEventType =
   | 'session_start'
   | 'tarot_draw'
+  | 'daily_fortune_draw'
+  | 'daily_deep_impression'
+  | 'daily_deep_paywall_open'
+  | 'daily_deep_plan_click'
+  | 'daily_deep_generate'
   | 'daily_check_in'
   | 'daily_reward'
   | 'return_reward'

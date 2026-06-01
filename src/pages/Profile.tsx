@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import {
   activateTesterAccess,
   activatePlusDays,
+  addDailyFortuneDeepCredits,
   addFeatureUnlock,
   canStartPlusTrial,
   getMembershipLabel,
@@ -17,7 +18,7 @@ import {
   startPlusTrial,
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
-import { SHOP_PLANS } from '../lib/pricing';
+import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
 import { apiFetch } from '../lib/apiClient';
 
 const AVATARS = [
@@ -57,6 +58,10 @@ const PLUS_VALUE_PILLARS = [
 type PayMethodId = (typeof PAY_METHODS)[number]['id'];
 type PaymentStatus = 'idle' | 'creating' | 'opened' | 'checking' | 'waiting' | 'paid' | 'failed';
 const TESTER_REDEEM_CODE = 'ASTRORAIL-TEST-2026';
+const PLAN_REDIRECTS: Record<string, string> = {
+  relationship_report: 'bazi_full_archive',
+  relationship_weekly: 'bazi_full_archive',
+};
 
 export default function Profile() {
   const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
@@ -65,7 +70,7 @@ export default function Profile() {
   
   const [isEditing, setIsEditing] = useState(false);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState('tarot_deep_report');
+  const [selectedPlanId, setSelectedPlanId] = useState('daily_fortune_deep');
   const [selectedPayMethod, setSelectedPayMethod] = useState<PayMethodId>('alipay');
   const [guardianConsent, setGuardianConsent] = useState(false);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
@@ -91,7 +96,7 @@ export default function Profile() {
   const paymentReturnType = searchParams.get('payment') || '';
   const plusParam = searchParams.get('plus') || '';
   const planParam = searchParams.get('plan') || '';
-  const shopPlans = SHOP_PLANS;
+  const shopPlans = VISIBLE_SHOP_PLANS;
   const userSegment = getUserSegment({
     plusActive,
     activeDays: engagement.activeDays,
@@ -100,12 +105,13 @@ export default function Profile() {
     simulationHistory: simulationHistory.length,
     guardianMessages: guardianMessages.filter((message) => message.role === 'user').length,
   });
-  const hasPlanParam = shopPlans.some((plan) => plan.id === planParam);
+  const normalizedPlanParam = PLAN_REDIRECTS[planParam] || planParam;
+  const hasPlanParam = shopPlans.some((plan) => plan.id === normalizedPlanParam);
   const recommendedPlanId = hasPlanParam
-    ? planParam
+    ? normalizedPlanParam
     : tarotReadings.length >= 3 || diaryEntries.length >= 2 || simulationHistory.length >= 1
       ? 'plus_monthly'
-      : 'tarot_deep_report';
+      : 'daily_fortune_deep';
   const memorySeedCount = tarotReadings.length + diaryEntries.length + simulationHistory.length + profiles.length;
   const purchaseContextLine =
     memorySeedCount > 0
@@ -164,7 +170,11 @@ export default function Profile() {
       return;
     }
 
-    if (planId === 'tarot_deep_report') {
+    if (planId === 'daily_fortune_deep') {
+      setMembership((current) => addDailyFortuneDeepCredits(current, 1));
+      setEnergy((value) => value + 2);
+      setPaymentMessage('今日深解已到账：已赠送 2 点能量，可以回到塔罗页展开今天这张牌。');
+    } else if (planId === 'tarot_deep_report') {
       setMembership((current) => addFeatureUnlock(current, 'tarot_deep_report'));
       setEnergy((value) => value + 6);
       setPaymentMessage('深度牌阵报告已解锁：已赠送 6 点能量，可以回到塔罗页开始一次深度解读。');
@@ -181,9 +191,9 @@ export default function Profile() {
       setEnergy((value) => Math.max(value, 30));
       setPaymentMessage('双人 Plus 已到账：Plus、完整合盘和 7 日关系陪伴都已开启。');
     } else if (planId === 'bazi_full_archive') {
-      setMembership((current) => addFeatureUnlock(current, 'bazi'));
-      setEnergy((value) => value + 12);
-      setPaymentMessage('八字完整档案已解锁：已赠送 12 点能量，可以去八字页建立长期档案。');
+      setMembership((current) => addFeatureUnlock(addFeatureUnlock(addFeatureUnlock(current, 'bazi'), 'relationship_report'), 'relationship_weekly'));
+      setEnergy((value) => value + 16);
+      setPaymentMessage('完整档案包已解锁：八字档案、双人关系合盘和 7 日关系陪伴都已开启，并赠送 16 点能量。');
     } else if (planId === 'energy_pack_30') {
       setEnergy((value) => value + 30);
       setPaymentMessage('能量包已到账：+30 点星光能量。');
@@ -250,9 +260,9 @@ export default function Profile() {
   }, [paymentReturnType, paymentOrderId]);
 
   useEffect(() => {
-    if (hasPlanParam) setSelectedPlanId(planParam);
+    if (hasPlanParam) setSelectedPlanId(normalizedPlanParam);
     if (plusParam === '1') setShowMembershipModal(true);
-  }, [hasPlanParam, planParam, plusParam]);
+  }, [hasPlanParam, normalizedPlanParam, plusParam]);
 
   const handleCreatePaymentOrder = async () => {
     setPaymentMessage(null);
@@ -546,7 +556,7 @@ export default function Profile() {
               <div className="mt-5 rounded-[24px] border border-apple-gold/20 bg-apple-gold/10 p-4">
                 <div className="text-xs font-bold uppercase tracking-[0.18em] text-apple-gold">开通后马上发生</div>
                 <div className="mt-2 text-sm leading-relaxed text-apple-text">
-                  选择单次报告，会立刻把这次问题讲完整；选择 Plus，会开始保存长期记忆、周报和更多牌迹。
+                  选择今日深解，会把今天这张牌讲得更细；选择 Plus，每天都可以看完整日运、长期牌迹和周报。
                 </div>
                 <div className="mt-3 grid gap-2">
                   {SPIRITUAL_ANCHORS.map((item) => (

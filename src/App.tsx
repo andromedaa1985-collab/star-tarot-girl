@@ -18,6 +18,7 @@ import Bazi from './pages/Bazi';
 import Simulator from './pages/Simulator';
 import Diary from './pages/Diary';
 import Guardian from './pages/Guardian';
+import Analytics from './pages/Analytics';
 import { getStoredAccountSession } from './lib/accountClient';
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
               <Route path="settings/privacy" element={<Privacy />} />
               <Route path="settings/notifications" element={<Notifications />} />
               <Route path="settings/help" element={<Help />} />
+              <Route path="analytics" element={<Analytics />} />
               <Route path="about" element={<About />} />
             </Route>
           </Routes>

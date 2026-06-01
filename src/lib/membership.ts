@@ -9,6 +9,7 @@ export interface MembershipState {
   activatedAt: string | null;
   source: MembershipSource | null;
   unlocks: PremiumFeature[];
+  dailyFortuneDeepCredits: number;
 }
 
 export const FREE_READING_LIMIT = 30;
@@ -29,6 +30,7 @@ export const defaultMembership: MembershipState = {
   activatedAt: null,
   source: null,
   unlocks: [],
+  dailyFortuneDeepCredits: 0,
 };
 
 export function hasLocalPlusTrialLedger() {
@@ -62,6 +64,10 @@ export function normalizeMembership(value: unknown): MembershipState {
 
   const input = value as Partial<MembershipState>;
   const unlocks = normalizeUnlocks(input.unlocks);
+  const dailyFortuneDeepCredits =
+    typeof input.dailyFortuneDeepCredits === 'number' && Number.isFinite(input.dailyFortuneDeepCredits)
+      ? Math.max(0, Math.floor(input.dailyFortuneDeepCredits))
+      : 0;
 
   return {
     plan: input.plan === 'plus' || input.plan === 'tester' ? input.plan : 'free',
@@ -73,6 +79,7 @@ export function normalizeMembership(value: unknown): MembershipState {
         ? input.source
         : null,
     unlocks,
+    dailyFortuneDeepCredits,
   };
 }
 
@@ -120,6 +127,29 @@ export function getDailyMissionEnergy(membership: MembershipState) {
   return isPlusActive(membership) ? 6 : 3;
 }
 
+export function getDailyFortuneDeepCredits(membership: MembershipState) {
+  return Math.max(0, Math.floor(membership.dailyFortuneDeepCredits || 0));
+}
+
+export function hasDailyFortuneDeepAccess(membership: MembershipState) {
+  return isPlusActive(membership) || getDailyFortuneDeepCredits(membership) > 0;
+}
+
+export function addDailyFortuneDeepCredits(membership: MembershipState, credits = 1): MembershipState {
+  return {
+    ...membership,
+    dailyFortuneDeepCredits: getDailyFortuneDeepCredits(membership) + Math.max(0, Math.floor(credits)),
+  };
+}
+
+export function consumeDailyFortuneDeepCredit(membership: MembershipState): MembershipState {
+  if (isPlusActive(membership)) return membership;
+  return {
+    ...membership,
+    dailyFortuneDeepCredits: Math.max(0, getDailyFortuneDeepCredits(membership) - 1),
+  };
+}
+
 export function startPlusTrial(membership: MembershipState, now = new Date()): MembershipState {
   if (!canStartPlusTrial(membership, now)) {
     return hasLocalPlusTrialLedger() ? { ...membership, trialUsed: true } : membership;
@@ -134,6 +164,7 @@ export function startPlusTrial(membership: MembershipState, now = new Date()): M
     activatedAt: now.toISOString(),
     source: 'trial',
     unlocks: normalizeUnlocks(membership.unlocks),
+    dailyFortuneDeepCredits: getDailyFortuneDeepCredits(membership),
   };
 }
 
@@ -148,6 +179,7 @@ export function activatePlusDays(membership: MembershipState, days = PLUS_MONTHL
     activatedAt: membership.activatedAt || now.toISOString(),
     source: 'payment',
     unlocks: normalizeUnlocks(membership.unlocks),
+    dailyFortuneDeepCredits: getDailyFortuneDeepCredits(membership),
   };
 }
 
@@ -159,6 +191,7 @@ export function activateTesterAccess(now = new Date()): MembershipState {
     activatedAt: now.toISOString(),
     source: 'tester',
     unlocks: ['bazi', 'simulator', 'guardian', 'tarot_deep_report', 'relationship_report', 'relationship_weekly'],
+    dailyFortuneDeepCredits: 999999,
   };
 }
 
