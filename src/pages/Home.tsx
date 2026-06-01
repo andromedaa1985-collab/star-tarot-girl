@@ -56,6 +56,7 @@ import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, rec
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -1564,7 +1565,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           temperature: 0.82,
           max_tokens: 1900,
           isInternetMode,
@@ -1602,7 +1603,7 @@ export default function Home() {
     );
 
     const answerTrace = createGenerationTrace('tarot_followup', {
-      model: 'deepseek-chat',
+      model: DEEPSEEK_TEXT_MODEL,
       usedFallback: usedFallbackAnswer,
     });
     const aiMessage = {
@@ -1685,7 +1686,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           temperature: isDailyFortune ? 0.78 : 0.68,
           max_tokens: isDailyFortune ? 1100 : 900,
           isInternetMode,
@@ -1726,7 +1727,7 @@ export default function Home() {
     }
 
     const answerTrace = createGenerationTrace(shouldDraw ? 'tarot' : 'tarot_followup', {
-      model: 'deepseek-chat',
+      model: DEEPSEEK_TEXT_MODEL,
       usedFallback: usedFallbackAnswer,
     });
 

@@ -19,6 +19,7 @@ import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
 import { parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
+import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -448,7 +449,7 @@ ${baziContext}
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: DEEPSEEK_TEXT_MODEL,
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: '你是一个严格输出JSON格式的人生沙盘推演系统。' },
@@ -489,7 +490,7 @@ ${baziContext}
         advice: safeResult.advice || '',
         result: safeResult,
         ...createGenerationTrace('simulator', {
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: usedFallbackSimulation,
         }),
       }, ...prev].slice(0, 30));

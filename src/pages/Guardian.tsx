@@ -11,6 +11,7 @@ import {
   GUARDIAN_LETTER_SYSTEM_PROMPT,
   cleanAiText,
 } from '../lib/aiPrompting';
+import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -137,7 +138,7 @@ export default function Guardian() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.7,
             messages: [
               { role: 'system', content: '你是用户的星轨守护灵。' },
@@ -226,7 +227,7 @@ export default function Guardian() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.7,
             messages: [
               {
@@ -261,7 +262,7 @@ export default function Guardian() {
         text: cleanedText,
         timestamp: Date.now(),
         ...createGenerationTrace('guardian_chat', {
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: usedFallbackChat,
         }),
       }]);
@@ -274,7 +275,7 @@ export default function Guardian() {
         text: SERVICE_FALLBACK.guardianChat,
         timestamp: Date.now(),
         ...createGenerationTrace('guardian_chat', {
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: true,
         }),
       }]);

@@ -10,6 +10,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
 import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, cleanAiText } from '../lib/aiPrompting';
+import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -317,7 +318,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: DEEPSEEK_TEXT_MODEL,
             messages: [
               { role: 'system', content: '你是一位精通心理学与命理学的命运复盘导师。' },
               { role: 'user', content: `${DIARY_REVIEW_SYSTEM_PROMPT}\n\n${ACTIONABLE_MEMORY_RULES}\n\n${prompt}` }
@@ -346,7 +347,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         entryCount: scopedDiaryEntries.length,
         entryIds: scopedEntryIds,
         ...createGenerationTrace('diary_review', {
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: false,
         }),
       };

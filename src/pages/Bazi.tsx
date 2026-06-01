@@ -11,6 +11,7 @@ import { hasFeatureAccess, isPlusActive } from '../lib/membership';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { parseAiJson } from '../lib/aiPrompting';
+import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -969,7 +970,7 @@ ${exactBaziStr}
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.1,
             response_format: { type: 'json_object' },
             messages: [
@@ -1018,7 +1019,7 @@ ${exactBaziStr}
         career: parsedResult.career,
         romance: parsedResult.romance,
         ...createGenerationTrace('bazi_calculation', {
-          model: 'deepseek-chat',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: usedPartialBaziFallback,
         }),
       };
@@ -1092,7 +1093,7 @@ ${recentFortuneContext}
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'deepseek-reasoner',
+            model: DEEPSEEK_TEXT_MODEL,
             isInternetMode: useRecentFortuneContext,
             messages: [
               { role: 'system', content: '你是一位精通八字命理的国学大师。' },
@@ -1119,7 +1120,7 @@ ${recentFortuneContext}
         text: aiText,
         timestamp: Date.now(),
         ...createGenerationTrace('bazi_chat', {
-          model: 'deepseek-reasoner',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: usedFallbackChat,
         }),
       }]);
@@ -1132,7 +1133,7 @@ ${recentFortuneContext}
         text: SERVICE_FALLBACK.baziChat,
         timestamp: Date.now(),
         ...createGenerationTrace('bazi_chat', {
-          model: 'deepseek-reasoner',
+          model: DEEPSEEK_TEXT_MODEL,
           usedFallback: true,
         }),
       }]);
