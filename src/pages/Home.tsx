@@ -56,10 +56,18 @@ import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, rec
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
-import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
+import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import CompanionSprite, {
+  CompanionActionBadge,
+  CompanionExpressionBadge,
+  getDefaultCompanionAction,
+  type CompanionAction,
+  type CompanionExpression,
+  type CompanionOutfitId,
+} from '../components/CompanionSprite';
 
 type DrawnCard = {
   name: string;
@@ -144,52 +152,54 @@ const COMPOSER_SUGGESTIONS = [
   { label: '状态低落', prompt: '我最近状态有点乱，今天最该先稳住什么？' },
 ];
 
-const COMPANION_OUTFITS = [
+type CompanionOutfit = {
+  id: CompanionOutfitId;
+  name: string;
+  desc: string;
+  minLevel: number;
+  tone: string;
+};
+
+const COMPANION_OUTFITS: CompanionOutfit[] = [
   {
     id: 'auto',
     name: '随羁绊',
-    desc: '等级到了自动换形象',
-    image: '',
+    desc: '等级到了自动切换 Q 版形态',
     minLevel: 1,
     tone: 'from-[#F4CF83]/20 to-[#B8C7FF]/20',
   },
   {
     id: 'moon',
     name: '月白初心',
-    desc: '初始守护形态',
-    image: '/default-pet.png',
+    desc: 'Q 版初始守护',
     minLevel: 1,
     tone: 'from-white/20 to-[#B8C7FF]/20',
   },
   {
     id: 'moon-oracle',
     name: '月白神谕',
-    desc: 'LV.2 解锁 · 光羽礼服',
-    image: '/outfits/moon-oracle.png',
+    desc: 'LV.2 解锁 · 小光羽',
     minLevel: 2,
     tone: 'from-white/24 to-[#F4CF83]/14',
   },
   {
     id: 'star-cloak',
     name: '午夜星斗篷',
-    desc: 'LV.3 解锁 · 星图斗篷',
-    image: '/outfits/star-cloak.png',
+    desc: 'LV.3 解锁 · 小星袍',
     minLevel: 3,
     tone: 'from-[#7C9CFF]/22 to-[#17213A]/28',
   },
   {
     id: 'academy-tarot',
     name: '学院占星',
-    desc: 'LV.4 解锁 · 占星书包',
-    image: '/outfits/academy-tarot.png',
+    desc: 'LV.4 解锁 · 小书包',
     minLevel: 4,
     tone: 'from-[#F4CF83]/16 to-[#B8C7FF]/18',
   },
   {
     id: 'glass-robe',
     name: '液态玻璃礼装',
-    desc: 'LV.5 解锁 · 极光礼裙',
-    image: '/outfits/glass-robe.png',
+    desc: 'LV.5 解锁 · 小极光',
     minLevel: 5,
     tone: 'from-[#B8F7D4]/16 to-[#B8C7FF]/22',
   },
@@ -201,9 +211,22 @@ const PRELOAD_IMAGE_PATHS = Array.from(
     '/default-pet.png',
     '/avatar.png',
     ...TAROT_IMAGE_PATHS,
-    ...COMPANION_OUTFITS.map((outfit) => outfit.image).filter(Boolean),
   ]),
 );
+
+const OUTFIT_IDLE_ACTIONS: Record<Exclude<CompanionOutfitId, 'auto'>, CompanionAction> = {
+  moon: 'wave',
+  'moon-oracle': 'float',
+  'star-cloak': 'remember',
+  'academy-tarot': 'read',
+  'glass-robe': 'celebrate',
+};
+
+const getCompanionAction = (expression: CompanionExpression, outfit: CompanionOutfitId): CompanionAction => {
+  const resolvedOutfit = outfit === 'auto' ? 'moon' : outfit;
+  if (expression === 'idle') return OUTFIT_IDLE_ACTIONS[resolvedOutfit] || 'float';
+  return getDefaultCompanionAction(expression);
+};
 
 const DRAW_ANIMATION_MIN_MS = 4800;
 
@@ -1150,6 +1173,7 @@ export default function Home() {
   const [showWardrobe, setShowWardrobe] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showComposerTools, setShowComposerTools] = useState(false);
+  const [showPetMenu, setShowPetMenu] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [isDrawingCards, setIsDrawingCards] = useState(false);
@@ -1163,6 +1187,7 @@ export default function Home() {
   const [dailyDeepExpandedIds, setDailyDeepExpandedIds] = useState<Set<string>>(() => new Set());
   const [dailyDeepImpressionIds, setDailyDeepImpressionIds] = useState<Set<string>>(() => new Set());
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
+  const [petExpressionOverride, setPetExpressionOverride] = useState<CompanionExpression | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -1177,6 +1202,7 @@ export default function Home() {
     maxX: number;
     minY: number;
     maxY: number;
+    moved: boolean;
   } | null>(null);
 
   const todayKey = getLocalDateKey();
@@ -1247,15 +1273,22 @@ export default function Home() {
     companionOutfit === 'auto' || !selectedOutfit || selectedOutfit.minLevel > bondLevel
       ? autoOutfit
       : selectedOutfit;
-  const activeCompanionImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
-  const activePetImage = activeOutfit.image || autoOutfit.image || '/default-pet.png';
-  const isFullBodyPet = activeOutfit.id !== 'moon';
-  const petStageClass = isFullBodyPet
-    ? 'left-1/2 top-[248px] h-[190px] w-[190px] -translate-x-1/2 sm:top-[236px] sm:h-[220px] sm:w-[220px]'
-    : 'left-1/2 top-[292px] h-[132px] w-[132px] -translate-x-1/2 sm:h-[150px] sm:w-[150px]';
-  const petDockClass = isFullBodyPet
-    ? 'bottom-[calc(var(--app-bottom-pad)+94px)] left-2 h-[124px] w-[124px] sm:left-6 sm:h-[136px] sm:w-[136px]'
-    : 'bottom-[calc(var(--app-bottom-pad)+94px)] left-4 h-[88px] w-[88px] sm:left-6';
+  const activeOutfitId = activeOutfit.id === 'auto' ? autoOutfit.id : activeOutfit.id;
+  const basePetExpression: CompanionExpression = isDrawingCards
+    ? 'drawing'
+    : isThinking
+      ? 'thinking'
+      : canClaimDailyReward
+        ? 'happy'
+        : memoryRecall.contextLines.length
+          ? 'memory'
+          : 'idle';
+  const activePetExpression = isThinking || isDrawingCards
+    ? basePetExpression
+    : petExpressionOverride || basePetExpression;
+  const activePetAction = getCompanionAction(activePetExpression, activeOutfitId);
+  const petStageClass = 'left-1/2 top-[262px] h-[164px] w-[164px] -translate-x-1/2 sm:top-[244px] sm:h-[188px] sm:w-[188px]';
+  const petDockClass = 'bottom-[calc(var(--app-bottom-pad)+94px)] left-2 h-[108px] w-[108px] sm:left-5 sm:h-[122px] sm:w-[122px]';
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1272,21 +1305,34 @@ export default function Home() {
       maxX: window.innerWidth - edge - rect.width - baseLeft,
       minY: edge - baseTop,
       maxY: window.innerHeight - edge - rect.height - baseTop,
+      moved: false,
     };
   };
   const handlePetPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!petDragRef.current) return;
     const nextX = petDragRef.current.originX + event.clientX - petDragRef.current.startX;
     const nextY = petDragRef.current.originY + event.clientY - petDragRef.current.startY;
+    if (Math.abs(event.clientX - petDragRef.current.startX) + Math.abs(event.clientY - petDragRef.current.startY) > 6) {
+      petDragRef.current.moved = true;
+    }
     setPetOffset({
       x: clampNumber(nextX, petDragRef.current.minX, petDragRef.current.maxX),
       y: clampNumber(nextY, petDragRef.current.minY, petDragRef.current.maxY),
     });
   };
   const handlePetPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = petDragRef.current;
     petDragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drag?.moved) {
+      setShowPetMenu(false);
+      return;
+    }
+    if (!isThinking && !isDrawingCards) {
+      setPetExpressionOverride('happy');
+      setShowPetMenu((value) => !value);
     }
   };
   const isTarotImage = (image?: string) => Boolean(image && image.startsWith('/tarot/'));
@@ -1384,6 +1430,10 @@ export default function Home() {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
+
+  useEffect(() => {
+    if (isDrawingCards || isThinking) setPetExpressionOverride(null);
+  }, [isDrawingCards, isThinking]);
 
   useEffect(() => {
     if (initialChatScrollDoneRef.current || visibleMessages.length === 0) return;
@@ -1570,7 +1620,7 @@ export default function Home() {
         body: JSON.stringify({
           model: DEEPSEEK_TEXT_MODEL,
           temperature: 0.82,
-          max_tokens: 1900,
+          max_tokens: DEEPSEEK_MAX_TOKENS.dailyDeep,
           isInternetMode,
           messages: [
             {
@@ -1694,7 +1744,7 @@ export default function Home() {
         body: JSON.stringify({
           model: DEEPSEEK_TEXT_MODEL,
           temperature: isDailyFortune ? 0.78 : 0.68,
-          max_tokens: isDailyFortune ? 1100 : 900,
+          max_tokens: isDailyFortune ? DEEPSEEK_MAX_TOKENS.tarotDaily : DEEPSEEK_MAX_TOKENS.tarotGeneral,
           isInternetMode,
           messages: [
             {
@@ -2163,6 +2213,7 @@ export default function Home() {
   const openDailyTasksFromChat = () => {
     setShowDailyPanel(true);
     setShowComposerTools(false);
+    setShowPetMenu(false);
     setShowScrollTop(false);
     setShowScrollBottom(true);
     const scrollToDaily = () => {
@@ -2237,14 +2288,17 @@ export default function Home() {
           onChange={(event) => setInputText(event.target.value)}
           onPointerDown={() => {
             setShowComposerTools(false);
+            setShowPetMenu(false);
             setComposerFocused(true);
           }}
           onClick={() => {
             setShowComposerTools(false);
+            setShowPetMenu(false);
             setComposerFocused(true);
           }}
           onFocus={() => {
             setShowComposerTools(false);
+            setShowPetMenu(false);
             setComposerFocused(true);
           }}
           onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
@@ -2274,87 +2328,6 @@ export default function Home() {
     </div>
   );
 
-  const contextActionDock = (
-    <AnimatePresence initial={false}>
-      {visibleMessages.length > 0 && showComposerTools && !showComposerSuggestions && (
-        <motion.div
-          initial={{ opacity: 0, y: 10, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className="mx-auto mb-1.5 grid w-full max-w-[min(540px,calc(100vw-28px))] grid-cols-2 gap-1.5 rounded-[22px] border border-[#efe3cf]/72 bg-[#fff8ee]/82 p-1.5 shadow-[0_16px_42px_rgba(84,55,24,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/82 dark:shadow-[0_16px_42px_rgba(0,0,0,0.40),inset_0_1px_0_rgba(255,255,255,0.07)]"
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setShowComposerTools(false);
-              setShowReadingLog(true);
-            }}
-            className="flex min-w-0 items-center gap-2 rounded-[18px] bg-[#f4cf83]/18 px-2 py-2 text-left text-[#8f5e1b] transition-transform active:scale-[0.98] dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
-            aria-label="打开牌迹档案"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#fff4dc]/78 dark:bg-[#f4cf83]/10">
-              <BookOpen size={15} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-bold">牌迹</span>
-              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{tarotReadings.length} 条</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleMemoryRecallAction}
-            disabled={isThinking}
-            className="hidden"
-            aria-label="继续星轨记忆"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#f1dfbc]/78 text-[#9b641e] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]">
-              <Sparkles size={15} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-bold text-[#8f5e1b] dark:text-[#f4cf83]">记得你</span>
-              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{memoryRecall.meta}</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={openDailyTasksFromChat}
-            className="flex min-w-0 items-center gap-2 rounded-[18px] px-2 py-2 text-left text-[#6f6253] transition-transform active:scale-[0.98] dark:text-white/62"
-            aria-label="打开今日任务"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[14px] bg-[#f1dfbc]/78 text-[#9b641e] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]">
-              <CalendarCheck size={15} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-bold text-[#8f5e1b] dark:text-[#f4cf83]">{canClaimDailyReward ? '领奖励' : '任务'}</span>
-              <span className="block truncate text-[10px] text-[#746653] dark:text-white/48">{missionCount}/3</span>
-            </span>
-          </button>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-
-  const composerToolToggle = visibleMessages.length > 0 ? (
-    <div className="pointer-events-none mx-auto flex w-full max-w-[540px] justify-center">
-      <button
-        type="button"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
-          setComposerFocused(false);
-          setShowComposerTools((value) => !value);
-        }}
-        className="pointer-events-auto -mb-px flex h-6 w-12 items-center justify-center rounded-t-full border border-b-0 border-[#efe3cf]/78 bg-[#fffaf2]/90 text-[#8b765d] shadow-[0_-8px_22px_rgba(84,55,24,0.08),inset_0_1px_0_rgba(255,255,255,0.76)] backdrop-blur-2xl transition-transform active:scale-95 dark:border-white/[0.08] dark:bg-[#111522]/90 dark:text-white/58"
-        aria-label={showComposerTools ? '收起快捷工具' : '展开快捷工具'}
-        title={showComposerTools ? '收起快捷工具' : '展开快捷工具'}
-      >
-        {showComposerTools ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-      </button>
-    </div>
-  ) : null;
-
   const companionPet = (wrapperClassName: string, docked = false) => (
     <div className={wrapperClassName}>
       <div
@@ -2363,24 +2336,180 @@ export default function Home() {
         onPointerMove={handlePetPointerMove}
         onPointerUp={handlePetPointerUp}
         onPointerCancel={handlePetPointerUp}
+        onKeyDown={(event) => {
+          if ((event.key !== 'Enter' && event.key !== ' ') || isThinking || isDrawingCards) return;
+          event.preventDefault();
+          setPetExpressionOverride('happy');
+          setShowPetMenu((value) => !value);
+        }}
         style={{ transform: `translate3d(${petOffset.x}px, ${petOffset.y}px, 0)` }}
         className={clsx(
-          'h-full w-full cursor-grab touch-none active:cursor-grabbing',
+          'relative h-full w-full cursor-grab touch-none active:cursor-grabbing',
           docked && 'drop-shadow-[0_18px_24px_rgba(0,0,0,0.22)]',
         )}
-        aria-label="可拖动的星轨小桌宠"
-        role="img"
+        aria-label="星轨塔罗少女桌宠，点击打开快捷菜单，可拖动"
+        aria-expanded={showPetMenu}
+        role="button"
+        tabIndex={0}
       >
-        <motion.img
-          src={activePetImage}
-          alt="星轨引路人"
+        <motion.div
           animate={{ y: [0, -8, 0] }}
           transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-          className="pointer-events-none h-full w-full select-none object-contain drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]"
-          draggable={false}
-        />
+          className="pointer-events-none h-full w-full select-none drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]"
+        >
+          <CompanionSprite
+            outfit={activeOutfitId}
+            expression={activePetExpression}
+            action={activePetAction}
+            label="星轨塔罗少女 Q 版桌宠"
+          />
+        </motion.div>
       </div>
     </div>
+  );
+
+  const petMenu = (
+    <AnimatePresence>
+      {showPetMenu && (
+        <>
+          <motion.button
+            type="button"
+            aria-label="关闭星轨桌宠菜单"
+            className="fixed inset-0 z-[58] cursor-default bg-transparent"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowPetMenu(false)}
+          />
+          <motion.div
+            data-testid="companion-pet-menu"
+            initial={{ opacity: 0, y: 12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            className="fixed inset-x-4 bottom-[calc(var(--app-bottom-pad)+226px)] z-[70] mx-auto w-auto max-w-[360px] rounded-[28px] border border-[#eadcc8]/80 bg-[#fff8ee]/98 p-3 shadow-[0_18px_56px_rgba(84,55,24,0.16),inset_0_1px_0_rgba(255,255,255,0.78)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/98 dark:shadow-[0_20px_58px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.08)]"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3 px-1">
+              <div className="min-w-0">
+                <div className="text-[13px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">星轨桌宠</div>
+                <div className="mt-0.5 truncate text-[11px] text-apple-text-muted">点我就能去常用入口</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPetMenu(false)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-apple-surface-hover text-apple-text-muted transition-transform active:scale-95"
+                aria-label="关闭桌宠菜单"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={openDailyTasksFromChat}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-[#f4cf83]/20 px-2 text-center text-[#8f5e1b] transition-transform active:scale-[0.98] dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
+              >
+                <CalendarCheck size={18} />
+                <span className="text-[11px] font-black">任务</span>
+                <span className="text-[9px] text-[#7b6c5a] dark:text-white/46">{missionCount}/3</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  setShowReadingLog(true);
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <BookOpen size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">牌迹</span>
+                <span className="text-[9px] text-apple-text-muted">{tarotReadings.length} 条</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  setShowWardrobe(true);
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <Shirt size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">衣柜</span>
+                <span className="text-[9px] text-apple-text-muted">换装</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  navigate('/app/collection');
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <Sparkles size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">图鉴</span>
+                <span className="text-[9px] text-apple-text-muted">记忆</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  navigate('/app/bazi');
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <History size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">八字</span>
+                <span className="text-[9px] text-apple-text-muted">档案</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  navigate('/app/diary');
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <BookOpen size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">日记</span>
+                <span className="text-[9px] text-apple-text-muted">心情</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  navigate('/app/guardian');
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <Moon size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">守护</span>
+                <span className="text-[9px] text-apple-text-muted">回访</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPetMenu(false);
+                  navigate('/app/simulator');
+                }}
+                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
+              >
+                <Globe size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">沙盘</span>
+                <span className="text-[9px] text-apple-text-muted">选择</span>
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
   );
 
   const renderDailyDeepCta = (message: Message, index: number, list: Message[]) => {
@@ -2525,7 +2654,13 @@ export default function Home() {
           <header className="hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <div className="h-11 w-11 shrink-0 overflow-hidden rounded-[18px] bg-[#efe0c7] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-white/[0.08]">
-                <img src={activeCompanionImage} alt="星轨塔罗" className="h-full w-full object-contain p-1" />
+                <CompanionSprite
+                  outfit={activeOutfitId}
+                  expression={activePetExpression}
+                  action={activePetAction}
+                  label="星轨塔罗少女 Q 版头像"
+                  className="p-0.5"
+                />
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a6a28] dark:text-[#f4cf83]">
@@ -3142,16 +3277,15 @@ export default function Home() {
         ),
         visibleMessages.length > 0,
       )}
+      {petMenu}
 
       <div className="absolute inset-x-0 bottom-[var(--app-bottom-pad)] z-50 px-4">
         {composerSuggestions}
-        {contextActionDock}
-        {composerToolToggle}
         {composer}
       </div>
 
       <AnimatePresence>
-        {visibleMessages.length > 0 && showScrollBottom && (
+        {visibleMessages.length > 0 && showScrollBottom && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -3160,8 +3294,8 @@ export default function Home() {
             className={clsx(
               'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:left-[calc(50%_-_250px)]',
               showComposerTools || showComposerSuggestions
-                ? 'bottom-[calc(var(--app-bottom-pad)+168px)]'
-                : 'bottom-[calc(var(--app-bottom-pad)+112px)]',
+                ? 'bottom-[calc(var(--app-bottom-pad)+268px)]'
+                : 'bottom-[calc(var(--app-bottom-pad)+212px)]',
             )}
             aria-label="滚动到底部"
             title="滚动到底部"
@@ -3172,7 +3306,7 @@ export default function Home() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showScrollTop && (
+        {showScrollTop && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -3181,8 +3315,8 @@ export default function Home() {
             className={clsx(
               'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:left-[calc(50%_-_250px)]',
               showComposerTools || showComposerSuggestions
-                ? 'bottom-[calc(var(--app-bottom-pad)+216px)]'
-                : 'bottom-[calc(var(--app-bottom-pad)+160px)]',
+                ? 'bottom-[calc(var(--app-bottom-pad)+320px)]'
+                : 'bottom-[calc(var(--app-bottom-pad)+264px)]',
             )}
             aria-label="回到顶部"
             title="回到顶部"
@@ -3365,7 +3499,13 @@ export default function Home() {
           <header className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-[18px] bg-[#F5DFB1]/45 shadow-[0_8px_22px_rgba(111,77,31,0.10)] dark:bg-white/[0.07]">
-                <img src={activeCompanionImage} alt="星轨塔罗" className="h-full w-full object-contain p-1" />
+                <CompanionSprite
+                  outfit={activeOutfitId}
+                  expression={activePetExpression}
+                  action={activePetAction}
+                  label="星轨塔罗少女 Q 版头像"
+                  className="p-0.5"
+                />
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold text-[#B97B28] dark:text-[#F4CF83]/80">
@@ -3514,13 +3654,18 @@ export default function Home() {
                 </div>
               </div>
 
-              <motion.img
-                src={activeCompanionImage}
-                alt="星轨引路人"
+              <motion.div
                 animate={{ y: [0, -8, 0] }}
                 transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
                 className="absolute bottom-7 left-1/2 z-10 h-[96px] w-[96px] -translate-x-1/2 object-contain drop-shadow-[0_16px_22px_rgba(0,0,0,0.16)] sm:h-36 sm:w-36"
-              />
+              >
+                <CompanionSprite
+                  outfit={activeOutfitId}
+                  expression={activePetExpression}
+                  action={activePetAction}
+                  label="星轨塔罗少女 Q 版引路人"
+                />
+              </motion.div>
 
               <div className="absolute bottom-2 right-2 z-20 max-w-[58%] rounded-[19px] bg-[rgba(255,250,239,0.72)] px-2.5 py-1.5 shadow-[0_10px_22px_rgba(95,66,27,0.09),inset_0_1px_0_rgba(255,255,255,0.50)] backdrop-blur-xl after:absolute after:bottom-3.5 after:-left-1 after:h-2 after:w-2 after:rotate-45 after:bg-[rgba(255,250,239,0.72)] dark:bg-[rgba(11,14,23,0.72)] dark:shadow-[0_12px_26px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.07)] dark:after:bg-[rgba(11,14,23,0.72)]">
                 <div className="mb-px text-[8.5px] font-semibold text-[#B97B28] dark:text-[#F4CF83]/80">
@@ -3764,9 +3909,18 @@ export default function Home() {
               type="text"
               value={inputText}
               onChange={(event) => setInputText(event.target.value)}
-              onPointerDown={() => setComposerFocused(true)}
-              onClick={() => setComposerFocused(true)}
-              onFocus={() => setComposerFocused(true)}
+              onPointerDown={() => {
+                setShowPetMenu(false);
+                setComposerFocused(true);
+              }}
+              onClick={() => {
+                setShowPetMenu(false);
+                setComposerFocused(true);
+              }}
+              onFocus={() => {
+                setShowPetMenu(false);
+                setComposerFocused(true);
+              }}
               onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
               onKeyDown={(event) => event.key === 'Enter' && handleSend()}
               disabled={isThinking}
@@ -3795,7 +3949,7 @@ export default function Home() {
       </div>
 
       <AnimatePresence>
-        {showScrollTop && (
+        {showScrollTop && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -4309,7 +4463,9 @@ function WardrobeModal({
               {COMPANION_OUTFITS.map((outfit) => {
                 const unlocked = bondLevel >= outfit.minLevel;
                 const active = selectedId === outfit.id;
-                const previewImage = outfit.image || getAutoCompanionOutfit(bondLevel).image || '/default-pet.png';
+                const previewOutfit = outfit.id === 'auto' ? getAutoCompanionOutfit(bondLevel) : outfit;
+                const previewExpression: CompanionExpression = active ? 'happy' : 'idle';
+                const previewAction = getCompanionAction(previewExpression, previewOutfit.id);
                 return (
                   <button
                     key={outfit.id}
@@ -4327,22 +4483,39 @@ function WardrobeModal({
                   >
                     <div className={clsx('absolute inset-0 bg-gradient-to-br opacity-80', outfit.tone)} />
                     <div className="relative z-10 flex h-36 items-end justify-center sm:h-40">
-                      {outfit.id === 'auto' ? (
-                        <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-[28px] border border-[#F4CF83]/42 bg-white/32 text-[#B97B28] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] backdrop-blur-xl dark:bg-white/[0.07] dark:text-[#F4CF83]">
-                          <Sparkles size={38} />
-                        </div>
-                      ) : (
-                        <img
-                          src={previewImage}
-                          alt={outfit.name}
-                          className="h-full max-w-[92%] object-contain drop-shadow-[0_16px_22px_rgba(0,0,0,0.18)]"
+                      <div className="relative h-full w-[86%] max-w-[132px] drop-shadow-[0_16px_22px_rgba(0,0,0,0.18)]">
+                        {outfit.id === 'auto' && (
+                          <div className="absolute left-1/2 top-5 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[#F4CF83]/34 bg-white/42 px-2 py-1 text-[9px] font-black text-[#B97B28] backdrop-blur-xl dark:bg-white/[0.08] dark:text-[#F4CF83]">
+                            <Sparkles size={11} />
+                            自动
+                          </div>
+                        )}
+                        <CompanionSprite
+                          outfit={previewOutfit.id}
+                          expression={previewExpression}
+                          action={previewAction}
+                          label={`${outfit.name} Q 版预览`}
                         />
-                      )}
+                      </div>
                     </div>
                     <div className="relative z-10 mt-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="line-clamp-2 text-sm font-black leading-tight text-apple-text">{outfit.name}</div>
                         <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-apple-text-muted">{outfit.desc}</div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          <CompanionActionBadge
+                            action={previewAction}
+                            className="bg-[#f4cf83]/16 px-1.5 py-0.5 text-[9px] text-[#9a6a28] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
+                          />
+                          {(['idle', 'thinking', 'drawing', 'happy', 'memory'] as CompanionExpression[]).map((expression) => (
+                            <React.Fragment key={expression}>
+                              <CompanionExpressionBadge
+                                expression={expression}
+                                className="bg-apple-surface/70 px-1.5 py-0.5 text-[9px] text-[#9a6a28] dark:bg-white/[0.07] dark:text-[#f4cf83]"
+                              />
+                            </React.Fragment>
+                          ))}
+                        </div>
                       </div>
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-apple-border bg-apple-surface">
                         {active ? <Check size={14} className="text-[#B97B28] dark:text-[#F4CF83]" /> : unlocked ? <Shirt size={13} /> : <Lock size={13} />}

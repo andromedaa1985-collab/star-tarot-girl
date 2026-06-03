@@ -11,7 +11,7 @@ import { hasFeatureAccess, isPlusActive } from '../lib/membership';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { formatAppDateTime, getAppDateKey, getAppWeekday, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { buildUserAddressInstruction, normalizeUserAddress, parseAiJson } from '../lib/aiPrompting';
-import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
+import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -974,6 +974,7 @@ ${exactBaziStr}
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.1,
+            max_tokens: DEEPSEEK_MAX_TOKENS.baziCalculation,
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: '你是一位精通八字命理的国学大师。请务必返回合法的JSON对象。' },
@@ -1099,6 +1100,7 @@ ${recentFortuneContext}
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
             isInternetMode: useRecentFortuneContext,
+            max_tokens: DEEPSEEK_MAX_TOKENS.baziChat,
             messages: [
               { role: 'system', content: '你是一位精通八字命理的国学大师。' },
               ...baziMessages.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text })),

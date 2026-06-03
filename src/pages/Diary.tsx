@@ -10,7 +10,7 @@ import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { getAppDateKey, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { isPlusActive } from '../lib/membership';
 import { ACTIONABLE_MEMORY_RULES, DIARY_REVIEW_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
-import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
+import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -321,6 +321,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
+            max_tokens: DEEPSEEK_MAX_TOKENS.diaryReview,
             messages: [
               { role: 'system', content: '你是一位精通心理学与命理学的命运复盘导师。' },
               { role: 'user', content: [DIARY_REVIEW_SYSTEM_PROMPT, userAddressInstruction, ACTIONABLE_MEMORY_RULES, prompt].filter(Boolean).join('\n\n') }

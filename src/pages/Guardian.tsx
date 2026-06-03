@@ -13,7 +13,7 @@ import {
   cleanAiText,
   normalizeUserAddress,
 } from '../lib/aiPrompting';
-import { DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
+import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
@@ -145,6 +145,7 @@ export default function Guardian() {
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.7,
+            max_tokens: DEEPSEEK_MAX_TOKENS.guardianLetter,
             messages: [
               { role: 'system', content: '你是用户的星轨守护灵。' },
               {
@@ -236,6 +237,7 @@ export default function Guardian() {
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
             temperature: 0.7,
+            max_tokens: DEEPSEEK_MAX_TOKENS.guardianChat,
             messages: [
               {
                 role: 'system',
@@ -293,7 +295,7 @@ export default function Guardian() {
   };
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-y-auto overscroll-contain text-apple-text no-scrollbar">
+    <div className="relative h-full w-full overflow-hidden text-apple-text">
       {/* Background */}
       <div className="absolute inset-0 z-0 pointer-events-none">
         <picture>
@@ -305,12 +307,13 @@ export default function Guardian() {
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-apple-bg/50 to-apple-bg"></div>
       </div>
       
+      <div className="relative z-10 h-full overflow-y-auto overscroll-contain px-4 pb-[calc(var(--app-bottom-pad)+150px)] pt-7 no-scrollbar sm:px-6 sm:pt-9">
       {/* Header & Guardian Orb */}
-      <div className="pt-12 pb-6 px-6 flex flex-col items-center relative shrink-0">
-        <h1 className="font-serif text-2xl font-bold tracking-widest text-apple-accent mb-6 relative z-10 dark:text-[#6B8AFF]">星轨守护</h1>
+      <div className="mx-auto flex w-full max-w-md flex-col items-center pb-6">
+        <h1 className="font-serif text-2xl font-bold tracking-widest text-apple-accent mb-4 relative z-10 dark:text-[#6B8AFF]">星轨守护</h1>
         
         {/* The "Guardian" Orb */}
-        <div className="relative w-32 h-32 flex items-center justify-center mb-6">
+        <div className="relative mb-5 flex h-24 w-24 items-center justify-center">
           <motion.div 
             animate={{ scale: isTyping ? [1, 1.1, 1] : [1, 1.05, 1], opacity: 0.4 }}
             transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
@@ -319,9 +322,9 @@ export default function Guardian() {
           <motion.div 
             animate={{ scale: isTyping ? [1, 1.05, 1] : [1, 1.02, 1] }}
             transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="relative w-20 h-20 bg-gradient-to-tr from-apple-gold to-[#dcb66f] rounded-full shadow-[0_18px_38px_rgba(185,123,40,0.26)] flex items-center justify-center overflow-hidden border border-apple-border dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:shadow-[0_0_30px_rgba(107,138,255,0.6)]"
+            className="relative w-16 h-16 bg-gradient-to-tr from-apple-gold to-[#dcb66f] rounded-full shadow-[0_18px_38px_rgba(185,123,40,0.26)] flex items-center justify-center overflow-hidden border border-apple-border dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:shadow-[0_0_30px_rgba(107,138,255,0.6)]"
           >
-            <Moon size={32} className="text-white/90 drop-shadow-md" fill="currentColor" />
+            <Moon size={28} className="text-white/90 drop-shadow-md" fill="currentColor" />
           </motion.div>
         </div>
 
@@ -394,8 +397,7 @@ export default function Guardian() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto px-4 pb-32 no-scrollbar">
-        <div className="max-w-md mx-auto space-y-6">
+      <div className="mx-auto w-full max-w-md space-y-6 pb-6">
           {guardianMessages.map((msg) => (
             <motion.div 
               key={msg.id}
@@ -430,11 +432,11 @@ export default function Guardian() {
             </motion.div>
           )}
           <div ref={chatEndRef} />
-        </div>
+      </div>
       </div>
 
       {/* Input Area */}
-      <div className="fixed bottom-20 left-0 w-full px-4 pb-4 bg-gradient-to-t from-apple-bg via-apple-bg/95 to-transparent pt-10 z-20 dark:from-[#05050A] dark:via-[#05050A]">
+      <div className="fixed left-0 w-full px-4 pb-4 bg-gradient-to-t from-apple-bg via-apple-bg/95 to-transparent pt-10 z-20 dark:from-[#05050A] dark:via-[#05050A]" style={{ bottom: 'calc(var(--app-bottom-pad) + 76px)' }}>
         <div className="max-w-md mx-auto relative">
           <input
             type="text"
@@ -458,7 +460,7 @@ export default function Guardian() {
       {/* Daily Letter Modal */}
       <AnimatePresence>
         {showLetter && dailyLetter && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end justify-center p-3 pb-[calc(12px+var(--app-safe-bottom))] pt-[calc(12px+var(--app-safe-top))] sm:items-center sm:p-6">
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -468,7 +470,11 @@ export default function Guardian() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="w-full max-w-sm max-h-[85vh] flex flex-col bg-apple-surface backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 border border-apple-border"
+              className="relative z-10 flex w-full max-w-md flex-col rounded-[30px] border border-apple-border bg-apple-surface p-5 shadow-2xl backdrop-blur-xl sm:p-7"
+              style={{
+                height: 'min(82svh, 680px)',
+                maxHeight: 'calc(100svh - var(--app-safe-top) - var(--app-safe-bottom) - 24px)',
+              }}
             >
               <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-apple-accent/10 to-transparent rounded-t-3xl pointer-events-none shrink-0"></div>
               
@@ -482,7 +488,7 @@ export default function Guardian() {
                 今日守护回访
               </h3>
               
-              <div className="font-serif text-[15px] leading-loose text-apple-text-muted whitespace-pre-wrap relative z-10 overflow-y-auto flex-1 min-h-0 pr-2 custom-scrollbar">
+              <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg/48 p-4 pr-3 font-serif text-[15px] leading-8 text-apple-text-muted whitespace-pre-wrap custom-scrollbar">
                 {dailyLetter}
               </div>
               

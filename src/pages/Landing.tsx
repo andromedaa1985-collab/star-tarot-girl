@@ -12,6 +12,7 @@ import {
   Stars,
   WandSparkles,
 } from 'lucide-react';
+import CompanionSprite, { type CompanionAction, type CompanionExpression, type CompanionOutfitId } from '../components/CompanionSprite';
 
 const featureCards = [
   {
@@ -221,6 +222,19 @@ function Features({ onOpen }: { onOpen: (path: string) => void }) {
 }
 
 function CompanionLooks() {
+  const looks: Array<{
+    name: string;
+    desc: string;
+    outfit: CompanionOutfitId;
+    expression: CompanionExpression;
+    action: CompanionAction;
+  }> = [
+    { name: '月白神谕', desc: '温柔待机，适合每日运势。', outfit: 'moon-oracle', expression: 'happy', action: 'celebrate' },
+    { name: '午夜星斗篷', desc: '记忆回看，会把线索收起来。', outfit: 'star-cloak', expression: 'memory', action: 'remember' },
+    { name: '学院占星', desc: '认真思考，陪你拆问题。', outfit: 'academy-tarot', expression: 'thinking', action: 'read' },
+    { name: '液态玻璃礼装', desc: '抽牌闪光，仪式感更轻盈。', outfit: 'glass-robe', expression: 'drawing', action: 'draw' },
+  ];
+
   return (
     <section className="px-5 pb-20 sm:px-8 lg:px-12">
       <div className="mx-auto grid max-w-6xl gap-4 overflow-hidden rounded-[38px] border border-white/12 bg-white/[0.065] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl lg:grid-cols-[0.9fr_1.1fr] lg:p-5">
@@ -231,26 +245,41 @@ function CompanionLooks() {
               星轨衣柜预览
             </div>
             <h2 className="text-3xl font-black leading-tight text-[#fffaf0] sm:text-4xl">
-              同一位星轨少女，多种陪伴形态。
+              同一位 Q 版星轨少女，多种陪伴形态。
             </h2>
             <p className="mt-4 text-base leading-7 text-[#cfc6b5]">
-              从光羽礼服到星斗斗篷，她会随着羁绊成长解锁新的样子。每套形象都保留熟悉的温柔，只换一种靠近你的方式。
+              从光羽礼服到星斗斗篷，她会随着羁绊成长解锁新的样子。每套形象都有自己的表情状态，不只是站在旁边，而是在回应你当前的仪式。
             </p>
           </div>
           <div className="mt-6 grid grid-cols-2 gap-2 text-xs font-bold text-[#eadfcc]">
-            {['月白神谕', '午夜星斗篷', '学院占星', '液态玻璃礼装'].map((label) => (
-              <div key={label} className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-2 text-center">
-                {label}
+            {looks.map(({ name }) => (
+              <div key={name} className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-2 text-center">
+                {name}
               </div>
             ))}
           </div>
         </div>
-        <div className="overflow-hidden rounded-[30px] border border-white/10 bg-[#f4f0e8]">
-          <img
-            src="/companion-outfit-sheet.png"
-            alt="星轨塔罗少女多套形象设定"
-            className="h-full min-h-[280px] w-full object-cover"
-          />
+        <div className="grid gap-3 rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_50%_0%,rgba(244,207,131,0.22),transparent_38%),linear-gradient(145deg,#fff7e8,#ede8ff)] p-3 sm:grid-cols-2 sm:p-4">
+          {looks.map((look) => (
+            <div
+              key={look.outfit}
+              className="relative min-h-[206px] overflow-hidden rounded-[24px] border border-[#d8c7a5]/58 bg-white/54 p-3 shadow-[0_14px_32px_rgba(55,37,16,0.12),inset_0_1px_0_rgba(255,255,255,0.72)]"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_12%,rgba(244,207,131,0.26),transparent_34%)]" />
+              <div className="relative z-10 mx-auto h-32 w-32">
+                <CompanionSprite
+                  outfit={look.outfit}
+                  expression={look.expression}
+                  action={look.action}
+                  label={`${look.name} Q 版形象`}
+                />
+              </div>
+              <div className="relative z-10 mt-1 text-center">
+                <div className="text-sm font-black text-[#2f2419]">{look.name}</div>
+                <div className="mt-1 text-xs font-semibold leading-relaxed text-[#7b6751]">{look.desc}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>
