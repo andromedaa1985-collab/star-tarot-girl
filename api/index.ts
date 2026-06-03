@@ -12,6 +12,35 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false, limit: "5mb" }));
+
+function isAllowedCorsOrigin(origin: string) {
+  if (
+    origin === "capacitor://localhost" ||
+    origin === "ionic://localhost" ||
+    origin === "https://star-tarot-girl.vercel.app" ||
+    origin === "https://zjhrail.xyz"
+  ) {
+    return true;
+  }
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+app.use((req, res, next) => {
+  const origin = req.get("origin");
+  if (origin && isAllowedCorsOrigin(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 registerAuthRoutes(app);
 registerPaymentRoutes(app);
 registerAnalyticsRoutes(app);

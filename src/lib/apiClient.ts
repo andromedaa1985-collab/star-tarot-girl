@@ -1,6 +1,6 @@
 const configuredApiBase = (
   import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.MODE === 'android' ? 'https://zjhrail.xyz' : '')
+  (import.meta.env.MODE === 'android' ? 'https://star-tarot-girl.vercel.app' : '')
 ).trim().replace(/\/+$/, '');
 
 export function apiUrl(path: string) {
