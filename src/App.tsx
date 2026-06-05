@@ -42,6 +42,7 @@ function App() {
               <Route path="settings/notifications" element={<Notifications />} />
               <Route path="settings/help" element={<Help />} />
               <Route path="analytics" element={<Analytics />} />
+              <Route path="admin" element={<Analytics />} />
               <Route path="about" element={<About />} />
             </Route>
           </Routes>

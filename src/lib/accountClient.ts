@@ -40,7 +40,7 @@ function toPublicErrorMessage(message: unknown) {
   return message;
 }
 
-function authHeaders(token?: string) {
+export function authHeaders(token?: string) {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

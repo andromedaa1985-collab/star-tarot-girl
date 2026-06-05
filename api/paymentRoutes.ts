@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type express from "express";
 import { readStoreJson, writeStoreJson } from "./jsonStore.js";
 import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing.js";
+import { getOptionalUser } from "./authRoutes.js";
 
 type PaymentOrder = {
   id: string;
@@ -10,6 +11,7 @@ type PaymentOrder = {
   amount: string;
   status: "created" | "failed" | "paid";
   createdAt: string;
+  userId?: string;
   providerOrderId?: string;
   providerResponse?: unknown;
   paidAt?: string;
@@ -59,7 +61,8 @@ export function registerPaymentRoutes(app: express.Express) {
         });
       }
 
-      const orderId = await createOrder(plan, "xorpay");
+      const user = await getOptionalUser(req);
+      const orderId = await createOrder(plan, "xorpay", user?.id);
       const payType = req.body.payType === "wechat" ? "native" : "alipay";
       const params = {
         name: plan.name,
@@ -68,7 +71,7 @@ export function registerPaymentRoutes(app: express.Express) {
         order_id: orderId,
         notify_url: config.notifyUrl,
         return_url: config.returnUrl,
-        order_uid: req.body.userId || "astro_guest",
+        order_uid: user?.id || req.body.userId || "astro_guest",
         more: plan.description,
         sign: signXorPayPay(
           { name: plan.name, payType, price: plan.amount, orderId, notifyUrl: config.notifyUrl },
@@ -115,7 +118,8 @@ export function registerPaymentRoutes(app: express.Express) {
         });
       }
 
-      const orderId = await createOrder(plan, "xunhupay");
+      const user = await getOptionalUser(req);
+      const orderId = await createOrder(plan, "xunhupay", user?.id);
       const tradeType = req.body.payType === "wechat" ? "WAP" : "WAP_ALIPAY";
       const params: Record<string, any> = {
         version: "1.1",
@@ -176,7 +180,8 @@ export function registerPaymentRoutes(app: express.Express) {
 
       const plan = getPlan(req.body.planId);
       const channel = req.body.channel === "wap" ? "wap" : "page";
-      const orderId = await createOrder(plan, "alipay");
+      const user = await getOptionalUser(req);
+      const orderId = await createOrder(plan, "alipay", user?.id);
       const method = channel === "wap" ? "alipay.trade.wap.pay" : "alipay.trade.page.pay";
       const bizContent: Record<string, any> = {
         out_trade_no: orderId,
@@ -358,7 +363,7 @@ async function savePaymentOrder(order: PaymentOrder) {
   }
 }
 
-async function getPaymentOrder(orderId?: string): Promise<PaymentOrder | null> {
+export async function getPaymentOrder(orderId?: string): Promise<PaymentOrder | null> {
   if (!orderId) return null;
   try {
     const order = await readStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, orderId, PAYMENT_ORDER_LOCAL_DIR);
@@ -377,7 +382,7 @@ async function patchPaymentOrder(orderId: string, patch: Partial<PaymentOrder>) 
   return next;
 }
 
-async function createOrder(plan: PaymentPlan, provider: string) {
+async function createOrder(plan: PaymentPlan, provider: string, userId?: string) {
   const orderId = `AR${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   await savePaymentOrder({
     id: orderId,
@@ -386,6 +391,7 @@ async function createOrder(plan: PaymentPlan, provider: string) {
     amount: plan.amount,
     status: "created",
     createdAt: new Date().toISOString(),
+    userId,
   });
   return orderId;
 }

@@ -5,6 +5,7 @@ import { search } from "duck-duck-scrape";
 import { registerAnalyticsRoutes } from "./analyticsRoutes.js";
 import { registerAuthRoutes } from "./authRoutes.js";
 import { registerPaymentRoutes } from "./paymentRoutes.js";
+import { prepareChatEntitlementCharge, registerEntitlementRoutes } from "./entitlementRoutes.js";
 
 dotenv.config();
 
@@ -43,6 +44,7 @@ app.use((req, res, next) => {
 
 registerAuthRoutes(app);
 registerPaymentRoutes(app);
+registerEntitlementRoutes(app);
 registerAnalyticsRoutes(app);
 
 const relationshipInvites = new Map<string, { profile: any; createdAt: string; expiresAt: number }>();
@@ -102,6 +104,7 @@ app.get("/api/relationship/invites/:token", (req, res) => {
 app.post("/api/deepseek/chat", async (req, res) => {
   try {
     const apiKey = requireEnv("DEEPSEEK_API_KEY", "DeepSeek API Key");
+    const entitlementCharge = await prepareChatEntitlementCharge(req);
     const messages = [...(req.body.messages ?? [])];
     if (req.body.isInternetMode) {
       const lastUserMsg = messages[messages.length - 1];
@@ -127,6 +130,7 @@ app.post("/api/deepseek/chat", async (req, res) => {
       messages,
     };
     delete bodyPayload.isInternetMode;
+    delete bodyPayload.entitlement;
     const response = await fetch("https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: {
@@ -135,24 +139,11 @@ app.post("/api/deepseek/chat", async (req, res) => {
       },
       body: JSON.stringify(bodyPayload)
     });
-    res.status(response.status).json(await response.json());
-  } catch (error: any) {
-    sendApiError(res, error);
-  }
-});
-
-app.post("/api/siliconflow/generate", async (req, res) => {
-  try {
-    const apiKey = requireEnv("IMAGE_API_KEY", "SiliconFlow Image API Key");
-    const response = await fetch("https://api.siliconflow.cn/v1/images/generations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(req.body)
-    });
-    res.status(response.status).json(await response.json());
+    const data = await response.json();
+    if (response.ok && !data?.error && entitlementCharge) {
+      data.entitlement = await entitlementCharge.commit();
+    }
+    res.status(response.status).json(data);
   } catch (error: any) {
     sendApiError(res, error);
   }
@@ -201,7 +192,7 @@ function sanitizeRelationshipProfile(input: any) {
 }
 
 function sendApiError(res: express.Response, error: Error) {
-  res.status(500).json({
+  res.status(Number((error as any)?.status) || 500).json({
     error: {
       message: error.message || "接口请求失败"
     }

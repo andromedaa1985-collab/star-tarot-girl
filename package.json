@@ -8,16 +8,18 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
-    "build:android": "vite build --mode android",
+    "build": "npm run clean && vite build",
+    "build:android": "npm run clean && vite build --mode android",
     "start": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "node scripts/clean-dist.cjs",
     "lint": "tsc --noEmit",
     "android:sync": "npm run build:android && cap sync android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
     "@google/genai": "^1.29.0",
     "@netlify/blobs": "^10.7.6",
     "@tailwindcss/vite": "^4.1.14",

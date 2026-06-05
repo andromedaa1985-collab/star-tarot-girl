@@ -51,7 +51,6 @@ export const APP_STORAGE_KEYS = [
   'appEvents',
   'relationshipTaskDone',
   'relationshipWeekStartedAt',
-  'grantedPaymentOrders',
   'trustedTimeOffsetMs',
   'draft:home:input',
   'draft:bazi:chat',
@@ -74,7 +73,6 @@ const MERGE_ARRAY_KEYS = new Set<string>([
   'reviewHistory',
   'guardianMessages',
   'appEvents',
-  'grantedPaymentOrders',
 ]);
 
 type StorageValue = unknown;

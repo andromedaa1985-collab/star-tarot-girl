@@ -6,21 +6,24 @@ import clsx from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
-  activateTesterAccess,
-  activatePlusDays,
-  addDailyFortuneDeepCredits,
-  addFeatureUnlock,
   canStartPlusTrial,
   getMembershipLabel,
   getPlusDaysLeft,
   isPlusActive,
   isTesterActive,
-  startPlusTrial,
 } from '../lib/membership';
 import { getUserSegment } from '../lib/engagement';
 import { normalizeUserAddress } from '../lib/aiPrompting';
 import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
 import { apiFetch } from '../lib/apiClient';
+import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
+import {
+  applyEntitlementSnapshot,
+  applyPaidOrderEntitlement,
+  fetchCurrentEntitlements,
+  redeemEntitlementCode,
+  startPlusTrialOnServer,
+} from '../lib/entitlementClient';
 
 const AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=b6e3f4',
@@ -58,7 +61,6 @@ const PLUS_VALUE_PILLARS = [
 
 type PayMethodId = (typeof PAY_METHODS)[number]['id'];
 type PaymentStatus = 'idle' | 'creating' | 'opened' | 'checking' | 'waiting' | 'paid' | 'failed';
-const TESTER_REDEEM_CODE = 'ASTRORAIL-TEST-2026';
 const PLAN_REDIRECTS: Record<string, string> = {
   relationship_report: 'bazi_full_archive',
   relationship_weekly: 'bazi_full_archive',
@@ -147,84 +149,29 @@ export default function Profile() {
     }
   };
 
-  const hasGrantedOrder = (orderId: string) => {
-    try {
-      const granted = JSON.parse(localStorage.getItem('grantedPaymentOrders') || '[]') as string[];
-      return granted.includes(orderId);
-    } catch {
-      return false;
-    }
+  const applyServerEntitlements = (snapshot: Parameters<typeof applyEntitlementSnapshot>[0]) => {
+    applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
   };
 
-  const markOrderGranted = (orderId: string) => {
-    try {
-      const granted = JSON.parse(localStorage.getItem('grantedPaymentOrders') || '[]') as string[];
-      if (!granted.includes(orderId)) {
-        localStorage.setItem('grantedPaymentOrders', JSON.stringify([...granted, orderId]));
-      }
-    } catch {
-      localStorage.setItem('grantedPaymentOrders', JSON.stringify([orderId]));
-    }
-  };
-
-  const grantPaidPlan = (planId: string, orderId: string) => {
-    if (hasGrantedOrder(orderId)) {
-      setPaymentStatus('paid');
-      setPaymentMessage('这笔订单已经到账过了，不会重复加权益。');
-      return;
-    }
-
-    if (planId === 'daily_fortune_deep') {
-      setMembership((current) => addDailyFortuneDeepCredits(current, 1));
-      setEnergy((value) => value + 2);
-      setPaymentMessage('今日深解已到账：已赠送 2 点能量，可以回到塔罗页展开今天这张牌。');
-    } else if (planId === 'tarot_deep_report') {
-      setMembership((current) => addFeatureUnlock(current, 'tarot_deep_report'));
-      setEnergy((value) => value + 6);
-      setPaymentMessage('深度牌阵报告已解锁：已赠送 6 点能量，可以回到塔罗页开始一次深度解读。');
-    } else if (planId === 'relationship_report') {
-      setMembership((current) => addFeatureUnlock(current, 'relationship_report'));
-      setEnergy((value) => value + 8);
-      setPaymentMessage('双人关系合盘已解锁：已赠送 8 点能量，可以回到八字页查看完整关系报告。');
-    } else if (planId === 'relationship_weekly') {
-      setMembership((current) => addFeatureUnlock(addFeatureUnlock(current, 'relationship_report'), 'relationship_weekly'));
-      setEnergy((value) => value + 10);
-      setPaymentMessage('7 日关系陪伴已解锁：完整合盘和一周相处任务都已开启。');
-    } else if (planId === 'couple_plus_monthly') {
-      setMembership((current) => addFeatureUnlock(addFeatureUnlock(activatePlusDays(current), 'relationship_report'), 'relationship_weekly'));
-      setEnergy((value) => Math.max(value, 30));
-      setPaymentMessage('双人 Plus 已到账：Plus、完整合盘和 7 日关系陪伴都已开启。');
-    } else if (planId === 'bazi_full_archive') {
-      setMembership((current) => addFeatureUnlock(addFeatureUnlock(addFeatureUnlock(current, 'bazi'), 'relationship_report'), 'relationship_weekly'));
-      setEnergy((value) => value + 16);
-      setPaymentMessage('完整档案包已解锁：八字档案、双人关系合盘和 7 日关系陪伴都已开启，并赠送 16 点能量。');
-    } else if (planId === 'energy_pack_30') {
-      setEnergy((value) => value + 30);
-      setPaymentMessage('能量包已到账：+30 点星光能量。');
-    } else {
-      setMembership((current) => activatePlusDays(current));
-      setEnergy((value) => Math.max(value, 20));
-      setPaymentMessage('Plus 已到账：月卡已生效，能量补到至少 20 点。');
-    }
-    markOrderGranted(orderId);
-    setPaymentStatus('paid');
-  };
-
-  const handleRedeemTesterCode = () => {
+  const handleRedeemTesterCode = async () => {
     const normalizedCode = redeemCode.trim().toUpperCase();
     if (!normalizedCode) {
+      setPaymentStatus('idle');
       setPaymentMessage('请输入兑换码。');
       return;
     }
-    if (normalizedCode !== TESTER_REDEEM_CODE) {
-      setPaymentMessage('兑换码无效，请检查后再试。');
-      return;
-    }
 
-    setMembership(activateTesterAccess());
-    setEnergy(999999);
-    setRedeemCode('');
-    setPaymentMessage('兑换成功：无限能量和全部完整功能已解锁。');
+    setPaymentStatus('checking');
+    try {
+      const snapshot = await redeemEntitlementCode(normalizedCode);
+      applyServerEntitlements(snapshot);
+      setRedeemCode('');
+      setPaymentStatus('paid');
+      setPaymentMessage(snapshot.message || '兑换成功：权益已由后端入账。');
+    } catch (error: any) {
+      setPaymentStatus('failed');
+      setPaymentMessage(error.message || '兑换失败，请稍后再试。');
+    }
   };
 
   const checkPaymentOrder = async (orderId: string) => {
@@ -232,14 +179,13 @@ export default function Profile() {
 
     setPendingOrderId(orderId);
     setPaymentStatus('checking');
-    setPaymentMessage('正在确认订单状态...');
+    setPaymentMessage('正在向后端确认订单权益...');
     try {
-      const response = await apiFetch(`/api/payments/orders/${encodeURIComponent(orderId)}`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || '订单状态查询失败');
-
-      if (data.order?.status === 'paid') {
-        grantPaidPlan(data.order.planId, orderId);
+      const result = await applyPaidOrderEntitlement(orderId);
+      if (result.status === 'paid' && result.entitlement) {
+        applyServerEntitlements(result.entitlement);
+        setPaymentStatus('paid');
+        setPaymentMessage(result.message || result.entitlement.message || '权益已经由后端确认入账。');
         return;
       }
 
@@ -247,16 +193,30 @@ export default function Profile() {
       setPaymentMessage('还没收到支付成功通知。完成付款后点“刷新到账状态”。');
     } catch (error: any) {
       setPaymentStatus('failed');
-      setPaymentMessage(error.message || '订单状态查询失败');
+      setPaymentMessage(error.message || '订单权益校验失败。');
     }
   };
 
-  const handleStartTrial = () => {
+  const handleStartTrial = async () => {
     if (!trialAvailable) return;
-    setMembership((current) => startPlusTrial(current));
-    setEnergy((value) => Math.max(value, 12));
-    setPaymentMessage('已开启 24 小时 Plus 试用，能量补到至少 12 点。');
+    setPaymentStatus('checking');
+    try {
+      const snapshot = await startPlusTrialOnServer();
+      applyServerEntitlements(snapshot);
+      setPaymentStatus('paid');
+      setPaymentMessage(snapshot.message || '已开通 24 小时 Plus 试用。');
+    } catch (error: any) {
+      setPaymentStatus('failed');
+      setPaymentMessage(error.message || '试用开通失败，请稍后再试。');
+    }
   };
+
+  useEffect(() => {
+    if (!getStoredAccountSession()) return;
+    fetchCurrentEntitlements()
+      .then(applyServerEntitlements)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!paymentReturnType || !paymentOrderId) return;
@@ -271,6 +231,13 @@ export default function Profile() {
   const handleCreatePaymentOrder = async () => {
     setPaymentMessage(null);
     setPaymentStatus('idle');
+    const accountSession = getStoredAccountSession();
+    if (!accountSession) {
+      setPaymentStatus('failed');
+      setPaymentMessage('请先登录星轨账户，再开通会员或购买权益。');
+      navigate('/app/auth?next=/app/profile?plus=1');
+      return;
+    }
     if (!guardianConsent) {
       setPaymentMessage('请先确认价格规则；未成年人需要监护人同意。');
       return;
@@ -294,7 +261,10 @@ export default function Profile() {
         try {
           const response = await apiFetch(`/api/payments/${gateway}/create`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...authHeaders(accountSession.token),
+            },
             body: JSON.stringify({
               planId: selectedPlanId,
               channel: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'wap' : 'page',

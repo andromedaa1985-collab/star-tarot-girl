@@ -41,7 +41,6 @@ import {
 } from '../store';
 import {
   canStartPlusTrial,
-  consumeDailyFortuneDeepCredit,
   getDailyCheckInEnergy,
   getDailyFortuneDeepCredits,
   getDailyMissionEnergy,
@@ -50,16 +49,18 @@ import {
   hasDailyFortuneDeepAccess,
   isPlusActive,
   isTesterActive,
-  startPlusTrial,
 } from '../lib/membership';
 import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
-import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
+import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TAROT_DEEP_MODEL, DEEPSEEK_TAROT_FAST_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import { shareImageWithNativeSheet } from '../lib/nativeShare';
+import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
+import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
 import CompanionSprite, {
   CompanionActionBadge,
   CompanionExpressionBadge,
@@ -518,9 +519,9 @@ const buildDailyFortunePrompt = (question: string, cards: DrawnCard[], isInterne
 请写一份中文“今日运势”。它是星轨塔罗少女每天递给用户的一小段陪伴：温柔、安慰、细致，但仍然清醒。
 ${DAILY_FORTUNE_VOICE_RULES}
 
-回答目标约 650 个中文字符，通常 580 到 720 字；牌意复杂时最多 760 字，不要为了显得丰满而硬加内容。分成 4 到 6 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。
+回答目标约 420 个中文字符，通常 360 到 500 字；牌意复杂时最多 540 字，不要为了显得丰满而硬加内容。分成 3 到 4 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。
 
-你需要自然完成一条情绪弧线：先用一句具体、柔软的话接住今天的状态；再把这张牌的正逆位、画面感或传统含义讲清楚，但要像聊天，不要像词典解释；接着让牌落到今天会遇到的真实时刻，比如身体和情绪什么时候会乱、关系里哪里要慢一点、工作学习或金钱安排上什么地方要先收口；然后说出今天最容易踩的一个坑，以及用户可以怎么温柔地绕开它；最后给一个 10 分钟内可以开始的小动作，再留一句睡前回看的话。
+你需要自然完成一条轻量情绪弧线：先用一句具体、柔软的话接住今天的状态；再把这张牌的正逆位、画面感或传统含义讲清楚，但要像聊天，不要像词典解释；接着让牌落到今天最相关的一个真实场景里；最后给一个 10 分钟内可以开始的小动作，再留一句睡前回看的话。细节不要全部展开，想展开的部分留给“今日深解”。
 
 不要主动提及日记、八字档案、人生沙盘、守护聊天或几天前的旧事，除非用户明确要求结合。
 不要下绝对结论，不要恐吓，不提供医疗、法律、投资等专业判断。
@@ -1288,7 +1289,7 @@ export default function Home() {
     : petExpressionOverride || basePetExpression;
   const activePetAction = getCompanionAction(activePetExpression, activeOutfitId);
   const petStageClass = 'left-1/2 top-[262px] h-[164px] w-[164px] -translate-x-1/2 sm:top-[244px] sm:h-[188px] sm:w-[188px]';
-  const petDockClass = 'bottom-[calc(var(--app-bottom-pad)+94px)] left-2 h-[108px] w-[108px] sm:left-5 sm:h-[122px] sm:w-[122px]';
+  const petDockClass = 'bottom-[calc(var(--app-bottom-pad)+112px)] right-[-34px] h-[104px] w-[104px] sm:right-[-38px] sm:h-[118px] sm:w-[118px]';
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1492,18 +1493,41 @@ export default function Home() {
     setAppEvents((events) => recordAppEvent(events, 'upgrade_prompt', { reason: 'soft_dismiss' }));
   };
 
+  const applyServerEntitlements = (snapshot?: EntitlementSnapshot) => {
+    if (!snapshot) return;
+    applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
+  };
+
+  const requireAccountForModelUse = () => {
+    const session = getStoredAccountSession();
+    if (session?.token) return session;
+    navigate('/app/auth?next=/app');
+    return null;
+  };
+
   const handleSoftConversion = () => {
     if (!softConversionTrigger) return;
     openUpgradePrompt(softConversionTrigger.reason);
   };
 
-  const handleStartTrial = () => {
+  const handleStartTrial = async () => {
     if (!trialAvailable) return;
-    setMembership((current) => startPlusTrial(current));
-    setEnergy((value) => Math.max(value, 12));
-    setShowUpgradePrompt(false);
-    setAppEvents((events) => recordAppEvent(events, 'trial_start', { source: upgradeReason }));
-    addExp(20);
+    if (!getStoredAccountSession()) {
+      setShowUpgradePrompt(false);
+      navigate('/app/auth?next=/app/profile?plus=1');
+      return;
+    }
+    try {
+      const snapshot = await startPlusTrialOnServer();
+      setMembership(snapshot.membership);
+      setEnergy(snapshot.energy);
+      setShowUpgradePrompt(false);
+      setAppEvents((events) => recordAppEvent(events, 'trial_start', { source: upgradeReason }));
+      addExp(20);
+    } catch {
+      setShowUpgradePrompt(false);
+      navigate('/app/profile?plus=1');
+    }
   };
 
   const handleOpenPlusPage = () => {
@@ -1589,6 +1613,8 @@ export default function Home() {
       setAppEvents((events) => recordAppEvent(events, 'daily_deep_paywall_open', { source: 'cta' }));
       return;
     }
+    const accountSession = requireAccountForModelUse();
+    if (!accountSession) return;
 
     const sourceQuestion = getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
     const linkedReading =
@@ -1616,9 +1642,13 @@ export default function Home() {
     try {
       const response = await apiFetch('/api/deepseek/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(accountSession.token),
+        },
         body: JSON.stringify({
-          model: DEEPSEEK_TEXT_MODEL,
+          entitlement: { type: 'daily_deep' },
+          model: DEEPSEEK_TAROT_DEEP_MODEL,
           temperature: 0.82,
           max_tokens: DEEPSEEK_MAX_TOKENS.dailyDeep,
           isInternetMode,
@@ -1638,20 +1668,34 @@ export default function Home() {
         }),
       });
       const data = await response.json();
+      if (response.status === 401 || response.status === 403) {
+        navigate('/app/auth?next=/app');
+        const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
+      if (response.status === 402) {
+        setShowDailyDeepPaywall(true);
+        const handled = new Error(data?.error?.message || '今日深解次数不足。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '今日深解请求失败');
       const aiAnswer = data?.choices?.[0]?.message?.content;
       if (!aiAnswer) throw new Error('今日深解返回为空');
+      applyServerEntitlements(data?.entitlement);
       answer = aiAnswer;
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.handledEntitlementError) {
+        setIsThinking(false);
+        return;
+      }
       console.error('Daily fortune deep request failed:', error);
       usedFallbackAnswer = true;
     }
 
     answer = cleanTarotAnswer(answer);
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
-    if (!plusActive && !testerActive) {
-      setMembership((current) => consumeDailyFortuneDeepCredit(current));
-    }
     setAppEvents((events) =>
       recordAppEvent(events, 'daily_deep_generate', {
         access: plusActive || testerActive ? 'membership' : 'credit',
@@ -1659,7 +1703,7 @@ export default function Home() {
     );
 
     const answerTrace = createGenerationTrace('tarot_followup', {
-      model: DEEPSEEK_TEXT_MODEL,
+      model: DEEPSEEK_TAROT_DEEP_MODEL,
       usedFallback: usedFallbackAnswer,
     });
     const aiMessage = {
@@ -1685,6 +1729,8 @@ export default function Home() {
   const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
+    const accountSession = requireAccountForModelUse();
+    if (!accountSession) return;
     if (!plusActive && energy <= 0) {
       openUpgradePrompt('energy');
       return;
@@ -1721,9 +1767,6 @@ export default function Home() {
     setDrawingCards(shouldDraw ? cards : []);
     setComposerFocused(false);
     setAutoScrollOnNextMessage(true);
-    if (!plusActive) {
-      setEnergy((value) => Math.max(0, value - 1));
-    }
     if (shouldDraw) setCardImage(image);
     setMessages((prev) => [...prev, userMessage]);
     if (shouldDraw) {
@@ -1740,9 +1783,13 @@ export default function Home() {
       const tarotContextPolicy = buildTarotContextPolicy(question, memoryRecall, profileTarotContextText);
       const response = await apiFetch('/api/deepseek/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(accountSession.token),
+        },
         body: JSON.stringify({
-          model: DEEPSEEK_TEXT_MODEL,
+          entitlement: { type: 'tarot_message', energyCost: 1 },
+          model: DEEPSEEK_TAROT_FAST_MODEL,
           temperature: isDailyFortune ? 0.78 : 0.68,
           max_tokens: isDailyFortune ? DEEPSEEK_MAX_TOKENS.tarotDaily : DEEPSEEK_MAX_TOKENS.tarotGeneral,
           isInternetMode,
@@ -1767,11 +1814,30 @@ export default function Home() {
         }),
       });
       const data = await response.json();
+      if (response.status === 401 || response.status === 403) {
+        navigate('/app/auth?next=/app');
+        const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
+      if (response.status === 402) {
+        openUpgradePrompt('energy');
+        const handled = new Error(data?.error?.message || '能量不足。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '塔罗解读请求失败');
       const aiAnswer = data?.choices?.[0]?.message?.content;
       if (!aiAnswer) throw new Error('塔罗解读返回为空');
+      applyServerEntitlements(data?.entitlement);
       answer = aiAnswer;
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.handledEntitlementError) {
+        setIsThinking(false);
+        setIsDrawingCards(false);
+        setDrawingCards([]);
+        return;
+      }
       console.error('Tarot request failed:', error);
       usedFallbackAnswer = true;
     }
@@ -1784,7 +1850,7 @@ export default function Home() {
     }
 
     const answerTrace = createGenerationTrace(shouldDraw ? 'tarot' : 'tarot_followup', {
-      model: DEEPSEEK_TEXT_MODEL,
+      model: DEEPSEEK_TAROT_FAST_MODEL,
       usedFallback: usedFallbackAnswer,
     });
 
@@ -2179,7 +2245,17 @@ export default function Home() {
 
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('分享图生成失败');
-      const file = new File([blob], `星轨牌迹-${Date.now()}.png`, { type: 'image/png' });
+      const fileName = `astrorail-tarot-${Date.now()}.png`;
+      const sharedNatively = await shareImageWithNativeSheet({
+        blob,
+        fileName,
+        title: '我的星轨牌迹',
+        text: '我在星轨塔罗少女留下了一次牌迹。',
+        dialogTitle: '分享星轨牌迹',
+      });
+      if (sharedNatively) return;
+
+      const file = new File([blob], fileName, { type: 'image/png' });
       if (navigator.canShare?.({ files: [file] })) {
         try {
           await navigator.share({ title: '我的星轨牌迹', files: [file] });

@@ -6,7 +6,7 @@ const ACCOUNT_STORE_NAME = "astro-rail-accounts";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOCAL_STORE_DIR = ".data/accounts";
 
-type UserRecord = {
+export type UserRecord = {
   id: string;
   email: string;
   displayName: string;
@@ -63,7 +63,7 @@ function getSessionSecret() {
   const secret = process.env.AUTH_SESSION_SECRET?.trim() || process.env.SESSION_SECRET?.trim();
   if (secret) return secret;
 
-  const derivationSeed = process.env.DEEPSEEK_API_KEY?.trim() || process.env.IMAGE_API_KEY?.trim();
+  const derivationSeed = process.env.DEEPSEEK_API_KEY?.trim();
   if (derivationSeed && derivationSeed.length >= 24) {
     return crypto
       .createHash("sha256")
@@ -171,15 +171,34 @@ async function findUserByEmail(email: string) {
   return readJson<UserRecord>(userKey(index.userId));
 }
 
-async function requireUser(req: Request) {
+function authError(message = "请先登录账户。") {
+  const error = new Error(message) as Error & { status: number };
+  error.status = 401;
+  return error;
+}
+
+export async function requireUser(req: Request) {
   const header = req.get("authorization") || "";
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
-  if (!token) throw new Error("请先登录账户。");
+  if (!token) throw authError("请先登录账户。");
 
-  const payload = verifyToken(token);
+  let payload: TokenPayload;
+  try {
+    payload = verifyToken(token);
+  } catch {
+    throw authError("登录状态已失效，请重新登录。");
+  }
   const user = await readJson<UserRecord>(userKey(payload.userId));
-  if (!user) throw new Error("账户不存在，请重新登录。");
+  if (!user) throw authError("账户不存在，请重新登录。");
   return user;
+}
+
+export async function getOptionalUser(req: Request) {
+  try {
+    return await requireUser(req);
+  } catch {
+    return null;
+  }
 }
 
 function getArchiveRecordCount(archive: any) {

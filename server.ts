@@ -5,6 +5,8 @@ import crypto from "crypto";
 import { search } from "duck-duck-scrape";
 import { registerAnalyticsRoutes } from "./api/analyticsRoutes";
 import { registerAuthRoutes } from "./api/authRoutes";
+import { prepareChatEntitlementCharge, registerEntitlementRoutes } from "./api/entitlementRoutes";
+import { registerPaymentRoutes } from "./api/paymentRoutes";
 import { PAYMENT_PLANS, type PaymentPlan } from "./src/lib/pricing";
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -208,6 +210,8 @@ async function startServer() {
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: false, limit: "5mb" }));
   registerAuthRoutes(app);
+  registerPaymentRoutes(app);
+  registerEntitlementRoutes(app);
   registerAnalyticsRoutes(app);
 
   // API routes
@@ -564,6 +568,7 @@ async function startServer() {
     try {
       const apiKey = process.env.DEEPSEEK_API_KEY;
       if (!apiKey) throw new Error("Missing DeepSeek API Key");
+      const entitlementCharge = await prepareChatEntitlementCharge(req);
 
       // Intercept for Internet Mode
       let messages = [...req.body.messages];
@@ -598,6 +603,7 @@ async function startServer() {
       };
       
       delete bodyPayload.isInternetMode; // Remove custom parameter before sending to deepseek
+      delete bodyPayload.entitlement;
 
       const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
@@ -611,30 +617,13 @@ async function startServer() {
       if (data.error) {
         console.error("DeepSeek API Error:", data.error);
       }
+      if (response.ok && !data.error && entitlementCharge) {
+        data.entitlement = await entitlementCharge.commit();
+      }
       res.json(data);
     } catch (error: any) {
       console.error("DeepSeek Proxy Error:", error);
-      res.status(500).json({ error: { message: error.message } });
-    }
-  });
-
-  // SiliconFlow Image Generation Proxy
-  app.post("/api/siliconflow/generate", async (req, res) => {
-    try {
-      const apiKey = process.env.IMAGE_API_KEY;
-      if (!apiKey) throw new Error("Missing SiliconFlow Image API Key");
-      const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(req.body)
-      });
-      const data = await response.json();
-      res.json(data);
-    } catch (error: any) {
-      res.status(500).json({ error: { message: error.message } });
+      res.status(Number(error?.status) || 500).json({ error: { message: error.message } });
     }
   });
 
