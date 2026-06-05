@@ -3,174 +3,226 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   BookOpen,
+  CheckCircle2,
+  Cloud,
   Compass,
-  Gem,
-  History,
-  Moon,
-  Shield,
+  Download,
+  HeartHandshake,
+  MessageCircleHeart,
+  MoonStar,
+  ShieldCheck,
   Sparkles,
-  Stars,
+  Star,
   WandSparkles,
+  Zap,
 } from 'lucide-react';
-import CompanionSprite, { type CompanionAction, type CompanionExpression, type CompanionOutfitId } from '../components/CompanionSprite';
-
-const featureCards = [
-  {
-    title: '塔罗陪伴',
-    copy: '把问题说出来，星轨会抽牌、追问、记录，不急着给你一个粗糙结论。',
-    icon: Sparkles,
-    path: '/app',
-  },
-  {
-    title: '八字洞察',
-    copy: '出生信息沉淀成个人档案，适合做每日运势和长期复盘。',
-    icon: Compass,
-    path: '/app/bazi',
-  },
-  {
-    title: '星轨日记',
-    copy: '记录心情、梦境和选择，让每一次表达都能被温柔接住。',
-    icon: BookOpen,
-    path: '/app/diary',
-  },
-  {
-    title: '守护来信',
-    copy: '需要被听见的时候，她会帮你把心里的结慢慢拆开。',
-    icon: Shield,
-    path: '/app/guardian',
-  },
-];
 
 const proofPoints = [
-  ['3 次', '每日免费指引'],
-  ['4 种', '塔罗 / 八字 / 日记 / 守护'],
-  ['1 位', '专属星轨少女'],
+  { value: '1 张', label: '每天的主牌' },
+  { value: '4 步', label: '抽牌、深解、记录、复盘' },
+  { value: '云端', label: '账号存档同步' },
+];
+
+const productScenes = [
+  {
+    title: '每日运势',
+    kicker: '主产品',
+    copy: '每天先抽一张牌，不急着展开所有人生问题，只把今天最该看清的一件事讲明白。',
+    icon: Sparkles,
+  },
+  {
+    title: '今日深解',
+    kicker: 'Plus',
+    copy: '当你真的想继续往下看，再展开情绪、关系、工作节奏和晚间回看。',
+    icon: WandSparkles,
+  },
+  {
+    title: '命运日记',
+    kicker: '复盘',
+    copy: '把当天的心情和选择留下来，之后回头看，会知道自己是怎么慢慢变清楚的。',
+    icon: BookOpen,
+  },
+  {
+    title: '云端账户',
+    kicker: '安全感',
+    copy: '登录后保留牌迹、能量、会员和记录，换设备也能继续接上。',
+    icon: Cloud,
+  },
 ];
 
 const ritualSteps = [
-  ['提问', '把正在纠结的事说出来，不需要组织得很完美。'],
-  ['抽牌', '选择单张指引、圣三角、爱情十字或事业岔路。'],
-  ['沉淀', '把重要解读写进日记，让星轨陪你看见变化。'],
+  ['先问今天', '不用组织得很完整，说出现在最卡的点就够了。'],
+  ['抽一张主牌', '星轨先给一个短而准的今日方向，不把内容一次讲满。'],
+  ['需要再深解', '想继续看时，再展开更细的关系、节奏和行动提醒。'],
+  ['晚上回看', '把今天发生的事记下来，形成自己的牌迹档案。'],
 ];
+
+const trustItems = [
+  '只在你允许时参考旧记录',
+  '不把建议说成绝对命运',
+  '每日先给短指引，深解再展开',
+  '登录后换设备也能接回存档',
+];
+
+const LANDING_INTRO_STORAGE_KEY = 'railstar_landing_intro_seen_v1';
+
+function markLandingIntroSeen() {
+  try {
+    window.localStorage.setItem(LANDING_INTRO_STORAGE_KEY, '1');
+  } catch {
+    // Ignore private-mode storage errors; navigation should still work.
+  }
+}
 
 export default function Landing() {
   const navigate = useNavigate();
-  const openAuth = React.useCallback(
-    (nextPath = '/app') => navigate(`/auth?next=${encodeURIComponent(nextPath)}`),
-    [navigate],
-  );
+  const openAuth = React.useCallback((nextPath = '/app') => {
+    markLandingIntroSeen();
+    navigate(`/auth?next=${encodeURIComponent(nextPath)}`);
+  }, [navigate]);
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#07080d] text-[#fff9ed] selection:bg-[#f4cf83] selection:text-[#0b0910]">
+    <main className="h-full min-h-screen overflow-y-auto bg-[#f5f7fb] text-[#151821] selection:bg-[#91e6f2] selection:text-[#081016]">
       <Hero onEnter={() => openAuth('/app')} />
-      <section className="relative border-y border-white/10 bg-[#090a12]/82 px-5 py-4 backdrop-blur-2xl sm:px-8">
-        <div className="mx-auto grid max-w-6xl grid-cols-3 gap-2 sm:gap-4">
-          {proofPoints.map(([value, label]) => (
-            <div
-              key={label}
-              className="rounded-[26px] border border-white/12 bg-white/[0.075] p-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl sm:p-5"
-            >
-              <div className="text-xl font-black text-[#f4cf83] sm:text-3xl">{value}</div>
-              <div className="mt-1 text-xs text-[#cfc6b5] sm:text-sm">{label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-      <Features onOpen={(path) => openAuth(path)} />
-      <CompanionLooks />
-      <RevenuePath onEnter={() => openAuth('/app')} />
+      <ProofStrip />
+      <ProductFocus onEnter={() => openAuth('/app')} />
+      <UsePath onEnter={() => openAuth('/app')} />
+      <TrustAndDownload onEnter={() => openAuth('/app')} />
     </main>
   );
 }
 
 function Hero({ onEnter }: { onEnter: () => void }) {
   return (
-    <section className="relative min-h-[92svh] overflow-hidden px-5 pb-20 pt-5 sm:px-8 lg:px-12">
+    <section className="relative min-h-[88svh] overflow-hidden px-5 pb-14 pt-4 sm:px-8 lg:px-12">
       <img
-        src="/details-new.png"
+        src="/railstar-app-icon-no-text.png"
         alt=""
-        className="absolute inset-0 h-full w-full object-cover opacity-72 saturate-[1.05]"
+        className="absolute inset-0 h-full w-full object-cover opacity-95"
       />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,6,12,0.98)_0%,rgba(5,6,12,0.92)_36%,rgba(5,6,12,0.48)_68%,rgba(5,6,12,0.84)_100%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,8,13,0.08)_0%,rgba(7,8,13,0.16)_58%,#07080d_100%)]" />
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#f4cf83]/70 to-transparent" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(246,248,253,0.94)_0%,rgba(246,248,253,0.78)_38%,rgba(246,248,253,0.18)_78%,rgba(246,248,253,0.64)_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_74%_42%,rgba(114,91,255,0.20),transparent_36%),radial-gradient(circle_at_18%_82%,rgba(31,179,196,0.22),transparent_34%)]" />
 
-      <nav className="relative z-10 mx-auto flex max-w-6xl items-center justify-between gap-3 rounded-full border border-white/12 bg-white/[0.075] px-3 py-3 shadow-[0_24px_80px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-2xl">
-        <button onClick={onEnter} className="flex min-w-0 items-center gap-3 text-left">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#f4cf83]/34 bg-[#f4cf83]/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]">
-            <Moon size={19} className="text-[#f4cf83]" />
-          </span>
+      <nav className="relative z-10 mx-auto flex max-w-6xl items-center justify-between gap-3 py-3">
+        <button type="button" onClick={onEnter} className="flex min-w-0 items-center gap-3 text-left">
+          <img
+            src="/details-new.png"
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-[16px] shadow-[0_12px_32px_rgba(83,78,145,0.18)]"
+          />
           <span className="min-w-0">
-            <span className="block truncate text-lg font-black leading-none sm:text-xl">星轨 AstroRail</span>
-            <span className="mt-1 block truncate text-xs text-[#d0c7b8]">AI 塔罗陪伴工作台</span>
+            <span className="block truncate text-base font-black text-[#1b2130]">星轨 Railstar</span>
+            <span className="mt-0.5 block truncate text-xs font-semibold text-[#606a7f]">塔罗少女陪你过今天</span>
           </span>
         </button>
         <button
+          type="button"
           onClick={onEnter}
-          className="hidden shrink-0 rounded-full bg-[#f4cf83] px-5 py-2.5 text-sm font-black text-[#0b0910] shadow-[0_14px_42px_rgba(244,207,131,0.24)] transition hover:-translate-y-0.5 hover:bg-[#ffe0a0] sm:inline-flex"
+          className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#151821] px-4 py-2.5 text-sm font-black text-white shadow-[0_16px_36px_rgba(21,24,33,0.18)] transition hover:-translate-y-0.5 hover:bg-[#252a38]"
         >
-          进入应用
+          打开应用
+          <ArrowRight size={16} />
         </button>
       </nav>
 
-      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-10 pt-20 lg:grid-cols-[1.02fr_0.98fr] lg:pt-24">
-        <div className="max-w-3xl">
-          <div className="mb-6 inline-flex max-w-full items-center gap-2 rounded-full border border-[#f4cf83]/28 bg-[#f4cf83]/12 px-3.5 py-2 text-sm font-semibold text-[#ffe0a0] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
-            <Stars size={16} />
-            <span className="truncate">给迷茫的人一个愿意每天打开的答案入口</span>
+      <div className="relative z-10 mx-auto flex min-h-[calc(88svh-92px)] max-w-6xl flex-col justify-end pb-4">
+        <div className="max-w-4xl">
+          <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#6f61ff]/20 bg-white/70 px-3.5 py-2 text-sm font-black text-[#5b4fe0] shadow-[0_12px_40px_rgba(91,79,224,0.10)] backdrop-blur-2xl">
+            <MoonStar size={16} />
+            <span className="truncate">一张牌，不替你决定人生，只陪你看清今天</span>
           </div>
-          <h1 className="text-5xl font-black leading-[1.02] text-[#fffaf0] sm:text-7xl lg:text-8xl">
-            <span className="block">星轨</span>
-            <span className="block">AstroRail</span>
+          <h1 className="max-w-3xl text-4xl font-black leading-[1.06] tracking-[0] text-[#121620] sm:text-6xl lg:text-7xl">
+            每天抽一张牌，
+            <br />
+            把今天过清楚一点。
           </h1>
-          <p className="mt-6 max-w-[34rem] text-lg font-semibold leading-8 text-[#eadfcc] sm:text-2xl">
-            一位会抽牌、会追问、会记住你的 AI 塔罗少女。当你不知道怎么选，她会陪你把心里的雾慢慢拨开。
+          <p className="mt-6 max-w-2xl text-base font-semibold leading-8 text-[#4e596d] sm:text-xl">
+            星轨是一款 AI 塔罗陪伴 App。它把每日运势做成主入口：短一点、准一点、温柔一点；当你想继续看，再进入今日深解、日记复盘和云端档案。
           </p>
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
+              type="button"
               onClick={onEnter}
-              className="inline-flex w-full max-w-[21rem] items-center justify-center gap-2 rounded-full bg-[#f4cf83] px-6 py-4 text-base font-black text-[#0b0910] shadow-[0_18px_55px_rgba(244,207,131,0.24)] transition hover:-translate-y-0.5 hover:bg-[#ffe0a0] sm:w-auto"
+              className="inline-flex w-full max-w-[22rem] items-center justify-center gap-2 rounded-full bg-[#151821] px-6 py-4 text-base font-black text-white shadow-[0_18px_46px_rgba(21,24,33,0.22)] transition hover:-translate-y-0.5 hover:bg-[#252a38] sm:w-auto"
             >
-              先体验一次
-              <ArrowRight size={19} />
+              先抽今日运势
+              <Sparkles size={18} />
             </button>
             <a
-              href="#features"
-              className="inline-flex w-full max-w-[21rem] items-center justify-center rounded-full border border-white/15 bg-white/[0.08] px-6 py-4 text-base font-bold text-[#fff7e9] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:border-[#f4cf83]/50 hover:bg-[#f4cf83]/12 sm:w-auto"
+              href="#focus"
+              className="inline-flex w-full max-w-[22rem] items-center justify-center rounded-full border border-[#151821]/12 bg-white/70 px-6 py-4 text-base font-black text-[#151821] shadow-[0_14px_42px_rgba(82,92,126,0.12)] backdrop-blur-2xl transition hover:-translate-y-0.5 hover:border-[#6f61ff]/28 hover:bg-white sm:w-auto"
             >
-              了解玩法
+              看看值不值得用
             </a>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
 
-        <div className="relative mx-auto w-full max-w-[430px] lg:ml-auto">
-          <div className="absolute -inset-10 rounded-[54px] border border-white/8 bg-white/[0.035] backdrop-blur-[2px]" />
-          <div className="relative overflow-hidden rounded-[40px] border border-white/14 bg-[#121521]/62 p-4 shadow-[0_28px_90px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-3xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-1 pb-3">
-              <span className="text-sm font-bold text-[#f4cf83]">今日星轨</span>
-              <span className="rounded-full border border-[#f4cf83]/24 bg-[#f4cf83]/12 px-3 py-1 text-xs font-bold text-[#f4cf83]">
-                LV.1
-              </span>
-            </div>
+function ProofStrip() {
+  return (
+    <section className="border-y border-[#dce3ef] bg-white/72 px-5 py-4 backdrop-blur-2xl sm:px-8">
+      <div className="mx-auto grid max-w-6xl grid-cols-3 gap-2 sm:gap-4">
+        {proofPoints.map((item) => (
+          <div key={item.label} className="text-center">
+            <div className="text-xl font-black text-[#151821] sm:text-3xl">{item.value}</div>
+            <div className="mt-1 text-xs font-semibold text-[#667085] sm:text-sm">{item.label}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
-            <div className="relative mt-5 aspect-square overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.035))] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
-              <img
-                src="/detail-card-hero.png"
-                alt="星轨塔罗少女"
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,244,210,0.16),transparent_34%),linear-gradient(180deg,rgba(9,12,22,0)_62%,rgba(9,12,22,0.45)_100%)]" />
+function ProductFocus({ onEnter }: { onEnter: () => void }) {
+  return (
+    <section id="focus" className="px-5 py-18 sm:px-8 sm:py-24 lg:px-12">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid gap-10 lg:grid-cols-[0.86fr_1.14fr] lg:items-center">
+          <div>
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-[#eaf8fb] px-3 py-1.5 text-sm font-black text-[#087a8f]">
+              <Compass size={15} />
+              围绕每日运势重新组织
             </div>
+            <h2 className="max-w-xl text-3xl font-black leading-tight text-[#151821] sm:text-5xl">
+              它不是占卜大全，是每天愿意打开一次的情绪入口。
+            </h2>
+            <p className="mt-5 max-w-xl text-base font-semibold leading-8 text-[#5d6678]">
+              先给一个克制的今日方向，不把所有内容一次讲满；真正需要的时候，再把深解、日记和复盘接上。这样免费体验不会臃肿，付费点也更自然。
+            </p>
+            <button
+              type="button"
+              onClick={onEnter}
+              className="mt-7 inline-flex items-center gap-2 rounded-full bg-[#6f61ff] px-5 py-3 text-sm font-black text-white shadow-[0_16px_34px_rgba(111,97,255,0.26)] transition hover:-translate-y-0.5 hover:bg-[#5d51df]"
+            >
+              体验这条路径
+              <ArrowRight size={17} />
+            </button>
+          </div>
 
-            <div className="mt-4 rounded-[28px] border border-white/12 bg-black/20 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">
-              <div className="mb-2 flex items-center gap-2 text-sm font-bold text-[#fffaf0]">
-                <WandSparkles size={16} className="text-[#f4cf83]" />
-                你的问题正在成形
-              </div>
-              <p className="text-sm leading-6 text-[#d5c9b6]">
-                先不要急着问答案。把困惑说清楚，星轨才会给你更贴近当下的指引。
-              </p>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {productScenes.map((scene) => {
+              const Icon = scene.icon;
+              return (
+                <article
+                  key={scene.title}
+                  className="rounded-[28px] border border-[#dde4ef] bg-white p-5 shadow-[0_18px_50px_rgba(82,92,126,0.10)]"
+                >
+                  <div className="mb-10 flex items-center justify-between gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[#f2f0ff] text-[#6f61ff]">
+                      <Icon size={22} />
+                    </div>
+                    <span className="rounded-full bg-[#f5f7fb] px-3 py-1 text-xs font-black text-[#667085]">
+                      {scene.kicker}
+                    </span>
+                  </div>
+                  <h3 className="text-2xl font-black text-[#151821]">{scene.title}</h3>
+                  <p className="mt-3 text-sm font-semibold leading-6 text-[#667085]">{scene.copy}</p>
+                </article>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -178,148 +230,122 @@ function Hero({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-function Features({ onOpen }: { onOpen: (path: string) => void }) {
+function UsePath({ onEnter }: { onEnter: () => void }) {
   return (
-    <section id="features" className="px-5 py-20 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-6xl">
+    <section className="relative isolate overflow-hidden bg-[#111622] px-5 pb-36 pt-28 text-white sm:px-8 sm:pb-40 sm:pt-36 lg:px-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 z-0 h-48 bg-[linear-gradient(180deg,#f5f7fb_0%,rgba(245,247,251,0.78)_30%,rgba(17,22,34,0.68)_76%,rgba(17,22,34,0)_100%)]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-56 bg-[linear-gradient(180deg,rgba(17,22,34,0)_0%,rgba(26,35,52,0.92)_34%,rgba(111,97,255,0.10)_66%,#f5f7fb_100%)]"
+      />
+      <div className="relative z-10 mx-auto max-w-6xl">
         <div className="mb-10 flex flex-col justify-between gap-5 md:flex-row md:items-end">
           <div>
-            <div className="mb-3 text-sm font-bold text-[#f4cf83]">星轨玩法</div>
-            <h2 className="max-w-3xl text-4xl font-black leading-tight text-[#fffaf0] sm:text-5xl">
-              把困惑交给星轨，把答案慢慢照亮。
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/8 px-3 py-1.5 text-sm font-black text-[#91e6f2]">
+              <MessageCircleHeart size={15} />
+              真实使用路径
+            </div>
+            <h2 className="max-w-3xl text-3xl font-black leading-tight sm:text-5xl">
+              从“我今天有点乱”，到“我知道先做什么”。
             </h2>
           </div>
-          <p className="max-w-xl text-base leading-7 text-[#cfc6b5]">
-            从一次塔罗开始，进入八字、沙盘、日记和守护陪伴。你不需要懂命理，只需要把问题说出来。
+          <p className="max-w-lg text-base font-semibold leading-7 text-[#b9c2d4]">
+            详情页不用堆功能，用户只需要看懂第一件事：星轨能把当下的混乱，变成一个今天能执行的小动作。
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {featureCards.map((feature) => {
-            const Icon = feature.icon;
-            return (
-              <button
-                key={feature.title}
-                onClick={() => onOpen(feature.path)}
-                className="group min-h-64 rounded-[30px] border border-white/12 bg-white/[0.07] p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:-translate-y-1 hover:border-[#f4cf83]/44 hover:bg-[#f4cf83]/12"
+        <div className="grid gap-4 lg:grid-cols-[1.02fr_0.98fr]">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {ritualSteps.map(([title, copy], index) => (
+              <article
+                key={title}
+                className="rounded-[28px] border border-white/10 bg-white/[0.06] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
               >
-                <div className="mb-10 flex h-12 w-12 items-center justify-center rounded-[20px] border border-[#f4cf83]/25 bg-[#f4cf83]/12 text-[#f4cf83]">
-                  <Icon size={22} />
+                <div className="mb-8 flex items-center justify-between gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#91e6f2] text-sm font-black text-[#081016]">
+                    {index + 1}
+                  </span>
+                  {index === 0 ? <Sparkles size={18} className="text-[#91e6f2]" /> : index === 1 ? <Star size={18} className="text-[#91e6f2]" /> : index === 2 ? <Zap size={18} className="text-[#91e6f2]" /> : <BookOpen size={18} className="text-[#91e6f2]" />}
                 </div>
-                <h3 className="text-2xl font-black text-[#fffaf0]">{feature.title}</h3>
-                <p className="mt-4 text-sm leading-6 text-[#cfc6b5]">{feature.copy}</p>
-                <div className="mt-7 inline-flex items-center gap-2 text-sm font-bold text-[#f4cf83] opacity-80 transition group-hover:opacity-100">
-                  打开
-                  <ArrowRight size={16} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CompanionLooks() {
-  const looks: Array<{
-    name: string;
-    desc: string;
-    outfit: CompanionOutfitId;
-    expression: CompanionExpression;
-    action: CompanionAction;
-  }> = [
-    { name: '月白神谕', desc: '温柔待机，适合每日运势。', outfit: 'moon-oracle', expression: 'happy', action: 'celebrate' },
-    { name: '午夜星斗篷', desc: '记忆回看，会把线索收起来。', outfit: 'star-cloak', expression: 'memory', action: 'remember' },
-    { name: '学院占星', desc: '认真思考，陪你拆问题。', outfit: 'academy-tarot', expression: 'thinking', action: 'read' },
-    { name: '液态玻璃礼装', desc: '抽牌闪光，仪式感更轻盈。', outfit: 'glass-robe', expression: 'drawing', action: 'draw' },
-  ];
-
-  return (
-    <section className="px-5 pb-20 sm:px-8 lg:px-12">
-      <div className="mx-auto grid max-w-6xl gap-4 overflow-hidden rounded-[38px] border border-white/12 bg-white/[0.065] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl lg:grid-cols-[0.9fr_1.1fr] lg:p-5">
-        <div className="flex flex-col justify-between rounded-[30px] border border-white/10 bg-black/18 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-          <div>
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#f4cf83]/24 bg-[#f4cf83]/12 px-3 py-1.5 text-sm font-bold text-[#f4cf83]">
-              <Sparkles size={15} />
-              星轨衣柜预览
-            </div>
-            <h2 className="text-3xl font-black leading-tight text-[#fffaf0] sm:text-4xl">
-              同一位 Q 版星轨少女，多种陪伴形态。
-            </h2>
-            <p className="mt-4 text-base leading-7 text-[#cfc6b5]">
-              从光羽礼服到星斗斗篷，她会随着羁绊成长解锁新的样子。每套形象都有自己的表情状态，不只是站在旁边，而是在回应你当前的仪式。
-            </p>
-          </div>
-          <div className="mt-6 grid grid-cols-2 gap-2 text-xs font-bold text-[#eadfcc]">
-            {looks.map(({ name }) => (
-              <div key={name} className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-2 text-center">
-                {name}
-              </div>
+                <h3 className="text-xl font-black">{title}</h3>
+                <p className="mt-3 text-sm font-semibold leading-6 text-[#b9c2d4]">{copy}</p>
+              </article>
             ))}
           </div>
-        </div>
-        <div className="grid gap-3 rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_50%_0%,rgba(244,207,131,0.22),transparent_38%),linear-gradient(145deg,#fff7e8,#ede8ff)] p-3 sm:grid-cols-2 sm:p-4">
-          {looks.map((look) => (
-            <div
-              key={look.outfit}
-              className="relative min-h-[206px] overflow-hidden rounded-[24px] border border-[#d8c7a5]/58 bg-white/54 p-3 shadow-[0_14px_32px_rgba(55,37,16,0.12),inset_0_1px_0_rgba(255,255,255,0.72)]"
-            >
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_12%,rgba(244,207,131,0.26),transparent_34%)]" />
-              <div className="relative z-10 mx-auto h-32 w-32">
-                <CompanionSprite
-                  outfit={look.outfit}
-                  expression={look.expression}
-                  action={look.action}
-                  label={`${look.name} Q 版形象`}
-                />
-              </div>
-              <div className="relative z-10 mt-1 text-center">
-                <div className="text-sm font-black text-[#2f2419]">{look.name}</div>
-                <div className="mt-1 text-xs font-semibold leading-relaxed text-[#7b6751]">{look.desc}</div>
-              </div>
+
+          <div className="overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <div className="relative overflow-hidden rounded-[26px] bg-[#070b16] p-3">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(244,207,131,0.18),transparent_28%),radial-gradient(circle_at_80%_18%,rgba(111,97,255,0.20),transparent_30%)]" />
+              <img
+                src="/landing/daily-share-preview.jpg"
+                alt="星轨牌迹分享图预览"
+                className="relative mx-auto aspect-[9/16] max-h-[570px] w-full max-w-[360px] rounded-[22px] object-cover shadow-[0_22px_60px_rgba(0,0,0,0.34)]"
+              />
+              <button
+                type="button"
+                onClick={onEnter}
+                className="relative mx-auto mt-4 inline-flex w-full max-w-[360px] items-center justify-center gap-2 rounded-full bg-white px-4 py-3 text-sm font-black text-[#151821] shadow-[0_16px_38px_rgba(0,0,0,0.22)]"
+              >
+                去生成我的今日牌迹
+                <ArrowRight size={16} />
+              </button>
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function RevenuePath({ onEnter }: { onEnter: () => void }) {
+function TrustAndDownload({ onEnter }: { onEnter: () => void }) {
   return (
-    <section id="ritual" className="px-5 pb-24 sm:px-8 lg:px-12">
-      <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-[34px] border border-[#f4cf83]/24 bg-[#f4cf83]/12 p-7 shadow-[0_18px_54px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[20px] bg-[#f4cf83] text-[#0b0910]">
-            <Gem size={22} />
+    <section className="px-5 py-18 sm:px-8 sm:py-24 lg:px-12">
+      <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+        <div>
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-[#fff3d8] px-3 py-1.5 text-sm font-black text-[#9b650d]">
+            <ShieldCheck size={15} />
+            不玄乎的安全感
           </div>
-          <h2 className="text-3xl font-black text-[#fffaf0] sm:text-4xl">开始你的星轨仪式</h2>
-          <p className="mt-5 text-base leading-7 text-[#eadfcc]">
-            在这里，你可以问一个正在困扰你的问题，也可以记录今天的心情。星轨会把牌面、命理和你的表达放在一起，给出一段更靠近你的回答。
+          <h2 className="max-w-xl text-3xl font-black leading-tight text-[#151821] sm:text-5xl">
+            温柔，但不装神秘。陪伴，但不越界。
+          </h2>
+          <p className="mt-5 max-w-xl text-base font-semibold leading-8 text-[#5d6678]">
+            星轨适合那些不想被一句“命运如此”糊弄的人。它更像一个每天陪你整理情绪的小工具：有仪式感，也有边界感。
           </p>
-          <button
-            onClick={onEnter}
-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#f4cf83] px-5 py-3 font-black text-[#0b0910] transition hover:-translate-y-0.5 hover:bg-[#ffe0a0]"
-          >
-            现在去体验
-            <ArrowRight size={18} />
-          </button>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          {ritualSteps.map(([title, copy], index) => (
-            <div
-              key={title}
-              className="rounded-[30px] border border-white/12 bg-white/[0.065] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] backdrop-blur-2xl"
-            >
-              <div className="mb-8 flex items-center justify-between gap-3 text-sm font-bold text-[#f4cf83]">
-                <span>{title}</span>
-                {index === 0 ? <Stars size={15} /> : index === 1 ? <History size={15} /> : <Sparkles size={15} />}
-              </div>
-              <p className="text-sm leading-6 text-[#cfc6b5]">{copy}</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {trustItems.map((item) => (
+            <div key={item} className="flex items-center gap-3 rounded-[24px] border border-[#dde4ef] bg-white p-4 shadow-[0_14px_34px_rgba(82,92,126,0.09)]">
+              <CheckCircle2 className="shrink-0 text-[#17a7b8]" size={20} />
+              <span className="text-sm font-black text-[#273041]">{item}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="mx-auto mt-14 max-w-6xl rounded-[34px] bg-[linear-gradient(135deg,#151821,#2d2767_48%,#087a8f)] p-6 text-white shadow-[0_24px_80px_rgba(21,24,33,0.24)] sm:p-8">
+        <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
+          <div>
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[18px] bg-white/12">
+              <Download size={22} />
+            </div>
+            <h2 className="text-3xl font-black sm:text-4xl">准备好，把今天交给一张牌。</h2>
+            <p className="mt-3 max-w-2xl text-sm font-semibold leading-7 text-white/74">
+              先从每日运势开始。喜欢它，再让星轨继续记住你的牌迹、日记和选择。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onEnter}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-base font-black text-[#151821] shadow-[0_16px_42px_rgba(255,255,255,0.18)] transition hover:-translate-y-0.5 md:w-auto"
+          >
+            进入星轨
+            <HeartHandshake size={18} />
+          </button>
         </div>
       </div>
     </section>

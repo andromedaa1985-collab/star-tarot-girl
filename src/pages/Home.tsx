@@ -23,6 +23,7 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  User,
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -2521,13 +2522,13 @@ export default function Home() {
                 type="button"
                 onClick={() => {
                   setShowPetMenu(false);
-                  navigate('/app/collection');
+                  navigate('/app/profile');
                 }}
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
-                <Sparkles size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">图鉴</span>
-                <span className="text-[9px] text-apple-text-muted">记忆</span>
+                <User size={18} />
+                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">我的</span>
+                <span className="text-[9px] text-apple-text-muted">账户</span>
               </button>
 
               <button

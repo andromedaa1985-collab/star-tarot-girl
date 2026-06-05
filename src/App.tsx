@@ -21,6 +21,8 @@ import Guardian from './pages/Guardian';
 import Analytics from './pages/Analytics';
 import { getStoredAccountSession } from './lib/accountClient';
 
+const LANDING_INTRO_STORAGE_KEY = 'railstar_landing_intro_seen_v1';
+
 function App() {
   return (
     <AppErrorBoundary>
@@ -94,6 +96,10 @@ function RequireAccount({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const session = getStoredAccountSession();
 
+  if (location.pathname === '/app' && !hasSeenLandingIntro()) {
+    return <Navigate to="/" replace />;
+  }
+
   if (!session) {
     const next = `${location.pathname}${location.search}`;
     return <Navigate to={`/auth?next=${encodeURIComponent(next)}`} replace />;
@@ -105,6 +111,14 @@ function RequireAccount({ children }: { children: React.ReactNode }) {
       {children}
     </>
   );
+}
+
+function hasSeenLandingIntro() {
+  try {
+    return window.localStorage.getItem(LANDING_INTRO_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 export default App;
