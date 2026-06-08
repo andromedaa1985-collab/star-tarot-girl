@@ -339,6 +339,22 @@ const NEW_READING_KEYWORDS = [
   'spread',
 ];
 
+const CURRENT_READING_REFERENCE_KEYWORDS = [
+  '刚才',
+  '刚刚',
+  '这张',
+  '这几张',
+  '这组牌',
+  '这张牌',
+  '这几张牌',
+  '当前',
+  '上一张',
+  '上一次',
+  '牌面',
+  '抽到的牌',
+  '这次牌',
+];
+
 const CURRENT_READING_KEYWORDS = [
   '解读',
   '解释',
@@ -359,8 +375,33 @@ const CURRENT_READING_KEYWORDS = [
   'explain',
 ];
 
+const CASUAL_CHAT_KEYWORDS = [
+  '你好',
+  '在吗',
+  '谢谢',
+  '感谢',
+  '哈哈',
+  '嘿嘿',
+  '宝子',
+  'honey',
+  '聊聊',
+  '陪我',
+  '你是谁',
+  '你叫什么',
+  '怎么用',
+  '测试',
+  '没事',
+];
+
 const includesKeyword = (text: string, keywords: string[]) =>
   keywords.some((keyword) => text.toLowerCase().includes(keyword.toLowerCase()));
+
+const isCasualChatQuestion = (question: string) => {
+  const normalized = question.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.length <= 18 && includesKeyword(normalized, CASUAL_CHAT_KEYWORDS)) return true;
+  return /^(hi|hello|hey|test|ok|thanks|thank you)[!.。！ ]*$/i.test(normalized);
+};
 
 const DAILY_FORTUNE_KEYWORDS = [
   '今日运势',
@@ -464,9 +505,12 @@ const buildTarotContextPolicy = (
 };
 
 const shouldCreateNewReading = (question: string, hasCurrentReading: boolean) => {
-  if (hasCurrentReading && includesKeyword(question, CURRENT_READING_KEYWORDS)) return false;
+  if (!hasCurrentReading) return true;
+  const normalized = question.trim();
+  if (includesKeyword(normalized, CURRENT_READING_REFERENCE_KEYWORDS)) return false;
   if (includesKeyword(question, NEW_READING_KEYWORDS)) return true;
-  return !hasCurrentReading;
+  if (includesKeyword(normalized, CURRENT_READING_KEYWORDS)) return false;
+  return false;
 };
 
 const getActiveProfile = (profiles: UserProfile[], activeProfileId: string | null) =>
@@ -625,7 +669,7 @@ const buildCurrentReadingPrompt = (
     ? `上一轮问题：${currentReading.question}
 已有牌面：${currentReading.cards}
 上一轮摘要：${currentReading.summary}`
-    : `当前牌图：${currentCardImage || '暂无明确牌图'}`;
+    : `当前还没有可继续的牌面。用户可能只是想聊天，也可能需要你引导他从一个具体问题开始。当前牌图：${currentCardImage || '暂无明确牌图'}`;
   const modeHint = isInternetMode
     ? '如果用户追问涉及现实信息，请提醒需要结合最新事实判断。'
     : '不需要联网，专注于已有牌面、情绪和选择。';
@@ -634,20 +678,28 @@ const buildCurrentReadingPrompt = (
 
 ${currentContext}
 
-请不要重新抽牌，也不要假装出现了新牌。基于已有牌面继续解读，语气客观但温柔，像一位塔罗少女在轻声陪伴用户。不要使用 Markdown 星号、加粗符号或井号标题。
-回答控制在 3 段以内：先接住这次追问，再说明它和已有牌面的关系，最后给一个“今天先...”的小动作。
+请不要重新抽牌，也不要假装出现了新牌。你现在是在和用户继续对话，不是在重新生成一份报告。
+语气像星轨塔罗少女：温柔、会接话、能安慰，但不要机械套模板。不要使用 Markdown 星号、加粗符号或井号标题。
+
+如果用户是在问刚才这张牌、牌意、为什么或怎么办，就沿着已有牌面继续解释。
+如果用户只是在表达情绪、闲聊、吐槽、感谢、补充近况，先像真人一样回应这句话，再轻轻把它和上一轮牌面或今天的小动作接起来；不要硬写“核心判断/牌面关系/今天先做”。
+如果用户的问题已经明显变成新的占卜主题，先提醒“这更像一个新问题，可以重新抽一张牌看”，然后给一个很短的过渡建议，不要强行用旧牌回答所有内容。
+
+回答通常 2 到 4 个自然短段落。第一句必须直接回应用户这句话，不要从“根据牌面”开头。结尾给一句能继续聊下去的开放式回应，或者一个 10 分钟内能做的小动作。
 ${modeHint}`;
 };
 
 const fallbackCurrentReadingAnswer = (question: string, currentReading?: TarotReading) => {
   if (!currentReading) {
-    return '现在还没有可继续解读的牌。你可以先抽一张牌，我再沿着那张牌陪你往下看。';
+    return `我在的。你刚刚说的是「${question}」，我先不急着把它变成一张牌。
+
+如果你只是想聊，我可以陪你慢慢把现在的状态说清楚；如果你想占卜，可以直接问一个具体问题，比如“今天我最该先稳住什么”。`;
   }
   return `我先不重新抽牌，就沿着刚才这组牌继续看。
 
-你问的是「${question}」。这组牌的核心不是给你一个立刻冲出去执行的答案，而是提醒你先把问题拆小：哪一部分是事实，哪一部分只是你害怕它会发生。
+你刚刚说的是「${question}」。我会先接住这句话，不急着把它又变成一份报告。刚才这组牌可以当成一个背景：它提醒你别急着逼自己立刻得出结论，先看清这句话背后真正让你难受的点。
 
-今天先做一个动作：把刚才那张牌对应到一个现实选择上，只问自己“下一步最小的动作是什么”。`;
+如果你只是想聊，我就在这里陪你把它慢慢说清楚；如果你想继续占卜，我们也可以把它当成一个新问题重新抽一张牌。今天先做一个很小的动作：把这句话改写成“我现在最想被理解的是……”，写完先别评判它。`;
 };
 
 const MEMORY_WINDOW_MS = 7 * 86400000;
@@ -1832,8 +1884,9 @@ export default function Home() {
     const currentReading = tarotReadings[0];
     const hasCurrentReading = Boolean(currentReading || hasDrawnCard);
     const mode = options.mode ?? 'auto';
+    const shouldChatOnly = mode === 'auto' && isCasualChatQuestion(question);
     const shouldDraw =
-      mode === 'draw' || (mode === 'auto' && shouldCreateNewReading(question, hasCurrentReading));
+      mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading));
     const isDailyFortune = shouldDraw && isDailyFortuneQuestion(question);
     const cards = shouldDraw ? drawCards(getDrawCount(question)) : [];
     const currentImages = currentReading?.cardImages?.length
@@ -2446,7 +2499,7 @@ export default function Home() {
               key={item.label}
               type="button"
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => handleSend(item.prompt)}
+              onClick={() => handleSend(item.prompt, { mode: 'draw' })}
               className="shrink-0 rounded-[14px] border border-[#eadcc8]/64 bg-white/52 px-2.5 py-1.5 text-[11px] font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64 sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
             >
               {item.label}
@@ -3273,7 +3326,7 @@ export default function Home() {
               {QUICK_PROMPTS.map((item) => (
                 <button
                   key={item.label}
-                  onClick={() => handleSend(item.prompt)}
+                  onClick={() => handleSend(item.prompt, { mode: 'draw' })}
                   disabled={isThinking}
                   className="flex h-8 min-w-0 items-center justify-center rounded-[16px] border border-[#eadcc8]/64 bg-[#fff8ee]/58 px-2 text-[12px] font-medium text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] transition-colors hover:text-[#241c14] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-white/52 dark:hover:text-white"
                 >
@@ -3908,7 +3961,7 @@ export default function Home() {
               {QUICK_PROMPTS.map((item) => (
                 <button
                   key={item.label}
-                  onClick={() => handleSend(item.prompt)}
+                  onClick={() => handleSend(item.prompt, { mode: 'draw' })}
                   disabled={isThinking}
                   className="flex h-6 shrink-0 items-center justify-center rounded-full bg-white/34 px-2 text-[10px] font-normal text-apple-text-muted shadow-[0_5px_12px_rgba(87,61,28,0.05),inset_0_1px_0_rgba(255,255,255,0.34)] transition-colors hover:text-apple-text disabled:opacity-50 dark:bg-white/[0.05]"
                 >
