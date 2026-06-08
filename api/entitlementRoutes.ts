@@ -33,6 +33,9 @@ type EntitlementRecord = {
 const ENTITLEMENT_STORE_NAME = "astro-entitlements";
 const ENTITLEMENT_LOCAL_DIR = ".data/entitlements";
 const DEFAULT_ENERGY = 5;
+const BUILTIN_TESTER_REDEEM_CODE_HASHES = [
+  "8a6fa05a5c3f6c71b18b47fbf268b2e18cef6a7fa73f8820a9703ab65d2c70d1",
+];
 
 type ChatEntitlementType = "tarot_message" | "daily_deep";
 
@@ -77,15 +80,14 @@ export function registerEntitlementRoutes(app: express.Express) {
       const code = normalizeRedeemCode(req.body?.code);
       if (!code) return res.status(400).json({ error: { message: "请输入兑换码。" } });
 
-      const allowedCodes = getTesterRedeemCodes();
-      if (allowedCodes.length === 0) {
+      const codeHash = hashCode(code);
+      if (!hasTesterRedeemCodes()) {
         return res.status(503).json({ error: { message: "兑换码服务暂未配置。" } });
       }
-      if (!allowedCodes.includes(code)) {
+      if (!isTesterRedeemCodeAllowed(code, codeHash)) {
         return res.status(400).json({ error: { message: "兑换码无效，请检查后再试。" } });
       }
 
-      const codeHash = hashCode(code);
       const record = await readEntitlementRecord(user.id);
       if (!record.redeemedCodeHashes.includes(codeHash)) {
         record.redeemedCodeHashes.push(codeHash);
@@ -291,6 +293,28 @@ function getTesterRedeemCodes() {
     .split(",")
     .map((code) => normalizeRedeemCode(code))
     .filter(Boolean);
+}
+
+function getTesterRedeemCodeHashes() {
+  const envHashes = (process.env.ASTRORAIL_TESTER_REDEEM_CODE_HASHES || process.env.TESTER_REDEEM_CODE_HASHES || "")
+    .split(",")
+    .map((hash) => normalizeRedeemCodeHash(hash))
+    .filter(Boolean);
+  return [...envHashes, ...BUILTIN_TESTER_REDEEM_CODE_HASHES];
+}
+
+function hasTesterRedeemCodes() {
+  return getTesterRedeemCodes().length > 0 || getTesterRedeemCodeHashes().length > 0;
+}
+
+function isTesterRedeemCodeAllowed(code: string, codeHash: string) {
+  return getTesterRedeemCodes().includes(code) || getTesterRedeemCodeHashes().includes(codeHash);
+}
+
+function normalizeRedeemCodeHash(value: unknown) {
+  if (typeof value !== "string") return "";
+  const hash = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(hash) ? hash : "";
 }
 
 function hashCode(code: string) {

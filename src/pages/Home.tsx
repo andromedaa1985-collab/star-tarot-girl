@@ -879,6 +879,90 @@ const formatArchiveDate = (date: string, options: Intl.DateTimeFormatOptions = {
 
 const getPrimaryCardName = (cards: string) => cards.split(/[，,、]/)[0]?.trim() || '未记录牌面';
 
+type ReadingShareHook = {
+  headline: string;
+  state: string;
+  subtitle: string;
+};
+
+const READING_SHARE_HOOK_RULES: Array<ReadingShareHook & { keywords: string[] }> = [
+  {
+    state: '嘴硬心软',
+    headline: '别急着证明你不在意',
+    subtitle: '有些在意不用马上说出口，先看清它把你带去了哪里。',
+    keywords: ['感情', '喜欢', '暧昧', '复合', '关系', '对方', '他', '她', '消息', '联系', '表白'],
+  },
+  {
+    state: '低电量重启中',
+    headline: '你不是没方向，是太累了',
+    subtitle: '今天先把能量收回来，再决定要往哪里走。',
+    keywords: ['累', '疲惫', '耗', '低电量', '休息', '睡', '压力', '撑', '透支', '倦'],
+  },
+  {
+    state: '外稳内乱',
+    headline: '今天先把自己从情绪里捞出来',
+    subtitle: '不是所有答案都要立刻出现，先让心里那团乱降下来。',
+    keywords: ['乱', '焦虑', '不安', '烦', '慌', '情绪', '崩', '内耗', '失控', '委屈'],
+  },
+  {
+    state: '过载但清醒',
+    headline: '今天别急着证明自己',
+    subtitle: '你已经做了很多，今天更重要的是分清主次。',
+    keywords: ['工作', '事业', '项目', '赚钱', '钱', '任务', '老板', '同事', '效率', '忙'],
+  },
+  {
+    state: '卡在路口',
+    headline: '先选能让你呼吸顺一点的路',
+    subtitle: '纠结不是没用，它在提醒你：这次选择真的和你有关。',
+    keywords: ['选择', '要不要', '怎么办', '方向', '机会', '决定', '纠结', '选', '还是'],
+  },
+  {
+    state: '边界感补课中',
+    headline: '别把别人的情绪背到自己身上',
+    subtitle: '温柔不是无限让步，今天可以先把边界放回来。',
+    keywords: ['边界', '拒绝', '讨好', '别人', '忍', '迁就', '责任', '沟通', '冲突'],
+  },
+  {
+    state: '慢慢清醒中',
+    headline: '今天先照顾那个快撑不住的自己',
+    subtitle: '你不用一次想通全部，先照顾此刻最真实的一点。',
+    keywords: ['自己', '状态', '未来', '迷茫', '低落', '人生', '心态', '改变'],
+  },
+];
+
+const FALLBACK_SHARE_HOOKS: ReadingShareHook[] = [
+  {
+    state: '慢慢清醒中',
+    headline: '每天一张牌，替你把今天最乱的情绪说清楚',
+    subtitle: '先看见自己，再决定今天要怎么过。',
+  },
+  {
+    state: '轻轻松手中',
+    headline: '今天不必把所有事都想明白',
+    subtitle: '先把最卡的那一点放到光里，答案会慢一点浮出来。',
+  },
+  {
+    state: '低压运行中',
+    headline: '你可以慢一点，但别再为难自己',
+    subtitle: '今天的重点不是赢过谁，而是把自己稳稳接住。',
+  },
+];
+
+const getStableIndex = (text: string, length: number) => {
+  if (length <= 0) return 0;
+  const value = Array.from(text || 'astrorail').reduce((total, char) => (total * 33 + char.charCodeAt(0)) >>> 0, 5381);
+  return value % length;
+};
+
+const getReadingShareHook = (reading: Pick<TarotReading, 'question' | 'cards' | 'summary'>): ReadingShareHook => {
+  const text = `${reading.question || ''} ${reading.cards || ''} ${reading.summary || ''}`;
+  const matched = READING_SHARE_HOOK_RULES.find((rule) => rule.keywords.some((keyword) => text.includes(keyword)));
+  if (matched) {
+    return { state: matched.state, headline: matched.headline, subtitle: matched.subtitle };
+  }
+  return FALLBACK_SHARE_HOOKS[getStableIndex(text, FALLBACK_SHARE_HOOKS.length)];
+};
+
 const buildTarotArchiveReport = (
   readings: TarotReading[],
   messages: Message[] = [],
@@ -918,12 +1002,21 @@ const buildTarotArchiveReport = (
   )
     .sort((a, b) => b[1] - a[1])
     .map(([card]) => card);
+  const emotionRank = Object.entries(
+    scope.reduce<Record<string, number>>((acc, reading) => {
+      const state = getReadingShareHook(reading).state;
+      acc[state] = (acc[state] || 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const topEmotion = emotionRank[0]?.[0] || '等待今日牌';
 
   const keywords = [
+    topEmotion,
     ...keywordScores.sort((a, b) => b.count - a.count).map((item) => item.label),
     ...diaryTrends.map((trend) => trend.label),
     ...cardRank.slice(0, 2),
-  ].filter((keyword, index, list) => list.indexOf(keyword) === index).slice(0, 5);
+  ].filter((keyword, index, list) => keyword && keyword !== '等待今日牌' && list.indexOf(keyword) === index).slice(0, 5);
 
   const timeline = scope.slice(0, 5).map((reading) => ({
     id: reading.id,
@@ -935,14 +1028,6 @@ const buildTarotArchiveReport = (
 
   const topCard = cardRank[0] || '还没有代表牌';
   const themeLabel = theme?.label || keywordScores[0]?.label || '自我状态';
-  const diaryMoodRank = Object.entries(
-    recentDiaries.reduce<Record<string, number>>((acc, entry) => {
-      const mood = getMoodLabel(entry.mood);
-      acc[mood] = (acc[mood] || 0) + 1;
-      return acc;
-    }, {}),
-  ).sort((a, b) => b[1] - a[1]);
-  const topDiaryMood = diaryMoodRank[0]?.[0] || '等待日记';
   const topDiaryTrend = diaryTrends[0];
   const profileArchiveSummary = activeProfile ? getBaziResultSummary(baziResult) : '';
   const latestGuardian = recentGuardian[0];
@@ -953,17 +1038,15 @@ const buildTarotArchiveReport = (
       desc: scope.length >= 2 ? '牌迹里已经出现可追踪的重复问题。' : '先积累到 2-3 次牌迹，主题会更稳定。',
     },
     {
-      label: '情绪底色',
-      value: topDiaryTrend
-        ? `${topDiaryTrend.label} · ${topDiaryTrend.entryCount} 次`
-        : recentDiaries.length
-          ? `${topDiaryMood} · ${recentDiaries.length} 篇`
-          : '等待日记',
+      label: '最常出现的情绪',
+      value: topEmotion,
       desc: topDiaryTrend
         ? `${topDiaryTrend.moodSummary}，${topDiaryTrend.evidence}。`
         : recentDiaries.length
           ? `最近日记提到「${getShortText(recentDiaries[0].content, 28)}」。`
-          : '写下心情后，复盘会更像在看真实的你。',
+          : scope.length
+            ? `从最近 ${scope.length} 次牌迹里反复读到的状态。`
+            : '连续抽牌后，这里会出现你的本周情绪标签。',
     },
     {
       label: '守护回声',
@@ -981,6 +1064,7 @@ const buildTarotArchiveReport = (
       : null,
   ].filter(Boolean) as TarotArchiveReport['signals'];
   const evidence = [
+    scope.length ? `本周情绪标签：${topEmotion}` : '',
     scope[0] ? `最近牌迹：${getShortText(scope[0].question, 34)} / ${getShortText(scope[0].cards, 24)}` : '',
     topDiaryTrend ? `日记趋势：${topDiaryTrend.label}，${topDiaryTrend.evidence}` : '',
     activeProfile ? `活跃档案：${activeProfile.name}${profileArchiveSummary ? `，${getShortText(profileArchiveSummary, 46)}` : ''}` : '',
@@ -999,7 +1083,7 @@ const buildTarotArchiveReport = (
         ].filter(Boolean);
 
   return {
-    title: scope.length > 0 ? `${themeLabel}观察档案` : '新的牌迹档案',
+    title: scope.length > 0 ? `${themeLabel} · 7 日轨迹` : '新的 7 日轨迹',
     dateRangeLabel,
     recordCount,
     keywords: keywords.length > 0 ? keywords : ['等待第一张牌'],
@@ -1009,7 +1093,7 @@ const buildTarotArchiveReport = (
     advice,
     prompt:
       scope.length > 0
-        ? `结合我这份「${themeLabel}观察档案」和最近牌迹，帮我继续看下一步最该注意什么。`
+        ? `结合我这份「${themeLabel} · 7 日轨迹」和最近牌迹，帮我继续看下一步最该注意什么。`
         : '帮我抽一张今日牌，作为我的第一份牌迹档案。',
   };
 };
@@ -1364,9 +1448,9 @@ export default function Home() {
   });
 
   const weeklyReportText = useMemo(() => {
-    if (weekReadings.length === 0) return '本周还没有足够牌迹，先抽一张今日牌。';
+    if (weekReadings.length === 0) return '本周还没有足够牌迹，先用今日牌留下第一条轨迹。';
     if (!plusActive && weekReadings.length >= 3) {
-      return `本周已有 ${weekReadings.length} 次牌迹。Plus 会把高频问题、代表牌和情绪走向整理成完整周报。`;
+      return `本周已有 ${weekReadings.length} 次牌迹。7 日轨迹报告会整理：最常出现的情绪、反复卡住的主题，以及星轨给你的本周关键词。`;
     }
     const themeBuckets = [
       { label: '感情关系', keywords: ['感情', '恋爱', '喜欢', '关系', '复合', '桃花'] },
@@ -1391,13 +1475,21 @@ export default function Home() {
           return acc;
         }, {}),
       ).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || '还没有代表牌';
+    const topState =
+      Object.entries(
+        weekReadings.reduce<Record<string, number>>((acc, reading) => {
+          const state = getReadingShareHook(reading).state;
+          acc[state] = (acc[state] || 0) + 1;
+          return acc;
+        }, {}),
+      ).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || '慢慢清醒中';
 
-    return `这周你更常问「${topTheme?.count ? topTheme.label : '自我状态'}」，代表牌是「${topCard}」。`;
+    return `这周你最常绕回「${topTheme?.count ? topTheme.label : '自我状态'}」，情绪标签更像「${topState}」，代表牌是「${topCard}」。`;
   }, [weekReadings, plusActive]);
   const weeklyReviewText = useMemo(() => {
-    if (weeklyMaterialCount === 0) return '本周还没有足够线索，先抽一张今日牌。';
+    if (weeklyMaterialCount === 0) return '本周还没有足够线索，先抽一张今日牌，留下第一条轨迹。';
     if (!plusActive && weeklyReviewReady) {
-      return `本周已经沉淀 ${weeklyMaterialCount} 条材料。Plus 会把牌迹、日记和守护回应整理成完整 7 日复盘。`;
+      return `本周已经沉淀 ${weeklyMaterialCount} 条材料。Plus 会生成完整 7 日轨迹报告：你这一周最常出现的情绪、反复卡住的主题，以及星轨给你的本周关键词。`;
     }
     const diaryLine = weekDiaries[0] ? `最近日记是${getMoodLabel(weekDiaries[0].mood)}` : '日记线索还在等待补充';
     const guardianLine = weekGuardianMessages[0] ? '守护回应已经纳入复盘' : '守护回应还未形成稳定线索';
@@ -1951,6 +2043,7 @@ export default function Home() {
     canvas.height = 10;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const shareHook = getReadingShareHook(reading);
 
     ctx.font = '800 38px sans-serif';
     const questionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', 488);
@@ -2016,12 +2109,18 @@ export default function Home() {
 
     try {
       const cardX = 86;
-      const cardY = 268;
       const cardWidth = 344;
       const cardHeight = 536;
       const sideX = 486;
       const sideWidth = 506;
       const contentWidth = 908;
+
+      ctx.font = '900 58px sans-serif';
+      const posterHeadlineLines = getCanvasTextLines(ctx, shareHook.headline, 890).slice(0, 2);
+      ctx.font = '600 25px sans-serif';
+      const posterSubtitleLines = getCanvasTextLines(ctx, shareHook.subtitle, 890).slice(0, 2);
+      const headerBottom = 314 + posterHeadlineLines.length * 66 + posterSubtitleLines.length * 34;
+      const cardY = Math.max(430, headerBottom + 34);
 
       ctx.font = '800 38px sans-serif';
       const posterQuestionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', sideWidth);
@@ -2182,6 +2281,22 @@ export default function Home() {
       ctx.fillStyle = 'rgba(244,207,131,0.36)';
       ctx.fillRect(86, 195, 116, 3);
 
+      const stateText = `今日状态 · ${shareHook.state}`;
+      ctx.font = '800 24px sans-serif';
+      const stateWidth = Math.min(560, ctx.measureText(stateText).width + 56);
+      const stateGradient = ctx.createLinearGradient(86, 222, 86 + stateWidth, 274);
+      stateGradient.addColorStop(0, 'rgba(244,207,131,0.95)');
+      stateGradient.addColorStop(1, 'rgba(124,156,255,0.58)');
+      drawRoundRect(86, 220, stateWidth, 52, 26, stateGradient, 'rgba(255,255,255,0.22)', 1);
+      ctx.fillStyle = '#111626';
+      ctx.fillText(stateText, 114, 254);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 58px sans-serif';
+      const headlineBottom = drawCanvasLines(ctx, posterHeadlineLines, 86, 340, 66);
+      ctx.fillStyle = 'rgba(255,255,255,0.68)';
+      ctx.font = '600 25px sans-serif';
+      drawCanvasLines(ctx, posterSubtitleLines, 88, headlineBottom + 14, 34);
+
       ctx.shadowColor = 'rgba(0,0,0,0.46)';
       ctx.shadowBlur = 34;
       ctx.shadowOffsetY = 20;
@@ -2250,8 +2365,8 @@ export default function Home() {
       const sharedNatively = await shareImageWithNativeSheet({
         blob,
         fileName,
-        title: '我的星轨牌迹',
-        text: '我在星轨塔罗少女留下了一次牌迹。',
+        title: shareHook.headline,
+        text: `${shareHook.state}｜${shareHook.subtitle}`,
         dialogTitle: '分享星轨牌迹',
       });
       if (sharedNatively) return;
@@ -2259,7 +2374,7 @@ export default function Home() {
       const file = new File([blob], fileName, { type: 'image/png' });
       if (navigator.canShare?.({ files: [file] })) {
         try {
-          await navigator.share({ title: '我的星轨牌迹', files: [file] });
+          await navigator.share({ title: shareHook.headline, text: `${shareHook.state}｜${shareHook.subtitle}`, files: [file] });
           return;
         } catch (error: any) {
           if (error?.name === 'AbortError') return;
@@ -4387,8 +4502,8 @@ function UpgradePromptModal({
     },
     weekly: {
       title: '你已经有材料做复盘了',
-      desc: 'Plus 会整理高频问题、代表牌和本周行动建议，让你看到自己到底卡在哪里。',
-      cta: '生成完整周报',
+      desc: 'Plus 会整理最常出现的情绪、反复卡住的主题和本周关键词，让你看到自己到底卡在哪里。',
+      cta: '生成 7 日轨迹',
     },
   }[reason];
   const paidWhy = {
@@ -4404,13 +4519,13 @@ function UpgradePromptModal({
     },
     weekly: {
       title: '你已经有材料做 7 日复盘了',
-      desc: 'Plus 会把牌迹、日记和守护回访接成一份完整报告，让你看到自己真正反复卡住的地方。',
+      desc: 'Plus 会把牌迹、日记和守护回访接成一份 7 日轨迹报告，让你看到自己真正反复卡住的地方。',
       cta: '查看完整复盘',
     },
   }[reason];
   const valuePillars = [
     { title: '长期记忆', desc: '持续沉淀' },
-    { title: '7 日复盘', desc: '看清反复主题' },
+    { title: '7 日轨迹', desc: '情绪与主题' },
     { title: '守护回访', desc: '每天接住近况' },
   ];
 
@@ -4695,7 +4810,7 @@ function ReadingLog({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
-                      本周档案
+                      7 日轨迹报告
                     </div>
                     <div className="mt-1 text-xl font-black leading-snug text-apple-text">{archiveReport.title}</div>
                     <div className="mt-1 text-xs text-apple-text-muted">
@@ -4805,7 +4920,7 @@ function ReadingLog({
                     onClick={onUpgrade}
                     className="mt-3 w-full rounded-full border border-[#F4CF83]/24 bg-apple-surface px-3 py-2 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
                   >
-                    解锁完整周报和 200 条牌迹
+                    解锁完整 7 日轨迹和 200 条牌迹
                   </button>
                 )}
               </div>
@@ -4820,33 +4935,43 @@ function ReadingLog({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {readings.slice(0, 20).map((reading) => (
-                    <div key={reading.id} className="rounded-[26px] border border-apple-border bg-apple-surface-hover p-3">
-                      <div className="flex gap-3">
-                        {reading.cardImage && (
-                          <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-bold leading-snug text-apple-text">{reading.question}</div>
-                          <div className="mt-1 text-xs leading-snug text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
-                          <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted">
-                            {getDisplaySummary(reading)}
-                          </p>
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="text-[10px] text-apple-text-muted">
-                              {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                  {readings.slice(0, 20).map((reading) => {
+                    const displaySummary = getDisplaySummary(reading);
+                    const shareHook = getReadingShareHook({ ...reading, summary: displaySummary });
+                    return (
+                      <div key={reading.id} className="rounded-[26px] border border-apple-border bg-apple-surface-hover p-3">
+                        <div className="flex gap-3">
+                          {reading.cardImage && (
+                            <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="rounded-full border border-[#F4CF83]/28 bg-[#F4CF83]/14 px-2 py-0.5 text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]">
+                                {shareHook.state}
+                              </span>
+                              <span className="line-clamp-1 text-xs font-black text-apple-text">{shareHook.headline}</span>
                             </div>
-                            <button
-                              onClick={() => onShare({ ...reading, summary: getDisplaySummary(reading) })}
-                              className="rounded-full border border-apple-border bg-apple-surface px-2.5 py-1 text-[10px] font-bold text-apple-text-muted"
-                            >
-                              生成分享图
-                            </button>
+                            <div className="mt-1.5 text-sm font-bold leading-snug text-apple-text">{reading.question}</div>
+                            <div className="mt-1 text-xs leading-snug text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
+                            <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted">
+                              {displaySummary}
+                            </p>
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <div className="text-[10px] text-apple-text-muted">
+                                {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                              </div>
+                              <button
+                                onClick={() => onShare({ ...reading, summary: displaySummary })}
+                                className="rounded-full border border-apple-border bg-apple-surface px-2.5 py-1 text-[10px] font-bold text-apple-text-muted"
+                              >
+                                生成分享图
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
