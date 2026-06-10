@@ -104,6 +104,13 @@ app.get("/api/relationship/invites/:token", (req, res) => {
 app.post("/api/deepseek/chat", async (req, res) => {
   try {
     const apiKey = requireEnv("DEEPSEEK_API_KEY", "DeepSeek API Key");
+    if (isDailyDeepBypassRequest(req)) {
+      return res.status(402).json({
+        error: {
+          message: "今日深解需要先解锁或开通 Plus，请通过正式深解入口继续。",
+        },
+      });
+    }
     const entitlementCharge = await prepareChatEntitlementCharge(req);
     const messages = [...(req.body.messages ?? [])];
     if (req.body.isInternetMode) {
@@ -148,6 +155,54 @@ app.post("/api/deepseek/chat", async (req, res) => {
     sendApiError(res, error);
   }
 });
+
+const DAILY_DEEP_API_STRONG_KEYWORDS = ["今日深解", "深解", "深度解读", "深度分析", "完整解读", "完整分析"];
+const DAILY_DEEP_API_DETAIL_KEYWORDS = ["讲细", "讲详细", "详细讲", "展开", "细说", "深入", "多讲一点", "再讲一点", "更完整"];
+const DAILY_DEEP_API_SUBJECT_KEYWORDS = ["今日运势", "每日运势", "今天", "今日", "这张牌", "这张", "牌面", "塔罗", "运势", "刚才"];
+
+function includesAnyKeyword(text: string, keywords: string[]) {
+  const normalized = text.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
+}
+
+function isDailyDeepIntent(text: string) {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  if (includesAnyKeyword(normalized, DAILY_DEEP_API_STRONG_KEYWORDS)) return true;
+  return includesAnyKeyword(normalized, DAILY_DEEP_API_DETAIL_KEYWORDS) && includesAnyKeyword(normalized, DAILY_DEEP_API_SUBJECT_KEYWORDS);
+}
+
+function getContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object" && "text" in part) return String((part as { text?: unknown }).text ?? "");
+      return "";
+    }).join("\n");
+  }
+  return "";
+}
+
+function getClientUserIntents(messages: unknown[]) {
+  const intents: string[] = [];
+  const intentPattern = /(?:用户这次追问|用户问题|用户原始输入)：([^\n]+)/g;
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const content = getContentText((message as { content?: unknown }).content);
+    for (const match of content.matchAll(intentPattern)) {
+      const intent = match[1]?.trim();
+      if (intent) intents.push(intent);
+    }
+  }
+  return intents;
+}
+
+function isDailyDeepBypassRequest(req: express.Request) {
+  if (req.body?.entitlement?.type !== "tarot_message") return false;
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  return getClientUserIntents(messages).some(isDailyDeepIntent);
+}
 
 function requireEnv(name: string, label: string) {
   const value = process.env[name]?.trim();

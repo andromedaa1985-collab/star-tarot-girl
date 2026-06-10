@@ -421,6 +421,17 @@ const isDailyFortuneQuestion = (question: string) => {
   return normalized === '运势' || includesKeyword(normalized, DAILY_FORTUNE_KEYWORDS);
 };
 
+const DAILY_DEEP_STRONG_KEYWORDS = ['今日深解', '深解', '深度解读', '深度分析', '完整解读', '完整分析'];
+const DAILY_DEEP_DETAIL_KEYWORDS = ['讲细', '讲详细', '详细讲', '展开', '细说', '深入', '多讲一点', '再讲一点', '更完整'];
+const DAILY_DEEP_SUBJECT_KEYWORDS = ['今日运势', '每日运势', '今天', '今日', '这张牌', '这张', '牌面', '塔罗', '运势', '刚才'];
+
+const isDailyDeepRequest = (question: string) => {
+  const normalized = question.trim();
+  if (!normalized) return false;
+  if (includesKeyword(normalized, DAILY_DEEP_STRONG_KEYWORDS)) return true;
+  return includesKeyword(normalized, DAILY_DEEP_DETAIL_KEYWORDS) && includesKeyword(normalized, DAILY_DEEP_SUBJECT_KEYWORDS);
+};
+
 const TAROT_CONTEXT_GENERAL_KEYWORDS = [
   '结合我',
   '结合我的',
@@ -937,12 +948,61 @@ type ReadingShareHook = {
   subtitle: string;
 };
 
-const READING_SHARE_HOOK_RULES: Array<ReadingShareHook & { keywords: string[] }> = [
+type ReadingShareHookCandidate = ReadingShareHook & {
+  keywords: string[];
+  cardHints?: string[];
+  position?: '正位' | '逆位';
+  weight?: number;
+};
+
+const READING_SHARE_HOOK_CANDIDATES: ReadingShareHookCandidate[] = [
   {
     state: '嘴硬心软',
     headline: '别急着证明你不在意',
     subtitle: '有些在意不用马上说出口，先看清它把你带去了哪里。',
-    keywords: ['感情', '喜欢', '暧昧', '复合', '关系', '对方', '他', '她', '消息', '联系', '表白'],
+    keywords: ['暗恋', '喜欢', '心动', '好感', '表白', '暧昧'],
+  },
+  {
+    state: '心动但不确定',
+    headline: '你不是想太多，是对方给得太少',
+    subtitle: '真正稳定的靠近，不需要你一个人反复翻译。',
+    keywords: ['暧昧', '忽冷忽热', '不确定', '试探', '喜欢', '心动', '好感'],
+  },
+  {
+    state: '等消息的人',
+    headline: '别把沉默自动翻译成答案',
+    subtitle: '没有回应的时候，先别急着替对方写完剧情。',
+    keywords: ['消息', '联系', '断联', '不回', '没回', '已读不回', '冷淡', '沉默', '冷战'],
+  },
+  {
+    state: '还没告别完',
+    headline: '想回头之前，先看清你在等什么',
+    subtitle: '有些舍不得是真的，但它不一定就是下一步。',
+    keywords: ['复合', '前任', '回头', '分手', '放下', '忘不掉', '舍不得', '旧人'],
+  },
+  {
+    state: '靠近也需要边界',
+    headline: '今天别赢道理，先保住靠近',
+    subtitle: '关系不是谁说服谁，而是两个人还能不能放松一点。',
+    keywords: ['感情', '关系', '对象', '伴侣', '沟通', '吵架', '争执', '委屈', '迁就', '边界'],
+  },
+  {
+    state: '轻轻松手中',
+    headline: '有些人不是答案，只是旧习惯',
+    subtitle: '你可以怀念，但不用把自己一直留在原地。',
+    keywords: ['放下', '离开', '结束', '释怀', '忘记', '不甘心', '舍不得'],
+  },
+  {
+    state: '卡在路口',
+    headline: '先选能让你呼吸顺一点的路',
+    subtitle: '纠结不是没用，它在提醒你：这次选择真的和你有关。',
+    keywords: ['选择', '要不要', '怎么办', '方向', '机会', '决定', '纠结', '选', '还是', '去留'],
+  },
+  {
+    state: '不敢动但想变好',
+    headline: '害怕选错的时候，先选能开始的一步',
+    subtitle: '你不需要一下子确定未来，只需要让今天别再空转。',
+    keywords: ['害怕', '怕错', '改变', '机会', '转行', '辞职', '搬家', '开始', '新方向'],
   },
   {
     state: '低电量重启中',
@@ -957,28 +1017,85 @@ const READING_SHARE_HOOK_RULES: Array<ReadingShareHook & { keywords: string[] }>
     keywords: ['乱', '焦虑', '不安', '烦', '慌', '情绪', '崩', '内耗', '失控', '委屈'],
   },
   {
+    state: '别再怪自己',
+    headline: '别把所有问题都归到自己身上',
+    subtitle: '今天先分清：哪些是你的责任，哪些只是你背久了。',
+    keywords: ['自责', '内疚', '不够好', '失败', '后悔', '做错', '否定', '怪自己'],
+  },
+  {
     state: '过载但清醒',
     headline: '今天别急着证明自己',
     subtitle: '你已经做了很多，今天更重要的是分清主次。',
     keywords: ['工作', '事业', '项目', '赚钱', '钱', '任务', '老板', '同事', '效率', '忙'],
   },
   {
-    state: '卡在路口',
-    headline: '先选能让你呼吸顺一点的路',
-    subtitle: '纠结不是没用，它在提醒你：这次选择真的和你有关。',
-    keywords: ['选择', '要不要', '怎么办', '方向', '机会', '决定', '纠结', '选', '还是'],
+    state: '启动困难中',
+    headline: '先打开那件事，不必马上做好',
+    subtitle: '今天的突破不靠用力，靠把第一步拆到足够小。',
+    keywords: ['拖延', '开始', '执行', '计划', '待办', '文档', '学习', '考试', '复习'],
   },
   {
-    state: '边界感补课中',
-    headline: '别把别人的情绪背到自己身上',
-    subtitle: '温柔不是无限让步，今天可以先把边界放回来。',
-    keywords: ['边界', '拒绝', '讨好', '别人', '忍', '迁就', '责任', '沟通', '冲突'],
+    state: '现实压力上线',
+    headline: '钱的焦虑，先从一个可控数字开始',
+    subtitle: '别让不确定把你淹没，今天先看清最小的账。',
+    keywords: ['钱', '赚钱', '收入', '花钱', '存款', '账单', '消费', '副业', '工资'],
   },
   {
-    state: '慢慢清醒中',
-    headline: '今天先照顾那个快撑不住的自己',
-    subtitle: '你不用一次想通全部，先照顾此刻最真实的一点。',
-    keywords: ['自己', '状态', '未来', '迷茫', '低落', '人生', '心态', '改变'],
+    state: '家里也要留边界',
+    headline: '亲近的人，也不能替你决定全部',
+    subtitle: '今天可以尊重他们，但别把自己的声音收得太小。',
+    keywords: ['家庭', '父母', '家人', '妈妈', '爸爸', '亲人', '催', '家里'],
+  },
+  {
+    state: '旧结构松动中',
+    headline: '不是崩了，是旧框架撑不住了',
+    subtitle: '有些变化来得突然，但它也在替你拆掉不合身的部分。',
+    keywords: ['突然', '崩', '变化', '冲击', '打乱', '推翻'],
+    cardHints: ['塔'],
+    weight: 2,
+  },
+  {
+    state: '暂停也是进度',
+    headline: '今天先别逼自己立刻有答案',
+    subtitle: '倒过来看这件事，可能比继续硬推更接近出口。',
+    keywords: ['卡住', '暂停', '等', '僵住', '没进展'],
+    cardHints: ['倒吊人'],
+    weight: 2,
+  },
+  {
+    state: '需要被好好照顾',
+    headline: '先把自己养回来，再处理世界',
+    subtitle: '今天的答案不在催促里，在你终于肯温柔一点的时候。',
+    keywords: ['照顾', '身体', '休息', '恢复', '安全感'],
+    cardHints: ['女皇', '星星'],
+  },
+  {
+    state: '轻装上路',
+    headline: '不确定也可以先迈一小步',
+    subtitle: '你不用把路看完，先确认脚下这一格是真的。',
+    keywords: ['开始', '新', '尝试', '冒险', '出发'],
+    cardHints: ['愚者'],
+  },
+  {
+    state: '雾里慢行',
+    headline: '看不清的时候，先别急着下结论',
+    subtitle: '月亮不是让你害怕，是提醒你别被想象牵着走。',
+    keywords: ['迷茫', '看不清', '怀疑', '误会', '梦', '不确定'],
+    cardHints: ['月亮'],
+  },
+  {
+    state: '换季中',
+    headline: '结束不是惩罚，是新位置腾出来了',
+    subtitle: '有些旧事到了该收尾的时候，你也可以慢慢松手。',
+    keywords: ['结束', '告别', '放下', '转变', '重来'],
+    cardHints: ['死神'],
+  },
+  {
+    state: '微光恢复中',
+    headline: '希望不是突然回来，是一点点亮起来',
+    subtitle: '今天不用强行振作，只要别把那点微光掐灭。',
+    keywords: ['希望', '恢复', '治愈', '愿望', '慢慢好'],
+    cardHints: ['星星', '太阳'],
   },
 ];
 
@@ -1006,12 +1123,60 @@ const getStableIndex = (text: string, length: number) => {
   return value % length;
 };
 
+const SHARE_SUMMARY_GENERIC_KEYWORDS = new Set([
+  '感情',
+  '关系',
+  '对象',
+  '伴侣',
+  '沟通',
+  '边界',
+  '工作',
+  '事业',
+  '任务',
+  '效率',
+  '钱',
+  '选择',
+  '方向',
+  '开始',
+  '自己',
+  '状态',
+  '未来',
+]);
+
+const countKeywordHits = (text: string, keywords: string[], weight: number) =>
+  keywords.reduce((score, keyword) => score + (keyword && text.includes(keyword) ? weight : 0), 0);
+
+const getShareHookScore = (
+  candidate: ReadingShareHookCandidate,
+  reading: Pick<TarotReading, 'question' | 'cards' | 'summary'>,
+) => {
+  const question = reading.question || '';
+  const cards = reading.cards || '';
+  const summary = reading.summary || '';
+  let score = candidate.weight || 0;
+
+  score += countKeywordHits(question, candidate.keywords, 5);
+  score += countKeywordHits(summary, candidate.keywords.filter((keyword) => !SHARE_SUMMARY_GENERIC_KEYWORDS.has(keyword)), 2);
+  score += countKeywordHits(cards, candidate.cardHints || [], 5);
+
+  if (candidate.position && cards.includes(candidate.position)) score += 2;
+  return score;
+};
+
 const getReadingShareHook = (reading: Pick<TarotReading, 'question' | 'cards' | 'summary'>): ReadingShareHook => {
   const text = `${reading.question || ''} ${reading.cards || ''} ${reading.summary || ''}`;
-  const matched = READING_SHARE_HOOK_RULES.find((rule) => rule.keywords.some((keyword) => text.includes(keyword)));
-  if (matched) {
+  const ranked = READING_SHARE_HOOK_CANDIDATES
+    .map((candidate) => ({ candidate, score: getShareHookScore(candidate, reading) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (ranked.length > 0) {
+    const bestScore = ranked[0].score;
+    const best = ranked.filter((item) => item.score === bestScore);
+    const matched = best[getStableIndex(`${text}:${bestScore}`, best.length)].candidate;
     return { state: matched.state, headline: matched.headline, subtitle: matched.subtitle };
   }
+
   return FALLBACK_SHARE_HOOKS[getStableIndex(text, FALLBACK_SHARE_HOOKS.length)];
 };
 
@@ -1314,6 +1479,7 @@ export default function Home() {
   const [showPetMenu, setShowPetMenu] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [scrollControlsActive, setScrollControlsActive] = useState(false);
   const [isDrawingCards, setIsDrawingCards] = useState(false);
   const [drawingCards, setDrawingCards] = useState<DrawnCard[]>([]);
   const [composerFocused, setComposerFocused] = useState(false);
@@ -1331,6 +1497,7 @@ export default function Home() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialChatScrollDoneRef = useRef(false);
+  const scrollControlsIdleTimerRef = useRef<number | null>(null);
   const petDragRef = useRef<{
     startX: number;
     startY: number;
@@ -1565,6 +1732,15 @@ export default function Home() {
     window.setTimeout(run, 320);
   };
 
+  const markScrollControlsActive = () => {
+    if (scrollControlsIdleTimerRef.current) window.clearTimeout(scrollControlsIdleTimerRef.current);
+    setScrollControlsActive(true);
+    scrollControlsIdleTimerRef.current = window.setTimeout(() => {
+      setScrollControlsActive(false);
+      scrollControlsIdleTimerRef.current = null;
+    }, 2000);
+  };
+
   useEffect(() => {
     const timers = PRELOAD_IMAGE_PATHS.map((src, index) =>
       window.setTimeout(() => {
@@ -1574,6 +1750,12 @@ export default function Home() {
 
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollControlsIdleTimerRef.current) window.clearTimeout(scrollControlsIdleTimerRef.current);
     };
   }, []);
 
@@ -1745,6 +1927,16 @@ export default function Home() {
     return isDailyFortuneQuestion(previousQuestion);
   };
 
+  const getLatestDailyFortuneDeepSource = () => {
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (message && isDailyFortuneResult(message, index, visibleMessages)) {
+        return { message, index };
+      }
+    }
+    return null;
+  };
+
   const handleOpenDailyDeepPlan = (planId: 'daily_fortune_deep' | 'plus_monthly') => {
     setShowDailyDeepPaywall(false);
     setAppEvents((events) => recordAppEvent(events, 'daily_deep_plan_click', { planId }));
@@ -1876,6 +2068,32 @@ export default function Home() {
     if (!question || isThinking) return;
     const accountSession = requireAccountForModelUse();
     if (!accountSession) return;
+    if ((options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
+      const source = getLatestDailyFortuneDeepSource();
+      if (source) {
+        clearInputDraft('');
+        await handleDailyDeepDive(source.message, source.index);
+        return;
+      }
+      clearInputDraft('');
+      setAutoScrollOnNextMessage(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'user' as const,
+          text: question,
+          timestamp: Date.now(),
+        },
+        {
+          id: crypto.randomUUID(),
+          role: 'ai' as const,
+          text: '今日深解需要先从一条「今日运势」展开，不会重新抽牌。你可以先点一次今日运势，看到免费版后再点“展开今日深解”。',
+          timestamp: Date.now(),
+        },
+      ]);
+      return;
+    }
     if (!plusActive && energy <= 0) {
       openUpgradePrompt('energy');
       return;
@@ -2090,20 +2308,51 @@ export default function Home() {
     recognition.start();
   };
 
+  const getDeepSummaryForReading = (reading: TarotReading) => {
+    const readingTime = Date.parse(reading.date);
+    const imageSet = new Set([reading.cardImage || '', ...(reading.cardImages || [])].filter(Boolean));
+    if (imageSet.size === 0) return '';
+
+    const candidates = messages
+      .map((message, index) => ({ message, index }))
+      .filter(({ message, index }) => {
+        if (message.role !== 'ai' || !message.text?.trim()) return false;
+        if (getPreviousUserQuestion(messages, index).trim() !== '展开今日深解') return false;
+        const imageMatched =
+          Boolean(message.cardImage && imageSet.has(message.cardImage)) ||
+          Boolean(message.cardImages?.some((image) => imageSet.has(image)));
+        if (!imageMatched) return false;
+        if (!Number.isFinite(readingTime)) return true;
+        return message.timestamp >= readingTime - 5 * 60 * 1000;
+      })
+      .sort((a, b) => {
+        if (!Number.isFinite(readingTime)) return b.message.timestamp - a.message.timestamp;
+        return Math.abs(a.message.timestamp - readingTime) - Math.abs(b.message.timestamp - readingTime);
+      });
+
+    return cleanTarotAnswer(candidates[0]?.message.text || '');
+  };
+
+  const getShareReading = (reading: TarotReading): TarotReading => {
+    const deepSummary = getDeepSummaryForReading(reading);
+    return deepSummary ? { ...reading, summary: deepSummary } : reading;
+  };
+
   const handleShareReadingCard = async (reading: TarotReading) => {
+    const shareReading = getShareReading(reading);
     const canvas = document.createElement('canvas');
     canvas.width = 1080;
     canvas.height = 10;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const shareHook = getReadingShareHook(reading);
+    const shareHook = getReadingShareHook(shareReading);
 
     ctx.font = '800 38px sans-serif';
-    const questionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', 488);
+    const questionLines = getCanvasTextLines(ctx, shareReading.question || '一次没有命名的问题', 488);
     ctx.font = '800 30px sans-serif';
-    const cardLines = getCanvasTextLines(ctx, reading.cards || '未记录牌面', 488);
+    const cardLines = getCanvasTextLines(ctx, shareReading.cards || '未记录牌面', 488);
     ctx.font = '500 30px sans-serif';
-    const summaryLines = getCanvasTextLines(ctx, reading.summary || '这次牌面已经留在档案里。', 896);
+    const summaryLines = getCanvasTextLines(ctx, shareReading.summary || '这次牌面已经留在档案里。', 896);
     const sideTextBottom = 318 + questionLines.length * 52 + 56 + cardLines.length * 44;
     const summaryTop = Math.max(880, sideTextBottom + 80);
     const canvasHeight = Math.max(1440, summaryTop + summaryLines.length * 52 + 190);
@@ -2126,14 +2375,14 @@ export default function Home() {
     ctx.fillText('星轨牌迹', 92, 120);
     ctx.fillStyle = 'rgba(255,255,255,0.72)';
     ctx.font = '600 30px sans-serif';
-    ctx.fillText(new Date(reading.date).toLocaleDateString('zh-CN'), 92, 168);
+    ctx.fillText(new Date(shareReading.date).toLocaleDateString('zh-CN'), 92, 168);
 
     const image = new Image();
     image.crossOrigin = 'anonymous';
     const loaded = await new Promise<boolean>((resolve) => {
       image.onload = () => resolve(true);
       image.onerror = () => resolve(false);
-      image.src = reading.cardImage || '/default-card.png';
+      image.src = shareReading.cardImage || '/default-card.png';
     });
 
     if (loaded) ctx.drawImage(image, 92, 230, 360, 560);
@@ -2176,11 +2425,11 @@ export default function Home() {
       const cardY = Math.max(430, headerBottom + 34);
 
       ctx.font = '800 38px sans-serif';
-      const posterQuestionLines = getCanvasTextLines(ctx, reading.question || '一次没有命名的问题', sideWidth);
+      const posterQuestionLines = getCanvasTextLines(ctx, shareReading.question || '一次没有命名的问题', sideWidth);
       ctx.font = '800 30px sans-serif';
-      const posterCardLines = getCanvasTextLines(ctx, reading.cards || '未记录牌面', sideWidth);
+      const posterCardLines = getCanvasTextLines(ctx, shareReading.cards || '未记录牌面', sideWidth);
       ctx.font = '500 30px sans-serif';
-      const posterSummaryLines = getCanvasTextLines(ctx, reading.summary || '这次牌面已经留在档案里。', contentWidth);
+      const posterSummaryLines = getCanvasTextLines(ctx, shareReading.summary || '这次牌面已经留在档案里。', contentWidth);
       const posterSideBottom = cardY + 96 + posterQuestionLines.length * 52 + 70 + posterCardLines.length * 44;
       const posterSummaryTop = Math.max(cardY + cardHeight + 112, posterSideBottom + 90);
       const posterHeight = Math.max(1480, posterSummaryTop + posterSummaryLines.length * 52 + 220);
@@ -2288,7 +2537,7 @@ export default function Home() {
         ctx.stroke();
       }
 
-      let seed = Array.from(`${reading.id || reading.date || reading.question}`).reduce(
+      let seed = Array.from(`${shareReading.id || shareReading.date || shareReading.question}`).reduce(
         (value, char) => (value * 31 + char.charCodeAt(0)) >>> 0,
         131,
       );
@@ -2330,7 +2579,7 @@ export default function Home() {
       ctx.fillText('星轨牌迹', 86, 122);
       ctx.fillStyle = 'rgba(255,255,255,0.70)';
       ctx.font = '600 28px sans-serif';
-      ctx.fillText(new Date(reading.date).toLocaleDateString('zh-CN'), 86, 168);
+      ctx.fillText(new Date(shareReading.date).toLocaleDateString('zh-CN'), 86, 168);
       ctx.fillStyle = 'rgba(244,207,131,0.36)';
       ctx.fillRect(86, 195, 116, 3);
 
@@ -2453,7 +2702,9 @@ export default function Home() {
     const target = event.currentTarget;
     setShowScrollTop(target.scrollTop > 360);
     setShowScrollBottom(target.scrollHeight - target.scrollTop - target.clientHeight > 220);
+    markScrollControlsActive();
   };
+  const scrollControlOpacity = scrollControlsActive ? 1 : 0.18;
 
   const openDailyTasksFromChat = () => {
     setShowDailyPanel(true);
@@ -3533,11 +3784,19 @@ export default function Home() {
         {visibleMessages.length > 0 && showScrollBottom && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            onClick={() => scrollConversationToBottom()}
+            whileHover={{ opacity: 1 }}
+            whileFocus={{ opacity: 1 }}
+            whileTap={{ opacity: 1, scale: 0.96 }}
+            onPointerEnter={markScrollControlsActive}
+            onFocus={markScrollControlsActive}
+            onClick={() => {
+              markScrollControlsActive();
+              scrollConversationToBottom();
+            }}
             className={clsx(
-              'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:left-[calc(50%_-_250px)]',
+              'absolute right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/84 text-[#7a6a56] shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.09] dark:text-white/62 sm:right-[calc(50%_-_250px)]',
               showComposerTools || showComposerSuggestions
                 ? 'bottom-[calc(var(--app-bottom-pad)+268px)]'
                 : 'bottom-[calc(var(--app-bottom-pad)+212px)]',
@@ -3554,11 +3813,19 @@ export default function Home() {
         {showScrollTop && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+            whileHover={{ opacity: 1 }}
+            whileFocus={{ opacity: 1 }}
+            whileTap={{ opacity: 1, scale: 0.96 }}
+            onPointerEnter={markScrollControlsActive}
+            onFocus={markScrollControlsActive}
+            onClick={() => {
+              markScrollControlsActive();
+              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             className={clsx(
-              'absolute left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:left-[calc(50%_-_250px)]',
+              'absolute right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:right-[calc(50%_-_250px)]',
               showComposerTools || showComposerSuggestions
                 ? 'bottom-[calc(var(--app-bottom-pad)+320px)]'
                 : 'bottom-[calc(var(--app-bottom-pad)+264px)]',
@@ -4197,9 +4464,17 @@ export default function Home() {
         {showScrollTop && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+            whileHover={{ opacity: 1 }}
+            whileFocus={{ opacity: 1 }}
+            whileTap={{ opacity: 1, scale: 0.96 }}
+            onPointerEnter={markScrollControlsActive}
+            onFocus={markScrollControlsActive}
+            onClick={() => {
+              markScrollControlsActive();
+              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             className="absolute bottom-[calc(var(--app-bottom-pad)+174px)] right-5 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-apple-surface text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl"
             aria-label="回到顶部"
             title="回到顶部"
