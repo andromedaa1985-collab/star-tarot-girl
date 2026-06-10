@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "clean": "node scripts/clean-dist.cjs",
     "lint": "tsc --noEmit",
+    "audit:tarot-randomness": "tsx scripts/audit-tarot-randomness.ts",
     "android:sync": "npm run build:android && cap sync android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug"
   },

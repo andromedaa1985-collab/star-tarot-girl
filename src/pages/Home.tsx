@@ -62,6 +62,7 @@ import { apiFetch } from '../lib/apiClient';
 import { shareImageWithNativeSheet } from '../lib/nativeShare';
 import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
 import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
+import { drawTarotPositions, shuffleWithRandom, type TarotPosition } from '../lib/tarotRandom';
 import CompanionSprite, {
   CompanionActionBadge,
   CompanionExpressionBadge,
@@ -73,7 +74,7 @@ import CompanionSprite, {
 
 type DrawnCard = {
   name: string;
-  position: '正位' | '逆位';
+  position: TarotPosition;
   image: string;
 };
 
@@ -251,40 +252,25 @@ const getLocalDateKey = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-const getRandomInt = (maxExclusive: number) => {
-  if (maxExclusive <= 1) return 0;
-  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
-    return Math.floor(Math.random() * maxExclusive);
-  }
-
-  const bucketSize = 0x100000000;
-  const limit = Math.floor(bucketSize / maxExclusive) * maxExclusive;
-  const buffer = new Uint32Array(1);
-  let value = 0;
-
-  do {
-    crypto.getRandomValues(buffer);
-    value = buffer[0];
-  } while (value >= limit);
-
-  return value % maxExclusive;
-};
-
 const shuffleTarotDeck = () => {
-  const deck = [...TAROT_CARDS];
-  for (let index = deck.length - 1; index > 0; index -= 1) {
-    const swapIndex = getRandomInt(index + 1);
-    [deck[index], deck[swapIndex]] = [deck[swapIndex], deck[index]];
-  }
-  return deck;
+  return shuffleWithRandom(TAROT_CARDS);
 };
 
-const drawCards = (count = 1): DrawnCard[] => {
+const extractTarotPositions = (cardsText = '') =>
+  (cardsText.match(/正位|逆位/g) || []) as TarotPosition[];
+
+const getRecentTarotPositions = (readings: TarotReading[], limit = 12) => {
+  const newestFirst = readings.flatMap((reading) => extractTarotPositions(reading.cards)).slice(0, limit);
+  return newestFirst.reverse();
+};
+
+const drawCards = (count = 1, recentPositions: TarotPosition[] = []): DrawnCard[] => {
   const drawCount = Math.max(1, Math.min(count, TAROT_CARDS.length));
   const deck = shuffleTarotDeck();
-  return deck.slice(0, drawCount).map((card) => ({
+  const positions = drawTarotPositions(drawCount, recentPositions);
+  return deck.slice(0, drawCount).map((card, index) => ({
     name: card.name,
-    position: getRandomInt(2) === 0 ? '正位' : '逆位',
+    position: positions[index],
     image: `/tarot/${card.file}`,
   }));
 };
@@ -2106,7 +2092,7 @@ export default function Home() {
     const shouldDraw =
       mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading));
     const isDailyFortune = shouldDraw && isDailyFortuneQuestion(question);
-    const cards = shouldDraw ? drawCards(getDrawCount(question)) : [];
+    const cards = shouldDraw ? drawCards(getDrawCount(question), getRecentTarotPositions(tarotReadings)) : [];
     const currentImages = currentReading?.cardImages?.length
       ? currentReading.cardImages
       : currentReading?.cardImage
