@@ -1,9 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 
-const memoryStores = new Map<string, Map<string, unknown>>();
-
-let warnedVercelMemoryFallback = false;
+let warnedVercelMissingPersistentStore = false;
 
 function isNetlifyRuntime() {
   return process.env.NETLIFY === "true" || Boolean(process.env.NETLIFY_BLOBS_CONTEXT);
@@ -24,19 +22,18 @@ function getRedisRestConfig() {
   };
 }
 
-function getMemoryStore(storeName: string) {
-  const existing = memoryStores.get(storeName);
-  if (existing) return existing;
-  const next = new Map<string, unknown>();
-  memoryStores.set(storeName, next);
-  return next;
+function warnVercelMissingPersistentStore() {
+  if (!isVercelRuntime() || warnedVercelMissingPersistentStore) return;
+  warnedVercelMissingPersistentStore = true;
+  console.warn(
+    "Persistent JSON store is not configured on Vercel. Configure UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN for account archive persistence.",
+  );
 }
 
-function warnVercelMemoryFallback() {
-  if (!isVercelRuntime() || warnedVercelMemoryFallback) return;
-  warnedVercelMemoryFallback = true;
-  console.warn(
-    "Using in-memory JSON store on Vercel. Configure UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN for persistent login.",
+function assertPersistentStoreOnVercel() {
+  if (!isVercelRuntime() || hasUpstashConfig()) return;
+  throw new Error(
+    "账户存档服务未配置持久化存储。请在 Vercel 配置 UPSTASH_REDIS_REST_URL 和 UPSTASH_REDIS_REST_TOKEN 后再使用账号与云端存档。",
   );
 }
 
@@ -112,8 +109,8 @@ export async function readStoreJson<T>(storeName: string, key: string, localDir:
   }
 
   if (isVercelRuntime()) {
-    warnVercelMemoryFallback();
-    return (getMemoryStore(storeName).get(key) as T | undefined) || null;
+    warnVercelMissingPersistentStore();
+    assertPersistentStoreOnVercel();
   }
 
   return readLocalJson<T>(localDir, key);
@@ -132,9 +129,8 @@ export async function writeStoreJson(storeName: string, key: string, value: unkn
   }
 
   if (isVercelRuntime()) {
-    warnVercelMemoryFallback();
-    getMemoryStore(storeName).set(key, value);
-    return;
+    warnVercelMissingPersistentStore();
+    assertPersistentStoreOnVercel();
   }
 
   await writeLocalJson(localDir, key, value);

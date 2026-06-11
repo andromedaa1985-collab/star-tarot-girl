@@ -1,11 +1,18 @@
-const CACHE_NAME = "astro-rail-pwa-v1";
+const CACHE_NAME = "astro-rail-pwa-v2-20260611";
 const APP_SHELL = [
   "/app",
   "/manifest.webmanifest",
-  "/details-new.png",
+  "/railstar-app-icon-no-text.png",
+  "/railstar-app-icon.png",
   "/default-card.png",
   "/default-pet.png",
 ];
+const NETWORK_FIRST_PATHS = new Set([
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/railstar-app-icon-no-text.png",
+  "/railstar-app-icon.png",
+]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -31,6 +38,19 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(fetch(request).catch(() => caches.match("/app")));
+    return;
+  }
+
+  if (NETWORK_FIRST_PATHS.has(url.pathname)) {
+    event.respondWith(
+      fetch(request, { cache: "reload" })
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
+        })
+        .catch(() => caches.match(request)),
+    );
     return;
   }
 
