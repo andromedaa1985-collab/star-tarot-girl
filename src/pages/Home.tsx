@@ -580,7 +580,7 @@ const buildDailyFortunePrompt = (question: string, cards: DrawnCard[], isInterne
 请写一份中文“今日运势”。它是星轨塔罗少女每天递给用户的一小段陪伴：温柔、安慰、细致，但仍然清醒。
 ${DAILY_FORTUNE_VOICE_RULES}
 
-回答目标约 420 个中文字符，通常 360 到 500 字；牌意复杂时最多 540 字，不要为了显得丰满而硬加内容。分成 3 到 4 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。
+回答目标约 380 个中文字符，通常 320 到 430 字；牌意复杂时最多 470 字，不要为了显得丰满而硬加内容。分成 3 到 4 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。结尾必须是一句完整的话；如果快到长度上限，优先删掉中间细节，也不要把句子停在一半。
 
 你需要自然完成一条轻量情绪弧线：先用一句具体、柔软的话接住今天的状态；再把这张牌的正逆位、画面感或传统含义讲清楚，但要像聊天，不要像词典解释；接着让牌落到今天最相关的一个真实场景里；最后给一个 10 分钟内可以开始的小动作，再留一句睡前回看的话。细节不要全部展开，想展开的部分留给“今日深解”。
 
@@ -674,6 +674,31 @@ const cleanTarotAnswer = (text: string) =>
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+const TAROT_COMPLETE_ENDING_RE = /[。！？!?…][」』）)\]"'”’]*$/;
+
+const trimToLastCompleteSentence = (text: string) => {
+  const cleaned = cleanTarotAnswer(text);
+  if (!cleaned || TAROT_COMPLETE_ENDING_RE.test(cleaned)) return cleaned;
+  const lastSentenceEnd = Math.max(
+    cleaned.lastIndexOf('。'),
+    cleaned.lastIndexOf('！'),
+    cleaned.lastIndexOf('？'),
+    cleaned.lastIndexOf('!'),
+    cleaned.lastIndexOf('?'),
+    cleaned.lastIndexOf('…'),
+  );
+  return lastSentenceEnd >= 80 ? cleaned.slice(0, lastSentenceEnd + 1).trim() : cleaned;
+};
+
+const completeTruncatedTarotAnswer = (text: string, isDailyFortune: boolean) => {
+  const trimmed = trimToLastCompleteSentence(text);
+  if (TAROT_COMPLETE_ENDING_RE.test(trimmed)) return trimmed;
+  const suffix = isDailyFortune
+    ? '今天先把动作放小一点，给自己十分钟就够了；睡前回看时，只要记得你已经把自己接回来一点。'
+    : '今天先选一个十分钟内能开始的小动作，让自己慢慢回到可掌控的位置。';
+  return cleanTarotAnswer([trimmed, suffix].filter(Boolean).join('\n\n'));
+};
 
 const buildCurrentReadingPrompt = (
   question: string,
@@ -2023,10 +2048,11 @@ export default function Home() {
         throw handled;
       }
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '今日深解请求失败');
-      const aiAnswer = data?.choices?.[0]?.message?.content;
+      const choice = data?.choices?.[0];
+      const aiAnswer = choice?.message?.content;
       if (!aiAnswer) throw new Error('今日深解返回为空');
       applyServerEntitlements(data?.entitlement);
-      answer = aiAnswer;
+      answer = choice?.finish_reason === 'length' ? completeTruncatedTarotAnswer(aiAnswer, true) : aiAnswer;
     } catch (error: any) {
       if (error?.handledEntitlementError) {
         setIsThinking(false);
@@ -2037,6 +2063,9 @@ export default function Home() {
     }
 
     answer = cleanTarotAnswer(answer);
+    if (!usedFallbackAnswer && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
+      answer = completeTruncatedTarotAnswer(answer, true);
+    }
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
     setAppEvents((events) =>
       recordAppEvent(events, 'daily_deep_generate', {
@@ -2202,10 +2231,11 @@ export default function Home() {
         throw handled;
       }
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '塔罗解读请求失败');
-      const aiAnswer = data?.choices?.[0]?.message?.content;
+      const choice = data?.choices?.[0];
+      const aiAnswer = choice?.message?.content;
       if (!aiAnswer) throw new Error('塔罗解读返回为空');
       applyServerEntitlements(data?.entitlement);
-      answer = aiAnswer;
+      answer = choice?.finish_reason === 'length' ? completeTruncatedTarotAnswer(aiAnswer, isDailyFortune) : aiAnswer;
     } catch (error: any) {
       if (error?.handledEntitlementError) {
         setIsThinking(false);
@@ -2217,6 +2247,9 @@ export default function Home() {
       usedFallbackAnswer = true;
     }
     answer = cleanTarotAnswer(answer);
+    if (!usedFallbackAnswer && shouldDraw && isDailyFortune && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
+      answer = completeTruncatedTarotAnswer(answer, true);
+    }
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
 
     const drawingElapsed = Date.now() - drawingStartedAt;

@@ -3,7 +3,7 @@ export const DEEPSEEK_TAROT_FAST_MODEL = 'deepseek-v4-flash';
 export const DEEPSEEK_TAROT_DEEP_MODEL = 'deepseek-v4-pro';
 
 export const DEEPSEEK_MAX_TOKENS = {
-  tarotDaily: 560,
+  tarotDaily: 760,
   tarotGeneral: 460,
   dailyDeep: 1400,
   guardianLetter: 360,
