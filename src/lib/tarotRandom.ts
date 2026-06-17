@@ -1,11 +1,14 @@
 export type TarotPosition = '正位' | '逆位';
 
-const POSITION_QUEUE_STORAGE_KEY = 'astrorail:tarot-position-queue:v1';
-const POSITION_QUEUE_SIZE = 12;
+const LEGACY_POSITION_QUEUE_STORAGE_KEY = 'astrorail:tarot-position-queue:v1';
+const CARD_QUEUE_STORAGE_KEY_PREFIX = 'astrorail:tarot-card-queue:v1';
 const MAX_POSITION_STREAK = 3;
-const VALID_POSITIONS: TarotPosition[] = ['正位', '逆位'];
+const POSITION_IMBALANCE_WINDOW = 12;
+const POSITION_IMBALANCE_THRESHOLD = 5;
+const POSITION_REBALANCE_PERCENT = 68;
+const CARD_RECENT_BLOCK_SIZE = 6;
 
-let memoryPositionQueue: TarotPosition[] = [];
+const memoryCardQueues = new Map<number, number[]>();
 
 export const getRandomInt = (maxExclusive: number) => {
   if (maxExclusive <= 1) return 0;
@@ -38,6 +41,22 @@ export const shuffleWithRandom = <T,>(items: T[]) => {
 const isTarotPosition = (value: unknown): value is TarotPosition =>
   value === '正位' || value === '逆位';
 
+const normalizeTarotPositions = (positions: unknown[]) => positions.filter(isTarotPosition);
+
+const normalizeCardCount = (cardCount: number) => Math.max(0, Math.floor(cardCount));
+
+const normalizeCardQueue = (queue: unknown, cardCount: number) => {
+  if (!Array.isArray(queue)) return [];
+  const seen = new Set<number>();
+  const normalized: number[] = [];
+  for (const value of queue) {
+    if (!Number.isInteger(value) || value < 0 || value >= cardCount || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(value);
+  }
+  return normalized;
+};
+
 const getStorage = () => {
   if (typeof window === 'undefined') return null;
   try {
@@ -47,31 +66,47 @@ const getStorage = () => {
   }
 };
 
-const readPositionQueue = () => {
+const getCardQueueStorageKey = (cardCount: number) => `${CARD_QUEUE_STORAGE_KEY_PREFIX}:${cardCount}`;
+
+const readCardQueue = (cardCount: number) => {
   const storage = getStorage();
-  if (!storage) return memoryPositionQueue;
+  if (!storage) return memoryCardQueues.get(cardCount) || [];
 
   try {
-    const parsed = JSON.parse(storage.getItem(POSITION_QUEUE_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter(isTarotPosition) : [];
+    return normalizeCardQueue(JSON.parse(storage.getItem(getCardQueueStorageKey(cardCount)) || '[]'), cardCount);
   } catch {
     return [];
   }
 };
 
-const writePositionQueue = (queue: TarotPosition[]) => {
-  const normalized = queue.filter(isTarotPosition);
+const writeCardQueue = (cardCount: number, queue: number[]) => {
+  const normalized = normalizeCardQueue(queue, cardCount);
   const storage = getStorage();
   if (!storage) {
-    memoryPositionQueue = normalized;
+    memoryCardQueues.set(cardCount, normalized);
     return;
   }
 
   try {
-    storage.setItem(POSITION_QUEUE_STORAGE_KEY, JSON.stringify(normalized));
+    storage.setItem(getCardQueueStorageKey(cardCount), JSON.stringify(normalized));
   } catch {
-    memoryPositionQueue = normalized;
+    memoryCardQueues.set(cardCount, normalized);
   }
+};
+
+const getRecentCardBlockSet = (recentCardIndices: number[], cardCount: number) => {
+  const blockSize = Math.min(CARD_RECENT_BLOCK_SIZE, Math.max(0, cardCount - 1));
+  return new Set(normalizeCardQueue(recentCardIndices, cardCount).slice(-blockSize));
+};
+
+const createCardQueue = (cardCount: number, recentCardIndices: number[] = []) => {
+  const shuffled = shuffleWithRandom(Array.from({ length: cardCount }, (_, index) => index));
+  const recentSet = getRecentCardBlockSet(recentCardIndices, cardCount);
+  if (recentSet.size === 0) return shuffled;
+
+  const fresh = shuffled.filter((cardIndex) => !recentSet.has(cardIndex));
+  const recent = shuffled.filter((cardIndex) => recentSet.has(cardIndex));
+  return [...fresh, ...recent];
 };
 
 const getTailStreak = (positions: TarotPosition[], position: TarotPosition) => {
@@ -83,50 +118,23 @@ const getTailStreak = (positions: TarotPosition[], position: TarotPosition) => {
   return streak;
 };
 
-const hasLongInternalStreak = (positions: TarotPosition[]) => {
-  let streak = 1;
-  for (let index = 1; index < positions.length; index += 1) {
-    streak = positions[index] === positions[index - 1] ? streak + 1 : 1;
-    if (streak > MAX_POSITION_STREAK) return true;
-  }
-  return false;
-};
-
-export const createBalancedPositionQueue = () => {
-  const half = POSITION_QUEUE_SIZE / 2;
-  const base = [
-    ...Array<TarotPosition>(half).fill('正位'),
-    ...Array<TarotPosition>(half).fill('逆位'),
-  ];
-
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const shuffled = shuffleWithRandom(base);
-    if (!hasLongInternalStreak(shuffled)) return shuffled;
-  }
-
-  const [first, second] = shuffleWithRandom(VALID_POSITIONS);
-  return [
-    ...Array<TarotPosition>(MAX_POSITION_STREAK).fill(first),
-    ...Array<TarotPosition>(MAX_POSITION_STREAK).fill(second),
-    ...Array<TarotPosition>(MAX_POSITION_STREAK).fill(first),
-    ...Array<TarotPosition>(MAX_POSITION_STREAK).fill(second),
-  ];
-};
-
 export const drawTarotPosition = (recentPositions: TarotPosition[] = []) => {
-  let queue = readPositionQueue();
-  if (queue.length === 0) queue = createBalancedPositionQueue();
+  const normalizedRecent = normalizeTarotPositions(recentPositions);
+  if (getTailStreak(normalizedRecent, '正位') >= MAX_POSITION_STREAK) return '逆位';
+  if (getTailStreak(normalizedRecent, '逆位') >= MAX_POSITION_STREAK) return '正位';
 
-  const first = queue[0];
-  const wouldExtendLongStreak = getTailStreak(recentPositions, first) >= MAX_POSITION_STREAK;
-  const preferredIndex = wouldExtendLongStreak
-    ? queue.findIndex((position) => position !== first)
-    : 0;
-  const drawIndex = preferredIndex >= 0 ? preferredIndex : 0;
-  const [position] = queue.splice(drawIndex, 1);
+  const randomPosition: TarotPosition = getRandomInt(2) === 0 ? '正位' : '逆位';
+  const window = normalizedRecent.slice(-POSITION_IMBALANCE_WINDOW);
+  const uprightCount = window.filter((position) => position === '正位').length;
+  const reversedCount = window.length - uprightCount;
+  const imbalance = uprightCount - reversedCount;
 
-  writePositionQueue(queue);
-  return position;
+  if (Math.abs(imbalance) >= POSITION_IMBALANCE_THRESHOLD) {
+    const underrepresented: TarotPosition = imbalance > 0 ? '逆位' : '正位';
+    return getRandomInt(100) < POSITION_REBALANCE_PERCENT ? underrepresented : randomPosition;
+  }
+
+  return randomPosition;
 };
 
 export const drawTarotPositions = (count: number, recentPositions: TarotPosition[] = []) => {
@@ -137,13 +145,53 @@ export const drawTarotPositions = (count: number, recentPositions: TarotPosition
   return positions;
 };
 
+export const drawTarotCardIndices = (cardCount: number, count = 1, recentCardIndices: number[] = []) => {
+  const normalizedCardCount = normalizeCardCount(cardCount);
+  if (normalizedCardCount === 0) return [];
+
+  const drawCount = Math.max(0, Math.min(Math.floor(count), normalizedCardCount));
+  const drawn: number[] = [];
+  let queue = readCardQueue(normalizedCardCount);
+
+  for (let index = 0; index < drawCount; index += 1) {
+    if (queue.length === 0) queue = createCardQueue(normalizedCardCount, [...recentCardIndices, ...drawn]);
+
+    const blocked = getRecentCardBlockSet([...recentCardIndices, ...drawn], normalizedCardCount);
+    const preferredIndex = queue.findIndex((cardIndex) => !blocked.has(cardIndex));
+    const drawIndex = preferredIndex >= 0 ? preferredIndex : 0;
+    const [cardIndex] = queue.splice(drawIndex, 1);
+    drawn.push(cardIndex);
+  }
+
+  writeCardQueue(normalizedCardCount, queue);
+  return drawn;
+};
+
 export const resetTarotPositionQueueForAudit = () => {
-  memoryPositionQueue = [];
   const storage = getStorage();
   if (!storage) return;
   try {
-    storage.removeItem(POSITION_QUEUE_STORAGE_KEY);
+    storage.removeItem(LEGACY_POSITION_QUEUE_STORAGE_KEY);
   } catch {
     // Ignore storage cleanup failures in diagnostics.
   }
+};
+
+export const resetTarotCardQueueForAudit = () => {
+  memoryCardQueues.clear();
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (key?.startsWith(CARD_QUEUE_STORAGE_KEY_PREFIX)) storage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage cleanup failures in diagnostics.
+  }
+};
+
+export const resetTarotRandomQueuesForAudit = () => {
+  resetTarotPositionQueueForAudit();
+  resetTarotCardQueueForAudit();
 };

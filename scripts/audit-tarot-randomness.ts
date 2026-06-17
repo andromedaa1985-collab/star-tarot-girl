@@ -1,7 +1,7 @@
 import {
+  drawTarotCardIndices,
   drawTarotPositions,
-  resetTarotPositionQueueForAudit,
-  shuffleWithRandom,
+  resetTarotRandomQueuesForAudit,
   type TarotPosition,
 } from '../src/lib/tarotRandom';
 
@@ -11,19 +11,22 @@ const SPREAD_AUDIT_DRAWS = 20_000;
 const SPREAD_SIZE = 5;
 const RECENT_WINDOW = 12;
 
-resetTarotPositionQueueForAudit();
+resetTarotRandomQueuesForAudit();
 
 const cardHits = Array(CARD_COUNT).fill(0);
 const positionHits: Record<TarotPosition, number> = { 正位: 0, 逆位: 0 };
 const recentPositions: TarotPosition[] = [];
+const recentCardIndices: number[] = [];
 let maxPositionStreak = 0;
 let currentStreak = 0;
 let previousPosition: TarotPosition | null = null;
 let spreadDuplicateFailures = 0;
 
 for (let draw = 0; draw < DRAWS; draw += 1) {
-  const deck = shuffleWithRandom([...Array(CARD_COUNT).keys()]);
-  cardHits[deck[0]] += 1;
+  const [cardIndex] = drawTarotCardIndices(CARD_COUNT, 1, recentCardIndices);
+  cardHits[cardIndex] += 1;
+  recentCardIndices.push(cardIndex);
+  if (recentCardIndices.length > RECENT_WINDOW) recentCardIndices.shift();
 
   const [position] = drawTarotPositions(1, recentPositions);
   positionHits[position] += 1;
@@ -37,8 +40,7 @@ for (let draw = 0; draw < DRAWS; draw += 1) {
 }
 
 for (let draw = 0; draw < SPREAD_AUDIT_DRAWS; draw += 1) {
-  const deck = shuffleWithRandom([...Array(CARD_COUNT).keys()]);
-  const spread = deck.slice(0, SPREAD_SIZE);
+  const spread = drawTarotCardIndices(CARD_COUNT, SPREAD_SIZE, recentCardIndices);
   if (new Set(spread).size !== spread.length) spreadDuplicateFailures += 1;
 }
 
@@ -62,8 +64,8 @@ console.log(JSON.stringify({
   },
 }, null, 2));
 
-if (positionHits.正位 !== positionHits.逆位) {
-  throw new Error('正逆位公平袋失衡');
+if (reversedRate < 0.485 || reversedRate > 0.515) {
+  throw new Error(`正逆位比例偏离过高：${reversedRate}`);
 }
 
 if (maxPositionStreak > 3) {
