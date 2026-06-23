@@ -599,6 +599,7 @@ async function startServer() {
 
       const bodyPayload = {
         ...req.body,
+        thinking: req.body.thinking ?? { type: "disabled" },
         messages: messages
       };
       

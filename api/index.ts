@@ -134,6 +134,7 @@ app.post("/api/deepseek/chat", async (req, res) => {
     }
     const bodyPayload = {
       ...req.body,
+      thinking: req.body.thinking ?? { type: "disabled" },
       messages,
     };
     delete bodyPayload.isInternetMode;

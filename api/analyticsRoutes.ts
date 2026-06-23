@@ -45,9 +45,9 @@ export function registerAnalyticsRoutes(app: express.Express) {
       if (!event) {
         return res.status(400).json({ error: { message: "无效的统计事件。" } });
       }
-      await writeAnalyticsEvent(event);
+      const persisted = await writeAnalyticsEvent(event);
       res.setHeader("Cache-Control", "no-store");
-      res.json({ ok: true });
+      res.json({ ok: true, persisted });
     } catch (error: any) {
       res.status(500).json({ error: { message: error.message || "统计事件写入失败" } });
     }
@@ -116,8 +116,15 @@ async function writeAnalyticsEvent(event: AnalyticsEvent) {
   try {
     const store = getAnalyticsStore();
     await store.setJSON(`events/${event.day}/${event.timestamp}-${event.id}.json`, event);
+    return true;
   } catch {
-    await writeLocalAnalyticsEvent(event);
+    try {
+      await writeLocalAnalyticsEvent(event);
+      return true;
+    } catch (localError: any) {
+      console.warn("Analytics event skipped because no writable analytics store is available:", localError?.message || localError);
+      return false;
+    }
   }
 }
 
