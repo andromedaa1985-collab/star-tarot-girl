@@ -1855,10 +1855,10 @@ export default function Home() {
     applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
   };
 
-  const requireAccountForModelUse = () => {
+  const requireAccountForPaidFeature = (next = '/app') => {
     const session = getStoredAccountSession();
     if (session?.token) return session;
-    navigate('/auth?next=/app');
+    navigate(`/auth?next=${encodeURIComponent(next)}`);
     return null;
   };
 
@@ -1980,7 +1980,7 @@ export default function Home() {
       setAppEvents((events) => recordAppEvent(events, 'daily_deep_paywall_open', { source: 'cta' }));
       return;
     }
-    const accountSession = requireAccountForModelUse();
+    const accountSession = requireAccountForPaidFeature('/app');
     if (!accountSession) return;
 
     const sourceQuestion = getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
@@ -2100,8 +2100,7 @@ export default function Home() {
   const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
-    const accountSession = requireAccountForModelUse();
-    if (!accountSession) return;
+    const accountSession = getStoredAccountSession();
     if ((options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
       const source = getLatestDailyFortuneDeepSource();
       if (source) {
@@ -2189,10 +2188,10 @@ export default function Home() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...authHeaders(accountSession.token),
+          ...authHeaders(accountSession?.token),
         },
         body: JSON.stringify({
-          entitlement: { type: 'tarot_message', energyCost: 1 },
+          ...(accountSession?.token ? { entitlement: { type: 'tarot_message', energyCost: 1 } } : {}),
           model: DEEPSEEK_TAROT_FAST_MODEL,
           temperature: isDailyFortune ? 0.78 : 0.68,
           max_tokens: isDailyFortune ? DEEPSEEK_MAX_TOKENS.tarotDaily : DEEPSEEK_MAX_TOKENS.tarotGeneral,
@@ -2219,10 +2218,13 @@ export default function Home() {
       });
       const data = await response.json();
       if (response.status === 401 || response.status === 403) {
-        navigate('/auth?next=/app');
-        const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
-        handled.handledEntitlementError = true;
-        throw handled;
+        if (accountSession?.token) {
+          navigate('/auth?next=/app');
+          const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
+          handled.handledEntitlementError = true;
+          throw handled;
+        }
+        throw new Error(data?.error?.message || '塔罗解读请求失败');
       }
       if (response.status === 402) {
         openUpgradePrompt('energy');
@@ -2251,6 +2253,10 @@ export default function Home() {
       answer = completeTruncatedTarotAnswer(answer, true);
     }
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
+    const consumedGuestEnergy = !accountSession?.token && !plusActive && !usedFallbackAnswer;
+    if (consumedGuestEnergy) {
+      setEnergy((value) => Math.max(0, value - 1));
+    }
 
     const drawingElapsed = Date.now() - drawingStartedAt;
     if (shouldDraw && drawingElapsed < DRAW_ANIMATION_MIN_MS) {
@@ -2295,13 +2301,13 @@ export default function Home() {
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
         spread: cards.length,
         plus: plusActive,
-        energySpent: plusActive ? 0 : 1,
+        energySpent: plusActive ? 0 : (accountSession?.token || consumedGuestEnergy ? 1 : 0),
         dailyFortune: isDailyFortune,
       }));
       if (isDailyFortune) {
         setAppEvents((events) => recordAppEvent(events, 'daily_fortune_draw', {
           plus: plusActive,
-          energySpent: plusActive ? 0 : 1,
+          energySpent: plusActive ? 0 : (accountSession?.token || consumedGuestEnergy ? 1 : 0),
         }));
       }
       addExp(Math.floor(Math.random() * 8) + 8);
@@ -2310,7 +2316,7 @@ export default function Home() {
         kind: 'followup',
         hasCurrentReading,
         plus: plusActive,
-        energySpent: plusActive ? 0 : 1,
+        energySpent: plusActive ? 0 : (accountSession?.token || consumedGuestEnergy ? 1 : 0),
       }));
       addExp(3);
     }

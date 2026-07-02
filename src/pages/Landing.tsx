@@ -76,18 +76,18 @@ function markLandingIntroSeen() {
 
 export default function Landing() {
   const navigate = useNavigate();
-  const openAuth = React.useCallback((nextPath = '/app') => {
+  const enterApp = React.useCallback((nextPath = '/app') => {
     markLandingIntroSeen();
-    navigate(`/auth?next=${encodeURIComponent(nextPath)}`);
+    navigate(nextPath);
   }, [navigate]);
 
   return (
     <main className="h-full min-h-screen overflow-y-auto bg-[#f5f7fb] text-[#151821] selection:bg-[#91e6f2] selection:text-[#081016]">
-      <Hero onEnter={() => openAuth('/app')} />
+      <Hero onEnter={() => enterApp('/app')} />
       <ProofStrip />
-      <ProductFocus onEnter={() => openAuth('/app')} />
-      <UsePath onEnter={() => openAuth('/app')} />
-      <TrustAndDownload onEnter={() => openAuth('/app')} />
+      <ProductFocus onEnter={() => enterApp('/app')} />
+      <UsePath onEnter={() => enterApp('/app')} />
+      <TrustAndDownload onEnter={() => enterApp('/app')} />
     </main>
   );
 }

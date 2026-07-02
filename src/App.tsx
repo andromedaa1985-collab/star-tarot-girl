@@ -32,7 +32,7 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/app/auth" element={<RedirectLegacyAppAuth />} />
-            <Route path="/app" element={<RequireAccount><Layout /></RequireAccount>}>
+            <Route path="/app" element={<AppShell />}>
               <Route index element={<Home />} />
               <Route path="bazi" element={<Bazi />} />
               <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
@@ -98,7 +98,7 @@ function RedirectLegacyAppAuth() {
   return <Navigate to={`/auth${location.search || '?next=/app'}`} replace />;
 }
 
-function RequireAccount({ children }: { children: React.ReactNode }) {
+function AppShell() {
   const location = useLocation();
   const session = getStoredAccountSession();
 
@@ -106,15 +106,10 @@ function RequireAccount({ children }: { children: React.ReactNode }) {
     return <Navigate to="/" replace />;
   }
 
-  if (!session) {
-    const next = `${location.pathname}${location.search}`;
-    return <Navigate to={`/auth?next=${encodeURIComponent(next)}`} replace />;
-  }
-
   return (
     <>
-      <AccountAutoSync />
-      {children}
+      {session?.token ? <AccountAutoSync /> : null}
+      <Layout />
     </>
   );
 }
