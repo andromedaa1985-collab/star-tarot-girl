@@ -1858,7 +1858,7 @@ export default function Home() {
   const requireAccountForModelUse = () => {
     const session = getStoredAccountSession();
     if (session?.token) return session;
-    navigate('/app/auth?next=/app');
+    navigate('/auth?next=/app');
     return null;
   };
 
@@ -1871,7 +1871,7 @@ export default function Home() {
     if (!trialAvailable) return;
     if (!getStoredAccountSession()) {
       setShowUpgradePrompt(false);
-      navigate('/app/auth?next=/app/profile?plus=1');
+      navigate('/auth?next=/app/profile?plus=1');
       return;
     }
     try {
@@ -2036,7 +2036,7 @@ export default function Home() {
       });
       const data = await response.json();
       if (response.status === 401 || response.status === 403) {
-        navigate('/app/auth?next=/app');
+        navigate('/auth?next=/app');
         const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
         handled.handledEntitlementError = true;
         throw handled;
@@ -2219,7 +2219,7 @@ export default function Home() {
       });
       const data = await response.json();
       if (response.status === 401 || response.status === 403) {
-        navigate('/app/auth?next=/app');
+        navigate('/auth?next=/app');
         const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
         handled.handledEntitlementError = true;
         throw handled;

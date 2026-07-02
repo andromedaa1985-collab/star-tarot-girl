@@ -235,7 +235,7 @@ export default function Profile() {
     if (!accountSession) {
       setPaymentStatus('failed');
       setPaymentMessage('请先登录星轨账户，再开通会员或购买权益。');
-      navigate('/app/auth?next=/app/profile?plus=1');
+      navigate('/auth?next=/app/profile?plus=1');
       return;
     }
     if (!guardianConsent) {

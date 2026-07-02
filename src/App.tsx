@@ -31,6 +31,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/app/auth" element={<RedirectLegacyAppAuth />} />
             <Route path="/app" element={<RequireAccount><Layout /></RequireAccount>}>
               <Route index element={<Home />} />
               <Route path="bazi" element={<Bazi />} />
@@ -90,6 +91,11 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, { hasError
       </main>
     );
   }
+}
+
+function RedirectLegacyAppAuth() {
+  const location = useLocation();
+  return <Navigate to={`/auth${location.search || '?next=/app'}`} replace />;
 }
 
 function RequireAccount({ children }: { children: React.ReactNode }) {
