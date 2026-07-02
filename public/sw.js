@@ -1,6 +1,5 @@
-const CACHE_NAME = "astro-rail-pwa-v2-20260611";
+const CACHE_NAME = "astro-rail-pwa-v3-20260702";
 const APP_SHELL = [
-  "/app",
   "/manifest.webmanifest",
   "/railstar-app-icon-no-text.png",
   "/railstar-app-icon.png",
@@ -16,8 +15,15 @@ const NETWORK_FIRST_PATHS = new Set([
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => Promise.all(APP_SHELL.map((url) => cache.add(url).catch(() => undefined))))
+      .then(() => self.skipWaiting()),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
@@ -37,7 +43,11 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(fetch(request).catch(() => caches.match("/app")));
+    event.respondWith(
+      fetch(request, { cache: "reload" }).catch(() =>
+        caches.match(request).then((cached) => cached || caches.match("/")).then((response) => response || Response.error()),
+      ),
+    );
     return;
   }
 
@@ -49,7 +59,23 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           return response;
         })
-        .catch(() => caches.match(request)),
+        .catch(() => caches.match(request).then((cached) => cached || Response.error())),
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith("/assets/")) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (!response.ok) {
+            return caches.match(request).then((cached) => cached || response);
+          }
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || Response.error())),
     );
     return;
   }

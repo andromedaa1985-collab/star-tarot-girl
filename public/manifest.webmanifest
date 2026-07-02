@@ -16,13 +16,13 @@
   "categories": ["lifestyle", "productivity"],
   "icons": [
     {
-      "src": "/railstar-app-icon-no-text.png?v=20260611",
+      "src": "/railstar-app-icon-no-text.png?v=20260702",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/railstar-app-icon.png?v=20260611",
+      "src": "/railstar-app-icon.png?v=20260702",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
