@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags, Pencil, Search } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, DiaryEntry, ReviewEntry } from '../store';
 import clsx from 'clsx';
 import { buildDiaryThemeTrends, recordAppEvent } from '../lib/engagement';
@@ -14,13 +14,19 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import PageHeader from '../components/ui/PageHeader';
+import { useDialogFocus } from '../lib/useDialogFocus';
+import { getStoredAccountSession } from '../lib/accountClient';
+import { writeWorkspaceStorage } from '../lib/workspacePersistence';
+import { filterDiaryEntries, getDiarySourceSignature, isDiaryReviewCurrent, parseDiaryTags, updateDiaryEntry } from '../lib/diaryRecords';
+import { getBaziResultStatus } from '../lib/baziProfiles';
 
 const MOODS = [
-  { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
-  { value: 'good', icon: <Smile size={24} />, label: '不错', color: 'text-green-500', bg: 'bg-green-500/10', border: 'border-green-500/30' },
-  { value: 'neutral', icon: <Meh size={24} />, label: '平淡', color: 'text-stone-500', bg: 'bg-stone-500/10', border: 'border-stone-500/30' },
-  { value: 'bad', icon: <Frown size={24} />, label: '糟糕', color: 'text-rose-500', bg: 'bg-rose-500/10', border: 'border-rose-500/30' },
-  { value: 'awful', icon: <CloudRain size={24} />, label: '极差', color: 'text-zinc-600', bg: 'bg-zinc-500/10', border: 'border-zinc-500/30' },
+  { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
+  { value: 'good', icon: <Smile size={24} />, label: '不错', color: 'text-green-700 dark:text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/30' },
+  { value: 'neutral', icon: <Meh size={24} />, label: '平淡', color: 'text-apple-text-muted', bg: 'bg-stone-500/10', border: 'border-stone-500/30' },
+  { value: 'bad', icon: <Frown size={24} />, label: '糟糕', color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30' },
+  { value: 'awful', icon: <CloudRain size={24} />, label: '极差', color: 'text-zinc-600 dark:text-zinc-300', bg: 'bg-zinc-500/10', border: 'border-zinc-500/30' },
 ];
 
 const DAILY_DIARY_PROMPTS = [
@@ -75,14 +81,7 @@ function getEntriesInRange(entries: DiaryEntry[], startDate: string, endDate: st
   });
 }
 
-function sameIdSet(a: string[], b: string[]) {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((id, index) => id === sortedB[index]);
-}
-
-type DiaryReviewMeta = Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> & Partial<Pick<ReviewEntry, 'date' | 'entryIds'>>;
+type DiaryReviewMeta = Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> & Partial<Pick<ReviewEntry, 'date' | 'entryIds' | 'sourceSignature'>>;
 
 const DIARY_KEYWORD_HINTS = ['工作', '关系', '恋爱', '家人', '焦虑', '压力', '选择', '金钱', '学习', '失眠', '疲惫', '机会', '边界', '自我'];
 
@@ -111,6 +110,8 @@ function getReviewEntries(review: DiaryReviewMeta, entries: DiaryEntry[]) {
 }
 
 function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) {
+  // Do not silently reconstruct an old AI archive from subsequently edited diary text.
+  entries = meta && isDiaryReviewCurrent(meta, entries) ? entries : [];
   const cleanContent = cleanReviewContent(content);
   const lines = cleanContent.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const sourceText = `${cleanContent} ${entries.map((entry) => `${entry.content} ${(entry.tags || []).join(' ')}`).join(' ')}`;
@@ -159,22 +160,67 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
 }
 
 export default function Diary() {
+  const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   useTrustedTime();
   const navigate = useNavigate();
-  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { diaryEntries, setDiaryEntries, baziResult: storedBaziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
   const [isAdding, setIsAdding] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const reviewRequestRef = useRef(false);
+  const [reviewFailed, setReviewFailed] = useState(false);
   const [reviewResult, setReviewResult] = useState<string | null>(null);
-  const [reviewResultMeta, setReviewResultMeta] = useState<Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> | null>(null);
+  const [reviewResultMeta, setReviewResultMeta] = useState<DiaryReviewMeta | null>(null);
   const [reviewRange, setReviewRange] = useState<ReviewRangeKey>('today');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  
+  const [editingEntry, setEditingEntry] = useState<DiaryEntry | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editMood, setEditMood] = useState<DiaryEntry['mood']>('neutral');
+  const [editTags, setEditTags] = useState('');
+  const [query, setQuery] = useState('');
+  const [moodFilter, setMoodFilter] = useState<DiaryEntry['mood'] | 'all'>('all');
+  const [tagFilter, setTagFilter] = useState('');
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [entryNotice, setEntryNotice] = useState('');
+  const entrySaveRef = useRef(false);
+  const entryDialogRef = useRef<HTMLDivElement>(null);
+  const historyDialogRef = useRef<HTMLDivElement>(null);
+  const closeEntryDialog = () => { setIsAdding(false); setEditingEntry(null); };
+  useDialogFocus(entryDialogRef, isAdding, closeEntryDialog);
+  useDialogFocus(historyDialogRef, showHistoryModal, () => setShowHistoryModal(false));
+
   // New entry state
   const [newContent, setNewContent, clearContentDraft] = usePersistentDraft('draft:diary:content', '');
   const [newMood, setNewMood, clearMoodDraft] = usePersistentDraft<DiaryEntry['mood']>('draft:diary:mood', 'neutral');
   const [newTags, setNewTags, clearTagsDraft] = usePersistentDraft('draft:diary:tags', '');
 
+  const entryContent = editingEntry ? editContent : newContent;
+  const entryMood = editingEntry ? editMood : newMood;
+  const entryTags = editingEntry ? editTags : newTags;
+  const filteredEntries = filterDiaryEntries(diaryEntries, { query, mood: moodFilter, tag: tagFilter });
+  const availableTags = [...new Set<string>(diaryEntries.flatMap((entry: DiaryEntry) => entry.tags || []))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const hasFilters = Boolean(query.trim() || moodFilter !== 'all' || tagFilter);
+  const clearFilters = () => { setQuery(''); setMoodFilter('all'); setTagFilter(''); setVisibleCount(20); };
+  const openNewEntry = () => { entrySaveRef.current = false; setEditingEntry(null); setIsAdding(true); setEntryNotice(''); };
+  const openEditEntry = (entry: DiaryEntry) => {
+    entrySaveRef.current = false;
+    setEditingEntry(entry); setEditContent(entry.content); setEditMood(entry.mood); setEditTags((entry.tags || []).join(' '));
+    setIsAdding(true); setEntryNotice('');
+  };
+  useEffect(() => { setVisibleCount(20); }, [query, moodFilter, tagFilter]);
+  useEffect(() => {
+    const entryId = searchParams.get('entry');
+    if (!entryId) return;
+    const entry = diaryEntries.find(item => item.id === entryId);
+    if (entry) openEditEntry(entry);
+    else setEntryNotice('这篇日记已不存在，其他记录仍可继续查看。');
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('entry');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, diaryEntries]);
+
   const activeProfile = profiles.find(p => p.id === activeProfileId);
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const trustedNow = getTrustedNow();
   const todayPrompt = DAILY_DIARY_PROMPTS[Math.floor(parseDateKey(getAppDateKey(trustedNow)).getTime() / DAY_MS) % DAILY_DIARY_PROMPTS.length];
   const thisWeekCount = diaryEntries.filter(entry => trustedNow.getTime() - parseDateKey(entry.date).getTime() < 7 * DAY_MS).length;
@@ -192,7 +238,7 @@ export default function Diary() {
     navigate('/app/profile?plus=1&plan=plus_monthly&from=diary_review');
   };
 
-  const askTarotFromReview = (content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) => {
+  const askTarotFromReview = async (content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) => {
     const archive = buildDiaryReviewArchive(content, meta, entries);
     const prompt = [
       `请沿着我的「${archive.title}」继续看。`,
@@ -203,7 +249,7 @@ export default function Diary() {
     ].filter(Boolean).join('\n');
 
     try {
-      localStorage.setItem('draft:home:input', JSON.stringify(prompt));
+      if (!await writeWorkspaceStorage(workspaceOwner.current, 'draft:home:input', JSON.stringify(prompt))) return;
     } catch {
       // Draft handoff is optional. Navigation still works if storage is unavailable.
     }
@@ -219,19 +265,36 @@ export default function Diary() {
   };
 
   const handleSaveEntry = () => {
-    if (!newContent.trim()) return;
-    
+    if (!entryContent.trim() || entrySaveRef.current) return;
+    entrySaveRef.current = true;
+
+    if (editingEntry) {
+      if (!diaryEntries.some(entry => entry.id === editingEntry.id)) {
+        setEntryNotice('这篇日记已不存在，修改没有另存为新日记。');
+        closeEntryDialog();
+        return;
+      }
+      setDiaryEntries(prev => updateDiaryEntry(prev, editingEntry.id, {
+        content: editContent, mood: editMood, tags: parseDiaryTags(editTags),
+      }, getTrustedNow().toISOString()));
+      setEntryNotice('修改已保存，原日期保持不变；新建日记草稿也已保留。');
+      closeEntryDialog();
+      return;
+    }
+
     const entry: DiaryEntry = {
       id: createRecordId('diary'),
       date: getAppDateKey(getTrustedNow()),
       mood: newMood,
       content: newContent.trim(),
-      tags: newTags.split(/[,，\s]+/).filter(t => t.trim() !== ''),
+      tags: parseDiaryTags(newTags),
     };
 
     setDiaryEntries(prev => [entry, ...prev]);
     setAppEvents((events) => recordAppEvent(events, 'diary_save', { mood: newMood, tags: entry.tags.length }));
-    setIsAdding(false);
+    closeEntryDialog();
+    clearFilters();
+    setEntryNotice('日记已保存。');
     clearContentDraft('');
     clearMoodDraft('neutral');
     clearTagsDraft('');
@@ -244,12 +307,14 @@ export default function Diary() {
   };
 
   const handleReview = async () => {
+    if (isReviewing || reviewRequestRef.current) return;
     if (isPremiumReviewRange && !plusActive) {
       openPlusForReview();
       return;
     }
 
     if (scopedDiaryEntries.length === 0) {
+      setReviewFailed(false);
       setReviewResult(`${reviewWindow.label}还没有日记可复盘。先写一篇，星轨才能看见这段时间真正发生了什么。`);
       setReviewResultMeta({
         rangeLabel: reviewWindow.label,
@@ -261,23 +326,29 @@ export default function Diary() {
     }
 
     const scopedEntryIds = scopedDiaryEntries.map((entry) => entry.id);
+    const sourceSignature = getDiarySourceSignature(scopedDiaryEntries);
     const existingReview = reviewHistory.find((review) =>
       review.startDate === reviewWindow.startDate &&
       review.endDate === reviewWindow.endDate &&
-      sameIdSet(review.entryIds || [], scopedEntryIds)
+      isDiaryReviewCurrent(review, scopedDiaryEntries)
     );
 
     if (existingReview) {
+      setReviewFailed(false);
       setReviewResult(existingReview.content);
       setReviewResultMeta({
         rangeLabel: existingReview.rangeLabel || reviewWindow.label,
         startDate: existingReview.startDate || reviewWindow.startDate,
         endDate: existingReview.endDate || reviewWindow.endDate,
         entryCount: existingReview.entryCount || scopedDiaryEntries.length,
+        entryIds: existingReview.entryIds,
+        sourceSignature: existingReview.sourceSignature,
       });
       return;
     }
 
+    reviewRequestRef.current = true;
+    setReviewFailed(false);
     setIsReviewing(true);
     setReviewResult(null);
     setReviewResultMeta({
@@ -285,6 +356,8 @@ export default function Diary() {
       startDate: reviewWindow.startDate,
       endDate: reviewWindow.endDate,
       entryCount: scopedDiaryEntries.length,
+      entryIds: scopedEntryIds,
+      sourceSignature,
     });
 
     try {
@@ -329,8 +402,9 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
           })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        aiText = data.choices[0].message.content;
+        if (!res.ok || data.error) throw new Error(data.error?.message || 'Review generation failed');
+        aiText = data.choices?.[0]?.message?.content;
+        if (typeof aiText !== 'string' || !cleanAiText(aiText)) throw new Error('Empty review response');
       } catch (err) {
         console.error("DeepSeek Error:", err);
         throw err;
@@ -338,7 +412,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
       const finalResult = cleanAiText(aiText);
       setReviewResult(finalResult);
-      
+
       // Save to history (limit to 30)
       const newReview: ReviewEntry = {
         id: createRecordId('review'),
@@ -349,6 +423,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         endDate: reviewWindow.endDate,
         entryCount: scopedDiaryEntries.length,
         entryIds: scopedEntryIds,
+        sourceSignature,
         ...createGenerationTrace('diary_review', {
           model: DEEPSEEK_TEXT_MODEL,
           usedFallback: false,
@@ -360,74 +435,65 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
     } catch (error: any) {
       console.error("Review Error:", error);
       setReviewResult(SERVICE_FALLBACK.diaryReview);
+      setReviewFailed(true);
     } finally {
+      reviewRequestRef.current = false;
       setIsReviewing(false);
     }
   };
 
   return (
-    <div className="relative h-full w-full overflow-y-auto overscroll-contain px-4 pt-6 pb-40 text-apple-text no-scrollbar">
-      {/* Header */}
-      <div className="flex flex-col items-center mb-8 relative z-10">
-        <h1 className="mb-2 flex items-center gap-2 font-sans text-3xl font-bold tracking-widest text-apple-accent dark:text-apple-gold dark:drop-shadow-[0_0_22px_rgba(244,207,131,0.16)]">
-          <Book size={28} />
-          命运日记
-        </h1>
-        <p className="text-apple-text-muted text-sm tracking-widest dark:text-[#b7b1a3]">记录心路历程，洞察命运轨迹</p>
-      </div>
+    <div className="rail-page">
+      <PageHeader eyebrow="心情与记录" title="命运日记" description="把今天写下来，让每一次情绪与选择都有迹可循。" action={<button onClick={openNewEntry} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
+      <div className="rail-page-content space-y-6">
+        {entryNotice && <p role="status" className="rounded-xl border border-apple-border bg-apple-surface p-3 text-[14px] text-apple-text-muted">{entryNotice}</p>}
+        <section className="relative overflow-hidden rounded-[20px] border border-apple-gold/22 bg-apple-gold/[0.07] p-4">
 
-      <div className="max-w-md mx-auto space-y-6 relative z-10">
-        <section className="relative overflow-hidden rounded-3xl border border-apple-gold/22 bg-apple-gold/[0.07] p-4 shadow-[0_18px_42px_rgba(117,82,42,0.10)] dark:border-apple-gold/24 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.13),rgba(22,23,31,0.92)_42%,rgba(9,10,16,0.96))] dark:shadow-[0_20px_54px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.07)]">
-          <div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-apple-gold/18 blur-3xl" />
-          <div className="pointer-events-none absolute -left-14 bottom-0 h-32 w-32 rounded-full bg-[#7b6748]/18 blur-3xl" />
-          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/38 to-transparent" />
           <div className="relative z-10 flex items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2 text-apple-gold dark:text-[#f3d487]">
+              <div className="flex items-center gap-2 text-apple-gold">
                 <Sparkles size={16} />
-                <span className="text-sm font-bold">今日记录灵感</span>
+                <span className="text-[15px] font-medium">今日记录灵感</span>
               </div>
-              <p className="mt-2 text-sm leading-relaxed text-apple-text dark:text-[#f3efe6]">{todayPrompt}</p>
+              <p className="rail-body mt-2">{todayPrompt}</p>
             </div>
             <button
-              onClick={() => {
-                setIsAdding(true);
-              }}
-              className="shrink-0 rounded-full bg-apple-gold px-3 py-1.5 text-xs font-bold text-[#080a11] shadow-[0_10px_24px_rgba(185,123,40,0.20)] transition-transform active:scale-95 dark:bg-[#f1cf80] dark:shadow-[0_12px_28px_rgba(244,207,131,0.18)]"
+              onClick={openNewEntry}
+              className="rail-button-secondary shrink-0 px-4"
             >
               去写
             </button>
           </div>
           <div className="relative z-10 mt-4 grid grid-cols-2 gap-2">
-            <DiaryStat label="本周记录" value={`${thisWeekCount} 篇`} />
+            <DiaryStat label="近 7 日记录" value={`${thisWeekCount} 篇`} />
             <DiaryStat label="最近心情" value={latestMoodLabel} />
           </div>
         </section>
 
         {diaryEntries.length >= 3 && diaryThemeTrends.length > 0 && (
-          <section className="rounded-3xl border border-apple-border bg-apple-surface/82 p-4 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[#11151f]/82 dark:shadow-[0_10px_32px_rgba(0,0,0,0.34)]">
+          <section className="rounded-[20px] border border-apple-border bg-apple-surface p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-bold text-apple-text">
+                <div className="flex items-center gap-2 text-[15px] font-medium text-apple-text">
                   <Tags size={15} className="text-apple-gold" />
                   情绪关键词趋势
                 </div>
-                <div className="mt-0.5 text-[11px] leading-relaxed text-apple-text-muted">
+                <div className="mt-0.5 text-[13px] leading-relaxed text-apple-text-muted">
                   根据近 30 天日记提取，后续复盘会优先引用这些线索。
                 </div>
               </div>
-              <div className="shrink-0 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+              <div className="shrink-0 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[13px] font-medium text-apple-gold">
                 {diaryEntries.length} 篇
               </div>
             </div>
             <div className="grid gap-2">
               {diaryThemeTrends.map((trend) => (
-                <div key={trend.id} className="rounded-[20px] border border-apple-border bg-apple-bg/44 px-3 py-2 dark:border-white/10 dark:bg-black/14">
+                <div key={trend.id} className="rounded-[20px] border border-apple-border bg-apple-bg px-3 py-2">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 text-sm font-black text-apple-text">{trend.label}</div>
-                    <div className="shrink-0 text-[11px] font-bold text-apple-gold">{trend.entryCount} 次</div>
+                    <div className="min-w-0 text-[15px] font-semibold text-apple-text">{trend.label}</div>
+                    <div className="shrink-0 text-[13px] font-medium text-apple-gold">{trend.entryCount} 次</div>
                   </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-apple-text-muted">
+                  <div className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">
                     {trend.moodSummary} · {trend.evidence || '继续写几篇，趋势会更清楚。'}
                   </div>
                 </div>
@@ -438,25 +504,15 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
         {/* Actions */}
         <div className="grid grid-cols-2 gap-4">
-          <button
-            onClick={() => setIsAdding(true)}
-            className="col-span-2 bg-apple-surface backdrop-blur-xl rounded-3xl p-5 flex flex-col items-center justify-center gap-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] hover:shadow-[0_12px_32px_rgba(185,123,40,0.16)] transition-all text-apple-accent border border-apple-border dark:border-apple-gold/14 dark:bg-[#141821]/82 dark:text-apple-gold dark:shadow-[0_12px_34px_rgba(0,0,0,0.38)]"
-          >
-            <div className="w-12 h-12 rounded-full bg-apple-accent/10 flex items-center justify-center dark:bg-apple-gold/12">
-              <Plus size={24} />
-            </div>
-            <span className="font-medium text-sm tracking-widest">写日记</span>
-          </button>
-
-          <section className="col-span-2 rounded-3xl border border-apple-border bg-apple-surface/78 p-3 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[#11151f]/80 dark:shadow-[0_10px_32px_rgba(0,0,0,0.34)]">
+          <section className="col-span-2 rounded-[20px] border border-apple-border bg-apple-surface p-3">
             <div className="mb-3 flex items-center justify-between gap-3 px-1">
               <div className="min-w-0">
-                <div className="text-sm font-bold text-apple-text">选择复盘范围</div>
-                <div className="mt-0.5 text-[11px] text-apple-text-muted">
+                <div className="text-[15px] font-medium text-apple-text">选择复盘范围</div>
+                <div className="mt-0.5 text-[13px] text-apple-text-muted">
                   今日复盘免费 · 周期复盘 Plus 可用
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+              <div className="flex shrink-0 items-center gap-1 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[13px] font-medium text-apple-gold">
                 {plusActive ? <Crown size={12} /> : <Lock size={12} />}
                 {plusActive ? 'Plus 已开通' : 'Plus 解锁'}
               </div>
@@ -469,14 +525,15 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   <button
                     key={range.key}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => handleSelectReviewRange(range.key)}
                     className={clsx(
-                      'relative rounded-full border px-2 py-2 text-xs font-bold transition-all',
+                      'relative rounded-full border px-2 py-2 text-[13px] font-medium transition-all',
                       active
-                        ? 'border-apple-gold bg-apple-gold text-[#17130f] shadow-[0_10px_24px_rgba(185,123,40,0.18)]'
+                        ? 'border-apple-gold bg-apple-text text-apple-bg'
                         : locked
-                          ? 'border-apple-border bg-apple-bg/40 text-apple-text-muted/60 hover:border-apple-gold/35 hover:text-apple-gold dark:border-white/10 dark:bg-black/14'
-                          : 'border-apple-border bg-apple-bg/50 text-apple-text-muted hover:border-apple-gold/35 hover:text-apple-text dark:border-white/10 dark:bg-black/14'
+                          ? 'border-apple-border bg-apple-bg text-apple-text-muted hover:border-apple-gold/35 hover:text-apple-gold'
+                          : 'border-apple-border bg-apple-bg text-apple-text-muted hover:border-apple-gold/35 hover:text-apple-text'
                     )}
                     title={locked ? '开通 Plus 后可用' : range.label}
                   >
@@ -488,37 +545,38 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                 );
               })}
             </div>
-            <div className="mt-3 rounded-2xl bg-apple-bg/50 px-3 py-2 text-[11px] leading-relaxed text-apple-text-muted dark:bg-black/14">
+            <div className="mt-3 rounded-2xl bg-apple-bg px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
               当前范围：{reviewRangeText} · {scopedDiaryEntries.length} 篇
             </div>
           </section>
-          
+
           <button
             onClick={handleReview}
             disabled={isReviewing}
+            aria-busy={isReviewing}
             className={clsx(
-              'rounded-3xl p-5 flex flex-col items-center justify-center gap-3 transition-all disabled:opacity-70',
+              'rail-button w-full',
               isPremiumReviewRange && !plusActive
-                ? 'border border-apple-gold/30 bg-apple-surface text-apple-gold shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:bg-[#141821]/82'
-                : 'bg-gradient-to-br from-apple-gold to-[#c88a34] shadow-[0_16px_34px_rgba(185,123,40,0.20)] text-[#17130f] hover:opacity-90 dark:from-[#f1cf80] dark:to-[#b98436] dark:text-[#17130f] dark:shadow-[0_14px_34px_rgba(244,207,131,0.18)]'
+                ? 'border border-apple-gold/30 bg-apple-surface text-apple-gold'
+                : 'bg-apple-text text-apple-bg'
             )}
           >
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+            <div className="flex items-center justify-center">
               {isReviewing ? <Loader2 size={24} className="animate-spin" /> : isPremiumReviewRange && !plusActive ? <Lock size={24} /> : <BrainCircuit size={24} />}
             </div>
-            <span className="font-medium text-sm tracking-widest">
+            <span className="font-medium text-[15px]">
               {isReviewing ? '复盘中...' : isPremiumReviewRange && !plusActive ? '开通 Plus' : `${reviewWindow.label}复盘`}
             </span>
           </button>
 
           <button
             onClick={() => setShowHistoryModal(true)}
-            className="bg-apple-surface backdrop-blur-xl rounded-3xl p-5 flex flex-col items-center justify-center gap-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] hover:shadow-[0_12px_32px_rgba(185,123,40,0.15)] transition-all text-apple-text-muted border border-apple-border dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
+            className="rail-button-secondary w-full"
           >
-            <div className="w-12 h-12 rounded-full bg-apple-surface flex items-center justify-center">
+            <div className="flex items-center justify-center">
               <History size={24} />
             </div>
-            <span className="font-medium text-sm tracking-widest">复盘记录</span>
+            <span className="font-medium text-[15px]">复盘记录</span>
           </button>
         </div>
 
@@ -531,64 +589,95 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <DiaryReviewArchiveCard
+              {reviewFailed ? <div role="status" className="rail-panel"><p className="rail-body">{reviewResult}</p><button onClick={handleReview} disabled={isReviewing} className="rail-button-secondary mt-3">重试复盘</button></div> : <DiaryReviewArchiveCard
                 content={reviewResult}
                 meta={reviewResultMeta}
-                entries={scopedDiaryEntries}
+                entries={getReviewEntries(reviewResultMeta || {}, diaryEntries)}
                 onClose={() => setReviewResult(null)}
-                onContinue={() => askTarotFromReview(reviewResult, reviewResultMeta, scopedDiaryEntries)}
-              />
+                onContinue={() => askTarotFromReview(reviewResult, reviewResultMeta, getReviewEntries(reviewResultMeta || {}, diaryEntries))}
+              />}
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Diary List */}
         <div className="space-y-4">
-          <h3 className="font-sans font-bold text-lg text-apple-text flex items-center gap-2">
+          <h2 className="rail-section-title flex items-center gap-2">
             <Calendar size={18} className="text-apple-text-muted" />
             过往记录
-          </h3>
-          
-          {diaryEntries.length === 0 ? (
-            <div className="text-center py-12 bg-apple-surface backdrop-blur-xl rounded-3xl border border-dashed border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.10)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-              <Book size={32} className="mx-auto text-apple-text-muted mb-3" />
-              <p className="text-sm text-apple-text-muted">还没有记录过日记，开始写下第一篇吧</p>
+          </h2>
+          <div className="rail-panel space-y-3">
+            <label htmlFor="diary-search" className="flex items-center gap-2 text-[15px] font-medium"><Search size={16} aria-hidden="true" />找一篇日记</label>
+            <input id="diary-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索正文、日期或标签" className="rail-field" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="diary-mood-filter" className="mb-1 block text-[13px] text-apple-text-muted">心情</label>
+                <select id="diary-mood-filter" value={moodFilter} onChange={event => setMoodFilter(event.target.value as DiaryEntry['mood'] | 'all')} className="rail-field">
+                  <option value="all">全部心情</option>
+                  {MOODS.map(mood => <option key={mood.value} value={mood.value}>{mood.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="diary-tag-filter" className="mb-1 block text-[13px] text-apple-text-muted">标签</label>
+                <select id="diary-tag-filter" value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rail-field">
+                  <option value="">全部标签</option>
+                  {availableTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </div>
             </div>
+            <div className="flex items-center justify-between gap-3 text-[13px] text-apple-text-muted">
+              <span role="status">找到 {filteredEntries.length} 篇 · 共 {diaryEntries.length} 篇</span>
+              {hasFilters && <button onClick={clearFilters} className="min-h-10 px-2 font-medium text-apple-accent">清空筛选</button>}
+            </div>
+          </div>
+
+          {diaryEntries.length === 0 ? (
+            <div className="rail-empty">
+              <Book size={32} className="mx-auto text-apple-text-muted mb-3" />
+              <p className="text-[15px] text-apple-text-muted">还没有记录过日记，开始写下第一篇吧</p>
+            </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="rail-empty"><p className="text-[15px] text-apple-text-muted">没有符合当前条件的日记，试试其他关键词或清空筛选。</p></div>
           ) : (
-            diaryEntries.map(entry => {
+            filteredEntries.slice(0, visibleCount).map(entry => {
               const moodObj = MOODS.find(m => m.value === entry.mood) || MOODS[2];
               return (
-                <motion.div 
+                <motion.div
                   key={entry.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-apple-surface backdrop-blur-xl rounded-3xl p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] relative group border border-apple-border dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
+                  className="rail-panel relative group"
                 >
-                  <button 
+                  <div className="absolute right-3 top-3 flex gap-1">
+                  <button onClick={() => openEditEntry(entry)} aria-label={`编辑 ${entry.date} 的日记`} className="flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text"><Pencil size={16} /></button>
+                  <button
+                    aria-label={`删除 ${entry.date} 的日记`}
                     onClick={() => handleDelete(entry.id)}
-                    className="absolute top-5 right-5 text-apple-text-muted hover:text-red-500 transition-colors"
+                    className="flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-red-600 transition-colors"
                   >
                     <X size={16} />
                   </button>
-                  
-                  <div className="flex items-center gap-4 mb-4">
+                  </div>
+
+                  <div className="flex items-center gap-3 mb-4 pr-20">
                     <div className={clsx("w-12 h-12 rounded-full flex items-center justify-center border-2", moodObj.bg, moodObj.color, moodObj.border)}>
                       {moodObj.icon}
                     </div>
                     <div>
-                      <div className="font-mono text-sm font-bold tracking-widest text-apple-text">{entry.date}</div>
-                      <div className={clsx("text-xs font-medium mt-0.5", moodObj.color)}>{moodObj.label}</div>
+                      <div className="text-[15px] font-medium tabular-nums text-apple-text">{entry.date}</div>
+                      <div className={clsx("text-[13px] font-medium mt-0.5", moodObj.color)}>{moodObj.label}</div>
+                      {entry.updatedAt && <div className="mt-1 text-[12px] text-apple-text-muted">已编辑</div>}
                     </div>
                   </div>
-                  
-                  <p className="text-sm text-apple-text leading-relaxed mb-4">
+
+                  <p className="rail-reader mb-4">
                     {entry.content}
                   </p>
-                  
+
                   {entry.tags && entry.tags.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {entry.tags.map((tag, idx) => (
-                        <span key={idx} className="text-[10px] px-2.5 py-1 bg-apple-surface-hover text-apple-text-muted rounded-lg tracking-wider">
+                        <span key={idx} className="text-[13px] px-2.5 py-1 bg-apple-surface-hover text-apple-text-muted rounded-lg">
                           #{tag}
                         </span>
                       ))}
@@ -598,6 +687,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               );
             })
           )}
+          {filteredEntries.length > visibleCount && <button className="rail-button-secondary w-full" onClick={() => setVisibleCount(count => count + 20)}>再显示 20 篇（还有 {filteredEntries.length - visibleCount} 篇）</button>}
         </div>
       </div>
 
@@ -606,43 +696,47 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         <AnimatePresence>
         {isAdding && (
           <div className="fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsAdding(false)}
+              className="absolute inset-0 bg-black/60"
+              onClick={closeEntryDialog}
             />
-            <motion.div 
-              initial={{ opacity: 0, y: "100%" }} 
-              animate={{ opacity: 1, y: 0 }} 
+            <motion.div
+              initial={{ opacity: 0, y: "100%" }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border border-apple-border bg-apple-surface p-6 shadow-2xl backdrop-blur-xl no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:rounded-3xl"
+              ref={entryDialogRef}
+              role="dialog" aria-modal="true" aria-labelledby="diary-entry-title" tabIndex={-1}
+              className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-[24px] border border-apple-border bg-apple-surface p-6 no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:rounded-[24px]"
             >
               <div className="flex justify-between items-center mb-6">
-                <h3 className="font-sans font-bold text-xl text-apple-text tracking-widest">写日记</h3>
-                <button onClick={() => setIsAdding(false)} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
+                <h2 id="diary-entry-title" className="rail-section-title">{editingEntry ? '编辑日记' : '写日记'}</h2>
+                <button aria-label={editingEntry ? '取消编辑日记' : '关闭写日记'} onClick={closeEntryDialog} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
                   <X size={20} />
                 </button>
               </div>
 
               <div className="space-y-6">
+                {editingEntry && <p className="text-[13px] leading-relaxed text-apple-text-muted">正在编辑 {editingEntry.date} 的记录。保存会更新这篇日记，原日期保持不变；取消会放弃本次修改。</p>}
                 {/* Mood Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-apple-text-muted mb-3 tracking-widest">今天的心情如何？</label>
-                  <div className="flex justify-between">
+                  <p id="diary-mood-label" className="mb-3 text-[15px] font-medium text-apple-text">{editingEntry ? '当时的心情如何？' : '今天的心情如何？'}</p>
+                  <div className="flex justify-between gap-1" role="group" aria-labelledby="diary-mood-label">
                     {MOODS.map(mood => (
                       <button
                         key={mood.value}
-                        onClick={() => setNewMood(mood.value as any)}
+                        aria-pressed={entryMood === mood.value}
+                        onClick={() => editingEntry ? setEditMood(mood.value as DiaryEntry['mood']) : setNewMood(mood.value as DiaryEntry['mood'])}
                         className={clsx(
-                          "flex flex-col items-center gap-2 p-2 rounded-xl transition-all",
-                          newMood === mood.value ? "scale-110 bg-apple-surface shadow-[0_8px_22px_rgba(117,82,42,0.14)] dark:shadow-[0_4px_15px_rgba(0,0,0,0.2)]" : "opacity-50 hover:opacity-100"
+                          "flex min-w-0 flex-1 flex-col items-center gap-2 rounded-xl border border-transparent py-2 transition-colors",
+                          entryMood === mood.value ? "border-apple-accent bg-apple-gold/10" : "hover:bg-apple-surface-hover"
                         )}
                       >
-                        <div className={clsx("w-12 h-12 rounded-full flex items-center justify-center border-2", mood.bg, mood.color, mood.border)}>
+                        <div className={clsx("w-10 h-10 rounded-full flex items-center justify-center border sm:w-12 sm:h-12", mood.bg, mood.color, mood.border)}>
                           {mood.icon}
                         </div>
-                        <span className={clsx("text-xs font-medium tracking-widest", newMood === mood.value ? mood.color : "text-apple-text-muted")}>
+                        <span className={clsx("text-[13px] font-medium", entryMood === mood.value ? mood.color : "text-apple-text-muted")}>
                           {mood.label}
                         </span>
                       </button>
@@ -652,34 +746,37 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
                 {/* Content */}
                 <div>
-                  <label className="block text-sm font-medium text-apple-text-muted mb-2 tracking-widest">发生了什么事？</label>
-                  <textarea
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
+                  <label htmlFor="diary-content" className="mb-2 block text-[15px] font-medium text-apple-text">发生了什么事？</label>
+                  <textarea id="diary-content" required
+                    aria-describedby="diary-content-hint"
+                    value={entryContent}
+                    onChange={(e) => editingEntry ? setEditContent(e.target.value) : setNewContent(e.target.value)}
                     placeholder={todayPrompt}
-                    className="w-full bg-apple-surface border border-apple-border rounded-2xl p-4 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 resize-none h-32 transition-all placeholder:text-apple-text-muted/45 dark:focus:ring-apple-gold/35 dark:placeholder:text-[#b7b1a3]/42"
+                    className="rail-field h-44 resize-y"
                   />
+                  <p id="diary-content-hint" className="rail-muted mt-2">写下一件小事就好；填写内容后即可保存。</p>
                 </div>
 
                 {/* Tags */}
                 <div>
-                  <label className="block text-sm font-medium text-apple-text-muted mb-2 tracking-widest">添加标签 (用空格或逗号分隔)</label>
-                  <input
+                  <label htmlFor="diary-tags" className="mb-2 block text-[15px] font-medium text-apple-text">添加标签 <span className="rail-muted">（空格或逗号分隔）</span></label>
+                  <input id="diary-tags"
                     type="text"
-                    value={newTags}
-                    onChange={(e) => setNewTags(e.target.value)}
+                    value={entryTags}
+                    onChange={(e) => editingEntry ? setEditTags(e.target.value) : setNewTags(e.target.value)}
                     placeholder="例如：工作 恋爱 焦虑"
-                    className="w-full bg-apple-surface border border-apple-border rounded-xl p-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-all placeholder:text-apple-text-muted/50 dark:focus:ring-apple-gold/35"
+                    className="rail-field"
                   />
                 </div>
 
                 <button
                   onClick={handleSaveEntry}
-                  disabled={!newContent.trim()}
-                  className="w-full py-4 bg-apple-gold text-[#17130f] rounded-2xl font-bold tracking-widest shadow-[0_14px_28px_rgba(185,123,40,0.20)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#c88a34] dark:bg-[#f1cf80] dark:text-[#17130f] dark:shadow-[0_12px_28px_rgba(244,207,131,0.18)] dark:hover:bg-[#d6aa54]"
+                  disabled={!entryContent.trim()}
+                  className="rail-button w-full"
                 >
-                  保存日记
+                  {editingEntry ? '保存修改' : '保存日记'}
                 </button>
+                {editingEntry && <button onClick={closeEntryDialog} className="rail-button-secondary w-full">取消编辑</button>}
               </div>
             </motion.div>
           </div>
@@ -692,24 +789,26 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         <AnimatePresence>
         {showHistoryModal && (
           <div className="fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60"
               onClick={() => setShowHistoryModal(false)}
             />
-            <motion.div 
-              initial={{ opacity: 0, y: "100%" }} 
-              animate={{ opacity: 1, y: 0 }} 
+            <motion.div
+              initial={{ opacity: 0, y: "100%" }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="w-full max-w-md bg-apple-surface backdrop-blur-xl border border-apple-border rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl relative z-10 max-h-[90vh] flex flex-col"
+              ref={historyDialogRef}
+              role="dialog" aria-modal="true" aria-labelledby="diary-history-title" tabIndex={-1}
+              className="w-full max-w-2xl bg-apple-surface border border-apple-border rounded-t-[24px] sm:rounded-[24px] p-6 relative z-10 max-h-[90vh] flex flex-col"
             >
               <div className="flex justify-between items-center mb-6 shrink-0">
-                <h3 className="font-sans font-bold text-xl text-apple-text tracking-widest flex items-center gap-2">
-                  <History size={20} className="text-apple-accent dark:text-apple-gold" />
+                <h2 id="diary-history-title" className="rail-section-title flex items-center gap-2">
+                  <History size={20} className="text-apple-accent" />
                   复盘记录
-                </h3>
-                <button onClick={() => setShowHistoryModal(false)} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
+                </h2>
+                <button aria-label="关闭复盘记录" onClick={() => setShowHistoryModal(false)} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -718,7 +817,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                 {reviewHistory.length === 0 ? (
                   <div className="text-center py-12">
                     <History size={32} className="mx-auto text-apple-text-muted/20 mb-3" />
-                    <p className="text-sm text-apple-text-muted">暂无复盘记录</p>
+                    <p className="text-[15px] text-apple-text-muted">暂无复盘记录</p>
                   </div>
                 ) : (
                   reviewHistory.map((review) => {
@@ -767,16 +866,15 @@ function DiaryReviewArchiveCard({
   onContinue?: () => void;
 }) {
   const archive = buildDiaryReviewArchive(content, meta, entries);
+  const sourceCurrent = Boolean(meta && isDiaryReviewCurrent(meta, entries));
 
   return (
     <div
       className={clsx(
-        'relative overflow-hidden border border-apple-accent/24 bg-apple-surface shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:border-apple-gold/22 dark:bg-[#111722]/86 dark:shadow-[0_14px_42px_rgba(0,0,0,0.34)]',
-        compact ? 'rounded-[26px] p-4' : 'rounded-3xl p-5 sm:p-6',
+        'relative overflow-hidden border border-apple-accent/24 bg-apple-surface',
+        compact ? 'rounded-[20px] p-4' : 'rounded-[20px] p-5 sm:p-6',
       )}
     >
-      <div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-apple-gold/12 blur-3xl" />
-      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/36 to-transparent" />
 
       {onClose && (
         <button
@@ -791,12 +889,12 @@ function DiaryReviewArchiveCard({
       <div className="relative z-10">
         <div className="flex items-start justify-between gap-3 pr-10">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-apple-gold">
+            <div className="flex items-center gap-2 text-[13px] font-semibold uppercase text-apple-gold">
               <FileText size={14} />
               复盘档案
             </div>
-            <h3 className="mt-1 line-clamp-2 text-lg font-black text-apple-text">{archive.title}</h3>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-apple-text-muted">
+            <h3 className="mt-1 line-clamp-2 text-lg font-semibold text-apple-text">{archive.title}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] font-medium text-apple-text-muted">
               <span className="inline-flex items-center gap-1">
                 <Calendar size={12} />
                 {archive.dateRange || '近期记录'}
@@ -807,14 +905,18 @@ function DiaryReviewArchiveCard({
           {!onClose && onContinue && (
             <button
               onClick={onContinue}
-              className="shrink-0 rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] shadow-[0_12px_28px_rgba(185,123,40,0.18)] transition-transform active:scale-[0.98]"
+              className="shrink-0 rounded-full bg-apple-text px-3 py-2 text-[13px] font-semibold text-apple-bg transition-transform active:scale-[0.98]"
             >
               继续问
             </button>
           )}
         </div>
 
-        <p className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg/45 p-3 text-sm leading-relaxed text-apple-text dark:border-white/10 dark:bg-black/16">
+        <p className="mt-3 text-[13px] leading-relaxed text-apple-text-muted">
+          {meta?.entryCount === 0 ? '还没有来源记录，先写一篇日记。' : sourceCurrent ? '依据生成时的记录，与当前日记一致。' : meta?.sourceSignature ? '来源日记已修改或删除。这份复盘保留生成时的版本，可重新复盘查看最新记录。' : '这份复盘保留生成时的版本；旧记录未保存来源版本，请重新复盘查看最新记录。'}
+        </p>
+
+        <p className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg p-3 text-[15px] leading-relaxed text-apple-text">
           {archive.summary}
         </p>
 
@@ -822,7 +924,7 @@ function DiaryReviewArchiveCard({
           {archive.keywords.map((keyword) => (
             <span
               key={keyword}
-              className="inline-flex items-center gap-1 rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[11px] font-bold text-apple-gold"
+              className="inline-flex items-center gap-1 rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[13px] font-medium text-apple-gold"
             >
               <Tags size={11} />
               {keyword}
@@ -831,18 +933,18 @@ function DiaryReviewArchiveCard({
         </div>
 
         {archive.timeline.length > 0 && (
-          <div className="mt-4 rounded-[22px] border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-black/16">
-            <div className="mb-2 flex items-center gap-2 text-xs font-black text-apple-text">
+          <div className="mt-4 rounded-[20px] border border-apple-border bg-apple-surface p-3">
+            <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-apple-text">
               <History size={14} className="text-apple-gold" />
               情绪时间线
             </div>
             <div className="space-y-2">
               {archive.timeline.map((item) => (
                 <div key={item.id} className="grid grid-cols-[46px_minmax(0,1fr)] gap-2">
-                  <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
+                  <div className="pt-0.5 text-[13px] font-medium text-apple-text-muted">{item.date}</div>
                   <div className="min-w-0 border-l border-apple-gold/24 pl-3">
-                    <div className="text-xs font-black text-apple-text">{item.mood}</div>
-                    <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{item.content}</div>
+                    <div className="text-[13px] font-semibold text-apple-text">{item.mood}</div>
+                    <div className="mt-0.5 line-clamp-2 text-[13px] leading-relaxed text-apple-text-muted">{item.content}</div>
                   </div>
                 </div>
               ))}
@@ -853,8 +955,8 @@ function DiaryReviewArchiveCard({
         {archive.advice.length > 0 && (
           <div className="mt-3 grid gap-2">
             {archive.advice.map((item, index) => (
-              <div key={`${item}-${index}`} className="rounded-[18px] bg-apple-surface-hover px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
-                <span className="mr-1 font-black text-apple-text">留意 {index + 1}</span>
+              <div key={`${item}-${index}`} className="rounded-[18px] bg-apple-surface-hover px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
+                <span className="mr-1 font-semibold text-apple-text">留意 {index + 1}</span>
                 {item}
               </div>
             ))}
@@ -862,9 +964,9 @@ function DiaryReviewArchiveCard({
         )}
 
         {!compact && (
-          <details className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg/38 p-3 dark:border-white/10 dark:bg-black/14">
-            <summary className="cursor-pointer text-xs font-black text-apple-text-muted">查看完整复盘</summary>
-            <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-apple-text">
+          <details className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg p-3">
+            <summary className="cursor-pointer text-[13px] font-semibold text-apple-text-muted">查看完整复盘</summary>
+            <div className="rail-reader mt-4">
               {cleanReviewContent(content)}
             </div>
           </details>
@@ -873,7 +975,7 @@ function DiaryReviewArchiveCard({
         {onClose && onContinue && (
           <button
             onClick={onContinue}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-3 text-sm font-black text-[#17130f] shadow-[0_14px_30px_rgba(185,123,40,0.20)] transition-transform active:scale-[0.99]"
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-text py-3 text-[15px] font-semibold text-apple-bg transition-transform active:scale-[0.99]"
           >
             <MessageCircle size={16} />
             带着这份档案继续问
@@ -886,9 +988,9 @@ function DiaryReviewArchiveCard({
 
 function DiaryStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-apple-border bg-apple-surface/70 p-3 backdrop-blur-xl dark:border-apple-gold/14 dark:bg-[#11151f]/72 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.055)]">
-      <div className="text-[11px] text-apple-text-muted">{label}</div>
-      <div className="mt-1 text-base font-bold text-apple-text">{value}</div>
+    <div className="rounded-2xl border border-apple-border bg-apple-surface p-3">
+      <div className="text-[13px] text-apple-text-muted">{label}</div>
+      <div className="mt-1 text-base font-medium text-apple-text">{value}</div>
     </div>
   );
 }

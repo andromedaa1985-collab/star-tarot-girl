@@ -1,11 +1,13 @@
 import React from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { Sparkles, User, Compass, Book, Moon, LockKeyhole, Check } from 'lucide-react';
+import { Outlet, NavLink } from 'react-router-dom';
+import { Sparkles, User, Compass, Book, Moon, Sun, Settings, LockKeyhole, Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import clsx from 'clsx';
 import { useAppContext } from '../store';
 import { hasFeatureAccess, type PremiumFeature } from '../lib/membership';
 import { normalizeUserAddress } from '../lib/aiPrompting';
+import { useDialogFocus } from '../lib/useDialogFocus';
+import { WorkspaceStorageNotice } from './WorkspaceStorageNotice';
 
 const SimulatorIcon = ({ size = 20 }: { size?: number }) => (
   <svg
@@ -45,37 +47,30 @@ const navItems = [
 ];
 
 export default function Layout() {
-  const location = useLocation();
-  const isTarotHome = location.pathname === '/app';
+  const { preferredAddress, preferredAddressPromptDismissed, membership, theme, setTheme } = useAppContext();
+  const addressPromptOpen = !preferredAddress && !preferredAddressPromptDismissed;
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-apple-bg text-apple-text font-sans">
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: 'var(--app-shell-image)',
-          }}
-        />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:44px_44px] opacity-35" />
-        <div
-          className="absolute inset-0 opacity-[0.08] mix-blend-screen"
-          style={{
-            backgroundImage:
-              'url("data:image/svg+xml,%3Csvg viewBox=%270 0 160 160%27 xmlns=%27http://www.w3.org/2000/svg%27%3E%3Cfilter id=%27n%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%270.7%27 numOctaves=%272%27 stitchTiles=%27stitch%27/%3E%3C/filter%3E%3Crect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27/%3E%3C/svg%3E")',
-          }}
-        />
-      </div>
-
-      <div className="relative z-10 flex h-full justify-center px-0 sm:px-5 md:py-5">
-        <div className="app-stage h-full w-full max-w-[1180px] overflow-hidden shadow-[0_30px_120px_rgba(0,0,0,0.16)] backdrop-blur-2xl sm:rounded-[36px]" style={{ background: 'var(--app-stage-bg)' }}>
-          <main className="box-border h-full overflow-hidden pt-[var(--app-safe-top)]">
-            <Outlet />
-          </main>
+    <div className="rail-app font-sans">
+      <aside inert={addressPromptOpen} className="rail-sidebar">
+        <NavLink to="/app" className="rail-sidebar-brand">
+          <Sparkles size={26} className="text-apple-gold" aria-hidden="true" />
+          <span><strong>星轨</strong><small>陪你看清今天</small></span>
+        </NavLink>
+        <nav aria-label="主导航">
+          {navItems.map(item => <React.Fragment key={item.to}><NavItem {...item} locked={Boolean(item.feature && !hasFeatureAccess(membership, item.feature))} /></React.Fragment>)}
+        </nav>
+        <div className="rail-sidebar-footer">
+          <NavLink to="/app/settings" className="rail-nav-item"><Settings size={18} aria-hidden="true" />设置与存档</NavLink>
+          <button type="button" className="rail-nav-item w-full" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+            {theme === 'dark' ? '浅色模式' : '深色模式'}
+          </button>
+          <p className="mt-6 px-3 text-xs leading-6 text-apple-text-muted">一张牌，一段心事。<br />把今天过清楚一点。</p>
         </div>
-      </div>
-
-      {!isTarotHome && <BottomDock />}
+      </aside>
+      <main inert={addressPromptOpen} className="rail-main" id="app-main"><WorkspaceStorageNotice /><Outlet /></main>
+      <div inert={addressPromptOpen}><BottomDock /></div>
       <PreferredAddressPrompt />
     </div>
   );
@@ -91,6 +86,8 @@ function PreferredAddressPrompt() {
   } = useAppContext();
   const [draftAddress, setDraftAddress] = React.useState('');
   const shouldShow = !preferredAddress && !preferredAddressPromptDismissed;
+  const dialogRef = React.useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, shouldShow, () => setPreferredAddressPromptDismissed(true));
   const normalizedDraft = normalizeUserAddress(draftAddress);
   const normalizedUserName = normalizeUserAddress(userName);
   const defaultPreview = normalizedUserName && normalizedUserName !== '星轨旅人'
@@ -117,7 +114,7 @@ function PreferredAddressPrompt() {
     <AnimatePresence>
       {shouldShow && (
         <motion.div
-          className="fixed inset-0 z-[90] flex items-end justify-center px-4 pb-[calc(18px+var(--app-safe-bottom))] pt-[calc(18px+var(--app-safe-top))] sm:items-center sm:p-6"
+          className="fixed inset-0 z-[90] flex items-end justify-center overflow-y-auto px-4 pb-[calc(18px+var(--app-safe-bottom))] pt-[calc(18px+var(--app-safe-top))] sm:items-center sm:p-6"
           role="presentation"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -125,34 +122,36 @@ function PreferredAddressPrompt() {
         >
           <div className="absolute inset-0 bg-black/45 backdrop-blur-[10px]" />
           <motion.form
+            ref={dialogRef}
+            tabIndex={-1}
             onSubmit={handleSubmit}
             role="dialog"
             aria-modal="true"
             aria-labelledby="preferred-address-title"
-            className="relative w-full max-w-[390px] overflow-hidden rounded-[30px] border border-[#ead7bb]/85 bg-[#fff8ec]/95 p-5 text-[#2b2117] shadow-[0_24px_70px_rgba(43,33,23,0.28),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl dark:border-white/12 dark:bg-[#121824]/94 dark:text-white dark:shadow-[0_24px_70px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.08)]"
+            aria-describedby="preferred-address-description"
+            className="rail-panel relative max-h-full w-full max-w-[420px] overflow-y-auto text-apple-text"
             initial={{ y: 28, scale: 0.96, opacity: 0 }}
             animate={{ y: 0, scale: 1, opacity: 1 }}
             exit={{ y: 24, scale: 0.97, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 360, damping: 32 }}
           >
-            <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full bg-[#f1c86f]/20 blur-2xl dark:bg-[#6B8AFF]/18" />
             <div className="relative">
               <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#f2d58e] text-[#2c1d0d] shadow-[0_12px_28px_rgba(185,123,40,0.18)] dark:bg-[#f4cf83]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-apple-gold/10 text-apple-gold">
                   <Sparkles size={20} />
                 </div>
                 <div className="min-w-0">
                   <h2 id="preferred-address-title" className="text-lg font-bold leading-tight">
                     想让星轨怎么称呼你？
                   </h2>
-                  <p className="mt-2 text-sm leading-relaxed text-[#736658] dark:text-white/66">
+                  <p id="preferred-address-description" className="mt-2 text-sm leading-relaxed text-apple-text-muted">
                     她会在每日运势和解读里自然叫你一次。选默认后不再弹出，也可以在「我的 - 编辑个人资料」里调整。
                   </p>
                 </div>
               </div>
 
               <div className="mt-5">
-                <label htmlFor="preferred-address-input" className="mb-2 block text-xs font-semibold text-[#9a641c] dark:text-[#f4cf83]">
+                <label htmlFor="preferred-address-input" className="mb-2 block text-[13px] font-medium text-apple-text">
                   你爱听的称呼
                 </label>
                 <input
@@ -162,12 +161,11 @@ function PreferredAddressPrompt() {
                   onChange={(event) => setDraftAddress(event.target.value)}
                   placeholder="比如：宝子、小鱼、姐姐"
                   maxLength={16}
-                  autoFocus
-                  className="h-12 w-full rounded-2xl border border-[#dec8aa]/90 bg-white/78 px-4 text-[15px] font-medium text-[#2b2117] outline-none transition focus:border-[#b97b28]/55 focus:ring-4 focus:ring-[#d9a94f]/16 dark:border-white/10 dark:bg-white/[0.07] dark:text-white dark:placeholder:text-white/35 dark:focus:border-[#f4cf83]/45 dark:focus:ring-[#6B8AFF]/18"
+                  className="rail-field"
                 />
               </div>
 
-              <div className="mt-3 rounded-2xl border border-[#ead7bb]/80 bg-white/45 px-4 py-3 text-xs leading-relaxed text-[#7a6d5f] dark:border-white/10 dark:bg-white/[0.05] dark:text-white/58">
+              <div className="mt-3 rounded-xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-[13px] leading-relaxed text-apple-text-muted">
                 {normalizedDraft
                   ? `之后她会自然叫你「${normalizedDraft}」，但不会每段都重复。`
                   : defaultPreview}
@@ -177,14 +175,14 @@ function PreferredAddressPrompt() {
                 <button
                   type="button"
                   onClick={handleUseDefault}
-                  className="h-12 rounded-2xl border border-[#dfccb2]/90 bg-white/58 text-sm font-semibold text-[#665848] transition active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.06] dark:text-white/66"
+                  className="rail-button-secondary"
                 >
                   先用默认
                 </button>
                 <button
                   type="submit"
                   disabled={!normalizedDraft}
-                  className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#17130f] text-sm font-bold text-[#f4cf83] shadow-[0_14px_28px_rgba(23,19,15,0.18)] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-[#cfc4b4] disabled:text-white/70 disabled:shadow-none dark:bg-[#f4cf83] dark:text-[#17130f] dark:disabled:bg-white/12 dark:disabled:text-white/30"
+                  className="rail-button"
                 >
                   <Check size={17} />
                   就叫这个
@@ -201,12 +199,7 @@ function PreferredAddressPrompt() {
 function BottomDock() {
   const { membership } = useAppContext();
   return (
-    <nav className="pointer-events-none fixed inset-x-0 z-50 isolate px-3" style={{ bottom: 'var(--app-bottom-pad)' }}>
-      <div
-        className="absolute inset-x-0 z-0"
-        style={{ bottom: 'calc(-1 * var(--app-bottom-pad))', height: 'calc(84px + var(--app-bottom-pad))', background: 'var(--app-dock-wash)' }}
-      />
-      <div className="pointer-events-auto relative z-10 mx-auto flex h-[64px] w-full max-w-[540px] items-center justify-between gap-1 rounded-[30px] px-2 backdrop-blur-2xl" style={{ background: 'var(--app-dock-bg)', boxShadow: 'var(--app-dock-shadow)' }}>
+    <nav className="rail-mobile-nav" aria-label="主导航">
         {navItems.map((item) => (
           <React.Fragment key={item.to}>
             <NavItem
@@ -218,7 +211,6 @@ function BottomDock() {
             />
           </React.Fragment>
         ))}
-      </div>
     </nav>
   );
 }
@@ -240,37 +232,19 @@ function NavItem({
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) =>
-        clsx(
-          'relative flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[22px] px-1 transition-colors duration-300',
-          isActive
-            ? 'text-apple-gold'
-            : 'text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text'
-        )
-      }
+      className={({ isActive }) => clsx('rail-nav-item', isActive && 'active')}
     >
       {({ isActive }) => (
         <>
-          {isActive && (
-            <motion.div
-              layoutId="dock-active-pill"
-              className="absolute inset-0 rounded-[22px] bg-apple-surface-hover shadow-[inset_0_0_0_1px_rgba(244,207,131,0.14)]"
-              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-            />
-          )}
-          <motion.div
-            className="relative z-10"
-            animate={{ y: isActive ? -2 : 0, scale: isActive ? 1.06 : 1 }}
-            transition={{ type: 'spring', stiffness: 360, damping: 24 }}
-          >
+          <span className="relative" aria-hidden="true">
             {icon}
             {locked && (
               <span className="absolute -right-2 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-apple-gold text-[#14110e]">
                 <LockKeyhole size={9} />
               </span>
             )}
-          </motion.div>
-          <span className="relative z-10 text-[9px] font-medium">
+          </span>
+          <span>
             {label}
           </span>
         </>

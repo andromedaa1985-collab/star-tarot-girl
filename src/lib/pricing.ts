@@ -150,9 +150,9 @@ export const SHOP_PLANS: ProductPlan[] = [
     desc: '适合反复问同一个人的用户。包含 Plus 长期记忆、完整关系合盘和 7 日关系陪伴。',
     bullets: ['Plus 月卡权益', '解锁完整关系合盘和 7 日陪伴', '更适合情侣、暧昧和复合观察'],
     description: '长期记忆、关系陪伴、完整合盘与 Plus 权益',
-    entitlement: { type: 'membership', plan: 'plus', days: 31, energyFloor: 30 },
-    limits: { tarotReadings: 260, relationshipReports: 6, dailyMissionEnergy: 8 },
-    features: ['Plus 月卡权益', '完整关系合盘', '7 日关系陪伴', '更多关系复盘次数'],
+    entitlement: { type: 'membership', plan: 'plus', days: 31, features: ['relationship_report', 'relationship_weekly'], energyFloor: 30 },
+    limits: { tarotReadings: 200, relationshipDays: 31, dailyCheckInEnergy: 2, dailyMissionEnergy: 6 },
+    features: ['31 天 Plus 权益', '31 天完整关系合盘权限', '31 天内使用 7 日关系陪伴'],
     experiment: {
       tier: 'relationship',
       variant: 'couple-plus-16-9',

@@ -1,8 +1,8 @@
+import PageHeader from '../components/ui/PageHeader';
 import React, { useEffect, useState, useRef } from 'react';
-import { useAppContext, LEVEL_THRESHOLDS, LEVEL_TITLES } from '../store';
-import { User, Sparkles, Heart, Settings, ChevronRight, Moon, Vibrate, Edit2, X, Check, Upload, Compass, Crown, CalendarCheck, Gift, ShieldCheck, WalletCards, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import clsx from 'clsx';
+import { useAppContext, LEVEL_THRESHOLDS, LEVEL_TITLES, FRAGMENTS_POOL } from '../store';
+import { User, Sparkles, Settings, ChevronRight, Moon, Vibrate, Edit2, X, Check, Upload, Compass, Crown, CalendarCheck, Gift, ShieldCheck, WalletCards, Loader2 } from 'lucide-react';
+import { cn } from '../lib/utils';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
@@ -15,6 +15,10 @@ import {
 import { getUserSegment } from '../lib/engagement';
 import { normalizeUserAddress } from '../lib/aiPrompting';
 import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
+import { getPlanPeriodLabel, getPlanTerms, getProfilePurchaseAuthPath } from '../lib/purchaseFlow';
+import { getBackupSummary, type BackupSummary } from '../lib/appBackup';
+import { formatArchiveTime, getRecentProfileRecords } from '../lib/profileRecords';
+import { formatRecordDate } from '../lib/recordSearch';
 import { apiFetch } from '../lib/apiClient';
 import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
 import {
@@ -38,26 +42,6 @@ const PAY_METHODS = [
   { id: 'wechat', label: '微信支付', desc: '支持微信扫码或手机支付' },
 ] as const;
 
-const SPIRITUAL_ANCHORS = [
-  { title: '被记住', desc: '你的牌迹、日记和档案会持续沉淀，不用每次重新解释自己。' },
-  { title: '被理解', desc: '星轨会从反复出现的问题里整理出你的情绪模式和选择惯性。' },
-  { title: '被陪着走完', desc: '每周复盘和守护信件把一次占卜变成一段可回看的陪伴。' },
-];
-
-const PLUS_VALUE_PILLARS = [
-  {
-    title: '长期记忆',
-    desc: '牌迹、日记、档案、沙盘会沉淀成一个持续可追问的个人上下文。',
-  },
-  {
-    title: '7 日复盘',
-    desc: '把反复主题、情绪底色和行动建议整理出来，不只是单次占卜。',
-  },
-  {
-    title: '守护回访',
-    desc: '每日来信会回应最近真实线索，而不是泛泛安慰。',
-  },
-];
 
 type PayMethodId = (typeof PAY_METHODS)[number]['id'];
 type PaymentStatus = 'idle' | 'creating' | 'opened' | 'checking' | 'waiting' | 'paid' | 'failed';
@@ -67,9 +51,9 @@ const PLAN_REDIRECTS: Record<string, string> = {
 };
 
 export default function Profile() {
-  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
+  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, setBaziFormData, setBaziMessages, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const [isEditing, setIsEditing] = useState(false);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
@@ -80,16 +64,37 @@ export default function Profile() {
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle');
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [trialBusy, setTrialBusy] = useState(false);
+  const [trialNotice, setTrialNotice] = useState<{ error: boolean; message: string } | null>(null);
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemNotice, setRedeemNotice] = useState<{ error: boolean; message: string } | null>(null);
+  const trialResumeAttempted = useRef(false);
   const [redeemCode, setRedeemCode] = useState('');
   const [editName, setEditName] = useState(userName);
   const [editPreferredAddress, setEditPreferredAddress] = useState(preferredAddress);
   const [editAvatar, setEditAvatar] = useState(userAvatar);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backupSummary, setBackupSummary] = useState<BackupSummary | null>(() => {
+    try { return getBackupSummary(); } catch { return null; }
+  });
+  const [archiveNotice, setArchiveNotice] = useState('');
+  const session = getStoredAccountSession();
+  const recentRecords = getRecentProfileRecords(tarotReadings, diaryEntries, simulationHistory);
+
+  const refreshArchiveStatus = () => {
+    try { setBackupSummary(getBackupSummary()); setArchiveNotice('已刷新本机存档状态。云端时间来自上次服务端确认。'); }
+    catch { setBackupSummary(null); setArchiveNotice('暂时无法读取本机存档状态，请到设置检查或导出记录。'); }
+  };
+  useEffect(() => {
+    const refresh = () => { try { setBackupSummary(getBackupSummary()); } catch { setBackupSummary(null); } };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', refresh);
+    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', refresh); };
+  }, []);
   
   const nextLevelExp = LEVEL_THRESHOLDS[bondLevel] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
   const progressPercent = Math.min(100, (bondExp / nextLevelExp) * 100);
   const userQuestionCount = messages.filter(msg => msg.role === 'user').length;
-  const valueScore = Math.min(100, bondLevel * 10 + fragments.length * 5 + diaryEntries.length * 6 + tarotReadings.length * 3 + simulationHistory.length * 4 + checkInStreak * 4);
   const lastCheckInLabel = lastCheckInDate ? lastCheckInDate.replace(/-/g, '.') : '还没开始';
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
@@ -117,14 +122,10 @@ export default function Profile() {
       ? 'plus_monthly'
       : 'daily_fortune_deep';
   const memorySeedCount = tarotReadings.length + diaryEntries.length + simulationHistory.length + profiles.length;
-  const purchaseContextLine =
-    memorySeedCount > 0
-      ? `你已经留下 ${memorySeedCount} 份线索。开通后，这些记录会变成可继续追问的上下文。`
-      : '先从一份报告或档案开始，后面每次追问都不用重新铺垫背景。';
   const selectedPlan = shopPlans.find((plan) => plan.id === selectedPlanId) || shopPlans[0];
   const selectedPayMethodMeta = PAY_METHODS.find((method) => method.id === selectedPayMethod) || PAY_METHODS[0];
 
-  const toggleSetting = (key: keyof typeof settings) => {
+  const toggleSetting = (key: 'bgmEnabled' | 'hapticsEnabled') => {
     setSettings(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -154,23 +155,27 @@ export default function Profile() {
   };
 
   const handleRedeemTesterCode = async () => {
+    if (redeemBusy) return;
     const normalizedCode = redeemCode.trim().toUpperCase();
     if (!normalizedCode) {
-      setPaymentStatus('idle');
-      setPaymentMessage('请输入兑换码。');
+      setRedeemNotice({ error: true, message: '请输入兑换码。' });
       return;
     }
-
-    setPaymentStatus('checking');
+    if (!getStoredAccountSession()) {
+      setRedeemNotice({ error: true, message: '请先在设置中登录账户，再回来兑换。' });
+      return;
+    }
+    setRedeemBusy(true);
+    setRedeemNotice(null);
     try {
       const snapshot = await redeemEntitlementCode(normalizedCode);
       applyServerEntitlements(snapshot);
       setRedeemCode('');
-      setPaymentStatus('paid');
-      setPaymentMessage(snapshot.message || '兑换成功：权益已由后端入账。');
+      setRedeemNotice({ error: false, message: snapshot.message || '兑换成功，权益已生效。' });
     } catch (error: any) {
-      setPaymentStatus('failed');
-      setPaymentMessage(error.message || '兑换失败，请稍后再试。');
+      setRedeemNotice({ error: true, message: error.message || '兑换失败，请稍后再试。' });
+    } finally {
+      setRedeemBusy(false);
     }
   };
 
@@ -198,21 +203,35 @@ export default function Profile() {
   };
 
   const handleStartTrial = async () => {
-    if (!trialAvailable) return;
-    setPaymentStatus('checking');
+    if (!trialAvailable || trialBusy) return;
+    if (!getStoredAccountSession()) {
+      navigate(getProfilePurchaseAuthPath(selectedPlan.id, true));
+      return;
+    }
+    setTrialBusy(true);
+    setTrialNotice(null);
     try {
       const snapshot = await startPlusTrialOnServer();
       applyServerEntitlements(snapshot);
-      setPaymentStatus('paid');
-      setPaymentMessage(snapshot.message || '已开通 24 小时 Plus 试用。');
+      setTrialNotice({ error: false, message: snapshot.message || '已开通 24 小时 Plus 试用。' });
     } catch (error: any) {
-      setPaymentStatus('failed');
-      setPaymentMessage(error.message || '试用开通失败，请稍后再试。');
+      setTrialNotice({ error: true, message: error.message || '试用暂未开通，请稍后重试。' });
+    } finally {
+      setTrialBusy(false);
     }
   };
 
   useEffect(() => {
-    if (!getStoredAccountSession()) return;
+    if (searchParams.get('trial') !== '1' || !getStoredAccountSession() || trialResumeAttempted.current) return;
+    trialResumeAttempted.current = true;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('trial');
+    setSearchParams(nextParams, { replace: true });
+    void handleStartTrial();
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!getStoredAccountSession() || searchParams.get('trial') === '1') return;
     fetchCurrentEntitlements()
       .then(applyServerEntitlements)
       .catch(() => undefined);
@@ -229,13 +248,12 @@ export default function Profile() {
   }, [hasPlanParam, normalizedPlanParam, plusParam]);
 
   const handleCreatePaymentOrder = async () => {
+    if (isCreatingPayment) return;
     setPaymentMessage(null);
     setPaymentStatus('idle');
     const accountSession = getStoredAccountSession();
     if (!accountSession) {
-      setPaymentStatus('failed');
-      setPaymentMessage('请先登录星轨账户，再开通会员或购买权益。');
-      navigate('/auth?next=/app/profile?plus=1');
+      navigate(getProfilePurchaseAuthPath(selectedPlan.id));
       return;
     }
     if (!guardianConsent) {
@@ -307,113 +325,98 @@ export default function Profile() {
   };
 
   return (
-    <div className="relative h-full w-full overflow-y-auto overscroll-contain px-6 pt-4 pb-40 text-apple-text no-scrollbar">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="font-sans text-3xl font-bold tracking-widest text-apple-accent">我的</h1>
-        <button 
-          onClick={() => navigate('/app/settings')}
-          className="p-2 rounded-full glass-panel hover:bg-apple-surface-hover transition-colors border-apple-border"
-        >
-          <Settings size={20} className="text-apple-accent" />
-        </button>
-      </div>
+    <div className="rail-page">
+      <div className="rail-page-content">
+      <PageHeader eyebrow="你的星轨" title="我的" description="在这里查看你的成长、记录与陪伴权益。" action={<button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary"><Settings size={17} />设置</button>} />
 
-      {/* User Card */}
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-        className="bg-apple-surface backdrop-blur-xl rounded-3xl p-6 mb-8 flex items-center gap-6 relative overflow-hidden border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
-      >
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 mix-blend-overlay pointer-events-none"></div>
-        <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-apple-accent/14 to-transparent rounded-bl-full pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-apple-gold/12 blur-3xl rounded-full pointer-events-none"></div>
-        
-        <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-apple-gold to-[#dcb66f] p-[2px] shadow-[0_14px_28px_rgba(185,123,40,0.18)] shrink-0 relative z-10 dark:from-[#6B8AFF] dark:to-[#4F46E5] dark:shadow-[0_0_20px_rgba(107,138,255,0.4)]">
-          <div className="w-full h-full rounded-full bg-apple-surface flex items-center justify-center overflow-hidden border-2 border-[#e1d1bc] dark:border-[#141419]">
-            {userAvatar ? (
-              <img src={userAvatar} alt="Avatar" className="w-full h-full object-cover" />
-            ) : (
-              <User size={32} className="text-apple-accent" />
-            )}
-          </div>
+      <section className="rail-panel mb-6 flex flex-wrap items-center gap-5">
+        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-apple-border bg-apple-surface-hover">
+          {userAvatar ? <img src={userAvatar} alt="我的头像" className="size-full object-cover" onError={handleAvatarError} /> : <User size={28} className="text-apple-gold" />}
         </div>
-        <div className="flex-1 z-10">
-          <h2 className="font-sans text-2xl font-bold mb-1 tracking-wider text-apple-text drop-shadow-md">{userName}</h2>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-apple-accent animate-pulse shadow-[0_0_8px_rgba(185,123,40,0.35)] dark:shadow-[0_0_8px_rgba(107,138,255,0.8)]"></span>
-            <p className="text-xs text-apple-accent font-mono tracking-widest">
-              {preferredAddress ? `她会叫你：${preferredAddress}` : 'ID: 88481234'}
-            </p>
-          </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-2xl font-semibold text-apple-text break-words">{userName}</h2>
+          <p className="rail-muted mt-1">{preferredAddress ? `她会叫你：${preferredAddress}` : '可以设置一个专属称呼'}</p>
+          <p className="rail-muted mt-1 break-all">{getStoredAccountSession()?.user.email || '本机账户 · 登录后可同步云端存档'}</p>
         </div>
-        <button 
-          onClick={() => {
-            setEditName(userName);
-            setEditPreferredAddress(preferredAddress);
-            setEditAvatar(userAvatar);
-            setIsEditing(true);
-          }}
-          className="absolute top-4 right-4 p-2 rounded-full bg-apple-surface hover:bg-apple-surface-hover border border-apple-border transition-colors text-apple-text-muted hover:text-apple-text z-10 shadow-sm"
-        >
-          <Edit2 size={14} />
-        </button>
-      </motion.div>
+        <button type="button" onClick={() => { setEditName(userName); setEditPreferredAddress(preferredAddress); setEditAvatar(userAvatar); setIsEditing(true); }} className="rail-button-secondary w-full sm:w-auto"><Edit2 size={16} />编辑资料</button>
+      </section>
+
+      <section className="mb-8" aria-labelledby="my-records-heading">
+        <h2 id="my-records-heading" className="rail-section-title mb-4">我的记录</h2>
+        <div className="rail-surface divide-y divide-apple-border overflow-hidden">
+          {[{ label: '牌迹', count: tarotReadings.length, description: '查找问题与牌面，沿原解读追问', href: '/app?history=1' }, { label: '日记', count: diaryEntries.length, description: '查找、编辑与回看心情', href: '/app/diary' }, { label: '沙盘', count: simulationHistory.length, description: '回看选择与比较标准', href: '/app/simulator' }].map(item => (
+            <button key={item.label} type="button" onClick={() => navigate(item.href)} className="flex min-h-20 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-apple-surface-hover">
+              <span className="min-w-0"><span className="block text-base font-medium">{item.label} · {item.count} 条</span><span className="rail-muted mt-1 block">{item.description}</span></span><ChevronRight size={18} aria-hidden="true" className="shrink-0 text-apple-text-muted" />
+            </button>
+          ))}
+        </div>
+        <h3 className="mt-6 mb-3 text-base font-medium">最近留下的记录</h3>
+        {recentRecords.length ? (
+          <ol className="divide-y divide-apple-border">
+            {recentRecords.map(record => <li key={`${record.kind}:${record.id}`}><button type="button" onClick={() => navigate(record.href)} className="flex w-full items-start justify-between gap-3 rounded-xl px-2 py-4 text-left hover:bg-apple-surface-hover"><span className="min-w-0"><span className="rail-muted block">{record.label} · {formatRecordDate(record.date)}</span><span className="mt-1 block line-clamp-2 break-words text-base leading-7">{record.title}</span></span><ChevronRight size={17} aria-hidden="true" className="mt-1 shrink-0 text-apple-text-muted" /></button></li>)}
+          </ol>
+        ) : <div className="rail-empty"><p>还没有留下记录</p><p className="rail-muted mt-2">先抽一张今日牌，或写下一句今天的心情。</p><div className="mt-4 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => navigate('/app')} className="rail-button-secondary">开始今日塔罗</button><button type="button" onClick={() => navigate('/app/diary')} className="rail-button-secondary">写一句心情</button></div></div>}
+      </section>
+
+      <section className="rail-panel mb-8" aria-labelledby="archive-status-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="archive-status-heading" className="rail-section-title">账户与存档</h2><button type="button" onClick={refreshArchiveStatus} className="min-h-11 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">刷新状态</button></div>
+        <dl className="mt-4 space-y-3 text-sm leading-6">
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">当前账户</dt><dd className="min-w-0 break-all">{session?.user.email || '本机游客'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">服务端存档时间</dt><dd>{session ? formatArchiveTime(session.user.archiveUpdatedAt, '尚未确认云端存档') : '登录后可同步'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">最近自动恢复点</dt><dd>{backupSummary ? formatArchiveTime(backupSummary.lastAutoRecoveryAt, '尚未生成') : '读取状态失败'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">此浏览器最近手动存档操作</dt><dd>{backupSummary ? formatArchiveTime(backupSummary.lastBackupAt, '尚未操作') : '读取状态失败'}</dd></div>
+        </dl>
+        <p className="rail-muted mt-4">云端时间是上次确认的存档时间，不代表当前输入已同步。手动存档操作包括导出或恢复，操作时间不能证明备份文件已经保存。</p>
+        {archiveNotice && <p role="status" className="rail-muted mt-2">{archiveNotice}</p>}
+        <button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary mt-4 w-full sm:w-auto">{session ? '备份与云端同步' : '登录或导出存档'}<ChevronRight size={16} aria-hidden="true" /></button>
+      </section>
 
       {/* Edit Profile Modal */}
-      {createPortal(
-      <AnimatePresence>
-        {isEditing && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center px-4 py-4" style={{ zIndex: 80 }}>
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsEditing(false)}
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-apple-surface backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-apple-border relative z-10"
-            >
+      <ProfileDialog open={isEditing} title="编辑个人资料" onClose={() => setIsEditing(false)}>
+          <div className="relative p-6">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="font-sans font-bold text-lg text-apple-text">编辑个人资料</h3>
-                <button onClick={() => setIsEditing(false)} className="p-1 rounded-full hover:bg-apple-surface-hover text-apple-text-muted">
+                <h3 className="font-sans font-semibold text-lg text-apple-text">编辑个人资料</h3>
+                <button aria-label="关闭编辑资料" onClick={() => setIsEditing(false)} className="flex size-10 items-center justify-center rounded-xl hover:bg-apple-surface-hover text-apple-text-muted">
                   <X size={20} />
                 </button>
               </div>
 
               <div className="mb-6">
-                <label className="block text-xs font-medium text-apple-text-muted mb-2">昵称</label>
+                <label htmlFor="profile-name" className="block text-[13px] font-medium text-apple-text-muted mb-2">昵称</label>
                 <input 
                   type="text" 
+                  id="profile-name"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-all"
+                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-[15px] text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-colors duration-150"
                   placeholder="输入你的昵称"
                   maxLength={12}
                 />
               </div>
 
               <div className="mb-6">
-                <label className="block text-xs font-medium text-apple-text-muted mb-2">想被怎么称呼</label>
+                <label htmlFor="profile-address" className="block text-[13px] font-medium text-apple-text-muted mb-2">想被怎么称呼</label>
                 <input
                   type="text"
+                  id="profile-address"
                   value={editPreferredAddress}
                   onChange={(e) => setEditPreferredAddress(e.target.value)}
-                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-all"
+                  className="w-full bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-[15px] text-apple-text focus:outline-none focus:ring-2 focus:ring-apple-accent/35 transition-colors duration-150"
                   placeholder="比如：宝子、小鱼、姐姐"
                   maxLength={16}
                 />
-                <p className="mt-2 text-[11px] leading-relaxed text-apple-text-muted">
+                <p className="mt-2 text-[13px] leading-[1.8] text-apple-text-muted">
                   留空则按昵称称呼。首次弹窗选择后，也可以回到这里重新调整。
                 </p>
               </div>
 
               <div className="mb-8">
-                <label className="block text-xs font-medium text-apple-text-muted mb-3">选择头像</label>
+                <label className="block text-[13px] font-medium text-apple-text-muted mb-3">选择头像</label>
                 <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar items-center">
                   <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 border-2 border-dashed border-apple-border bg-apple-surface hover:bg-apple-surface-hover transition-all"
+                    aria-label="上传自定义头像"
+                    className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 border-2 border-dashed border-apple-border bg-apple-surface hover:bg-apple-surface-hover transition-colors duration-150"
                   >
                     <Upload size={20} className="text-apple-text-muted" />
                   </button>
@@ -426,9 +429,10 @@ export default function Profile() {
                   />
                   <button 
                     onClick={() => setEditAvatar(null)}
-                    className={clsx(
-                      "w-14 h-14 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
-                      editAvatar === null ? "border-apple-accent shadow-[0_8px_20px_rgba(185,123,40,0.16)] scale-110 dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)]" : "border-transparent bg-apple-surface"
+                    aria-label="使用默认头像"
+                    className={cn(
+                      "w-14 h-14 rounded-full flex items-center justify-center shrink-0 border-2 transition-colors duration-150",
+                      editAvatar === null ? "border-apple-accent  scale-110 " : "border-transparent bg-apple-surface"
                     )}
                   >
                     <User size={24} className="text-apple-text-muted" />
@@ -437,12 +441,13 @@ export default function Profile() {
                     <button 
                       key={idx}
                       onClick={() => setEditAvatar(avatar)}
-                      className={clsx(
-                        "w-14 h-14 rounded-full overflow-hidden shrink-0 border-2 transition-all",
-                        editAvatar === avatar ? "border-apple-accent shadow-[0_8px_20px_rgba(185,123,40,0.16)] scale-110 dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)]" : "border-transparent bg-apple-surface"
+                      aria-label={`选择头像 ${idx + 1}`}
+                      className={cn(
+                        "w-14 h-14 rounded-full overflow-hidden shrink-0 border-2 transition-colors duration-150",
+                        editAvatar === avatar ? "border-apple-accent  scale-110 " : "border-transparent bg-apple-surface"
                       )}
                     >
-                      <img src={avatar} alt={`Avatar ${idx}`} className="w-full h-full object-cover" />
+                      <img src={avatar} alt="" width="56" height="56" className="w-full h-full object-cover" onError={handleAvatarError} />
                     </button>
                   ))}
                 </div>
@@ -450,454 +455,211 @@ export default function Profile() {
 
               <button 
                 onClick={handleSaveProfile}
-                className="w-full py-3 bg-apple-gold text-[#17130f] rounded-xl font-bold shadow-[0_14px_28px_rgba(185,123,40,0.20)] flex items-center justify-center gap-2 hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_20px_rgba(107,138,255,0.3)] dark:hover:bg-[#4F46E5]"
+                className="rail-button w-full"
               >
                 <Check size={18} />
                 保存修改
               </button>
-            </motion.div>
           </div>
-        )}
-      </AnimatePresence>,
-      document.body,
-      )}
+      </ProfileDialog>
 
-      {createPortal(
-      <AnimatePresence>
-        {showMembershipModal && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center px-4 py-4" style={{ zIndex: 80 }}>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#3b2a1d]/42 backdrop-blur-xl dark:bg-black/70"
-              onClick={() => setShowMembershipModal(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 18 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 18 }}
-              className="relative z-10 max-h-[calc(100svh-32px)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-3xl border border-apple-border bg-apple-surface p-6 shadow-2xl no-scrollbar dark:border-[#F4CF83]/25 dark:bg-[#111722]"
-            >
-              <button onClick={() => setShowMembershipModal(false)} className="absolute right-4 top-4 rounded-full p-2 text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text dark:hover:bg-white/[0.06]">
-                <X size={18} />
-              </button>
-              <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-apple-gold/15 text-apple-gold">
-                <Crown size={24} />
-              </div>
-              <h3 className="text-2xl font-bold text-apple-text">{testerActive ? '完整功能已解锁' : plusActive ? '权益已生效' : '让星轨继续记得你'}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-                当前状态：{membershipLabel}。支付成功后权益会立即到账，可以回到刚刚的页面继续使用。
-              </p>
-              <div className="mt-4 rounded-[24px] border border-apple-gold/25 bg-[linear-gradient(145deg,rgba(185,123,40,0.12),rgba(124,156,255,0.08))] p-4 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.14),rgba(124,156,255,0.08))]">
-                <div className="flex items-center gap-2 text-xs font-black text-apple-gold">
-                  <Sparkles size={14} />
-                  不用从头再讲一遍
-                </div>
-                <p className="mt-2 text-sm leading-relaxed text-apple-text">{purchaseContextLine}</p>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
-                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
-                    <div className="font-black text-apple-text">{tarotReadings.length}</div>
-                    <div>牌迹</div>
-                  </div>
-                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
-                    <div className="font-black text-apple-text">{diaryEntries.length}</div>
-                    <div>日记</div>
-                  </div>
-                  <div className="rounded-2xl border border-apple-border/70 bg-[#fff8ed]/70 px-2 py-2 dark:border-white/10 dark:bg-black/20">
-                    <div className="font-black text-apple-text">{profiles.length}</div>
-                    <div>档案</div>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-2">
-                {PLUS_VALUE_PILLARS.map((item) => (
-                  <div key={item.title} className="rounded-[20px] border border-apple-border bg-apple-surface-hover/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                    <div className="text-sm font-black text-apple-text">{item.title}</div>
-                    <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{item.desc}</div>
-                  </div>
-                ))}
-              </div>
-              {trialAvailable && (
-                <button
-                  onClick={handleStartTrial}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-apple-gold/28 bg-apple-gold/12 py-3 text-sm font-bold text-apple-gold"
-                >
-                  <Sparkles size={16} />
-                  先试用 24 小时 Plus
-                </button>
-              )}
-              <div className="mt-4 rounded-[24px] border border-apple-border bg-apple-surface-hover/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                <div className="mb-2 text-xs font-bold text-apple-text-muted">兑换码</div>
-                <div className="flex gap-2">
-                  <input
-                    value={redeemCode}
-                    onChange={(event) => setRedeemCode(event.target.value)}
-                    placeholder="输入兑换码"
-                    className="min-w-0 flex-1 rounded-2xl border border-apple-border bg-apple-surface px-3 py-2 text-sm font-semibold text-apple-text outline-none placeholder:text-apple-text-muted/60 focus:border-apple-gold/50 dark:border-white/10 dark:bg-black/20"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRedeemTesterCode}
-                    className="shrink-0 rounded-2xl border border-apple-gold/24 bg-apple-gold/12 px-4 py-2 text-sm font-bold text-apple-gold transition-colors hover:bg-apple-gold/18 dark:border-white/10 dark:bg-white/[0.08] dark:text-apple-text dark:hover:bg-white/[0.12]"
-                  >
-                    兑换
-                  </button>
-                </div>
-              </div>
-              <div className="mt-5 rounded-[24px] border border-apple-gold/20 bg-apple-gold/10 p-4">
-                <div className="text-xs font-bold uppercase tracking-[0.18em] text-apple-gold">开通后马上发生</div>
-                <div className="mt-2 text-sm leading-relaxed text-apple-text">
-                  选择今日深解，会把今天这张牌讲得更细；选择 Plus，每天都可以看完整日运、长期牌迹和周报。
-                </div>
-                <div className="mt-3 grid gap-2">
-                  {SPIRITUAL_ANCHORS.map((item) => (
-                    <div key={item.title} className="rounded-2xl border border-apple-border bg-[#fff8ed]/70 p-3 dark:border-white/10 dark:bg-black/20">
-                      <div className="text-sm font-black text-apple-text">{item.title}</div>
-                      <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{item.desc}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-5 space-y-3">
-                {shopPlans.map((plan) => (
-                  <button
-                    key={plan.id}
-                    type="button"
-                    onClick={() => setSelectedPlanId(plan.id)}
-                    className={clsx(
-                      'w-full rounded-[24px] border p-4 text-left transition-all',
-                      selectedPlanId === plan.id
-                        ? 'border-apple-gold/55 bg-apple-gold/12 text-apple-text shadow-[0_14px_34px_rgba(185,123,40,0.12)] dark:shadow-[0_14px_34px_rgba(244,207,131,0.10)]'
-                        : 'border-apple-border bg-apple-surface/70 text-apple-text-muted hover:border-apple-gold/26 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-white/18',
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-base font-black text-apple-text">{plan.label}</span>
-                          {plan.id === recommendedPlanId && (
-                            <span className="rounded-full bg-apple-gold px-2 py-0.5 text-[10px] font-black text-[#11131a]">
-                              更适合现在
-                            </span>
-                          )}
-                          <span className="rounded-full border border-apple-gold/24 bg-apple-gold/10 px-2 py-0.5 text-[10px] font-bold text-apple-gold">
-                            {plan.badge}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-sm font-bold text-apple-text">{plan.title}</div>
-                        <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">{plan.desc}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div className="text-xs text-apple-text-muted">¥</div>
-                        <div className="text-3xl font-black text-apple-gold">{plan.price}</div>
-                      </div>
-                    </div>
-                    {selectedPlanId === plan.id && (
-                      <div className="mt-3 grid gap-1.5 text-xs leading-relaxed text-apple-text-muted">
-                        {plan.bullets.map((item) => (
-                          <div key={item} className="flex items-center gap-2">
-                            <Check size={13} className="text-apple-gold" />
-                            <span>{item}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-5">
-                <div className="mb-2 text-xs font-bold text-apple-text-muted">支付方式</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {PAY_METHODS.map((method) => (
-                    <button
-                      key={method.id}
-                      type="button"
-                      onClick={() => setSelectedPayMethod(method.id)}
-                      className={clsx(
-                        'rounded-2xl border p-3 text-left transition-all',
-                        selectedPayMethod === method.id
-                          ? 'border-apple-gold/50 bg-apple-gold/12 text-apple-text'
-                          : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
-                      )}
-                    >
-                      <div className="text-sm font-bold">{method.label}</div>
-                      <div className="mt-1 text-[11px] leading-relaxed text-apple-text-muted">{method.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="mt-4 flex items-start gap-3 rounded-2xl border border-apple-border bg-apple-surface/70 p-3 text-xs leading-relaxed text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]">
-                <input
-                  type="checkbox"
-                  checked={guardianConsent}
-                  onChange={(e) => setGuardianConsent(e.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>我已确认价格和权益；如果我是未成年人，已获得监护人同意。</span>
-              </label>
-              {paymentStatus !== 'idle' || pendingOrderId ? (
-                <PaymentStatusPanel
-                  status={paymentStatus}
-                  message={paymentMessage}
-                  orderId={pendingOrderId}
-                  planLabel={selectedPlan.label}
-                  methodLabel={selectedPayMethodMeta.label}
-                  onRefresh={() => pendingOrderId && checkPaymentOrder(pendingOrderId)}
-                />
-              ) : paymentMessage && (
-                <div className="mt-3 rounded-2xl border border-apple-gold/20 bg-apple-gold/10 p-3 text-xs leading-relaxed text-apple-gold">
-                  {paymentMessage}
-                </div>
-              )}
-              <button
-                onClick={handleCreatePaymentOrder}
-                disabled={isCreatingPayment || !guardianConsent}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-apple-gold to-[#dcb66f] py-3 font-bold text-[#080a11] disabled:opacity-50 dark:to-[#7C9CFF]"
-              >
-                {isCreatingPayment ? <Loader2 size={18} className="animate-spin" /> : <WalletCards size={18} />}
-                解锁 {selectedPlan.label} · ¥{selectedPlan.price}
-              </button>
-              <button
-                onClick={() => setShowMembershipModal(false)}
-                className="mt-3 w-full rounded-full border border-apple-border bg-apple-surface/70 py-3 font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]"
-              >
-                暂时不用
-              </button>
-              <p className="mt-3 text-center text-[11px] leading-relaxed text-apple-text-muted">
-                正式支付前会清楚展示价格与规则。未成年人付费必须先征得监护人同意。
-              </p>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>,
-      document.body,
-      )}
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="bg-apple-surface backdrop-blur-xl rounded-2xl p-5 flex flex-col gap-3 border border-apple-border shadow-[0_12px_30px_rgba(117,82,42,0.11)] dark:shadow-[0_8px_20px_rgba(0,0,0,0.3)] relative overflow-hidden">
-          <div className="absolute -right-4 -top-4 w-16 h-16 bg-apple-accent/10 rounded-full blur-xl pointer-events-none"></div>
-          <div className="flex items-center gap-2 text-apple-text-muted relative z-10">
-            <div className="p-1.5 rounded-lg bg-apple-accent/10 border border-apple-accent/20">
-              <Sparkles size={14} className="text-apple-accent" />
+      <ProfileDialog open={showMembershipModal} title="会员权益详情" onClose={() => setShowMembershipModal(false)}>
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="rail-muted mb-2 flex items-center gap-2"><Crown size={16} className="text-apple-gold" />陪伴权益 · {membershipLabel}</p>
+              <h2 className="text-balance text-2xl font-semibold text-apple-text">选择适合你的陪伴</h2>
+              <p className="rail-muted mt-2">价格与有效期先看清，按需要开通。</p>
             </div>
-            <span className="text-xs font-medium tracking-widest">剩余能量</span>
+            <button type="button" aria-label="关闭会员详情" onClick={() => setShowMembershipModal(false)} className="flex size-10 shrink-0 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover"><X size={18} /></button>
           </div>
-          <div className="text-3xl font-sans font-bold text-apple-text relative z-10 drop-shadow-md">{testerActive ? '∞' : energy}</div>
-        </motion.div>
-        <motion.div 
-          initial={{ opacity: 0, x: 20 }} 
-          animate={{ opacity: 1, x: 0 }} 
-          transition={{ delay: 0.2 }} 
-          onClick={() => navigate('/app/collection')}
-          className="bg-apple-surface backdrop-blur-xl rounded-2xl p-5 flex flex-col gap-3 border border-apple-border shadow-[0_12px_30px_rgba(117,82,42,0.11)] dark:shadow-[0_8px_20px_rgba(0,0,0,0.3)] relative overflow-hidden cursor-pointer hover:border-apple-gold/50 transition-colors group"
-        >
-          <div className="absolute -right-4 -top-4 w-16 h-16 bg-apple-gold/10 rounded-full blur-xl pointer-events-none group-hover:bg-apple-gold/20 transition-colors"></div>
-          <div className="flex items-center gap-2 text-apple-text-muted relative z-10">
-            <div className="p-1.5 rounded-lg bg-apple-gold/10 border border-apple-gold/20 group-hover:bg-apple-gold/20 transition-colors">
-              <LibraryIcon size={14} className="text-apple-gold" />
-            </div>
-            <span className="text-xs font-medium tracking-widest">收集进度</span>
-          </div>
-          <div className="text-3xl font-sans font-bold text-apple-text relative z-10 drop-shadow-md">{fragments.length} <span className="text-lg text-apple-text-muted/50">/ 8</span></div>
-        </motion.div>
-      </div>
 
-      {/* Retention & Plus Preview */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.22 }}
-        className="mb-8 rounded-3xl border border-[#D8B26B]/35 bg-[linear-gradient(145deg,rgba(255,252,246,0.96),rgba(244,235,221,0.88))] p-5 shadow-[0_18px_52px_rgba(117,82,42,0.14)] relative overflow-hidden dark:border-[#F4CF83]/25 dark:bg-[linear-gradient(145deg,rgb(27,32,48),rgb(18,23,34),rgb(11,14,21))] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)]"
-      >
-        <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-apple-gold/12 blur-3xl" />
-        <div className="relative z-10 flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-apple-gold">
-              <Crown size={18} />
-              <span className="text-sm font-bold tracking-wide">{testerActive ? '完整权限' : plusActive ? 'Plus 已开通' : '星轨 Plus'}</span>
-            </div>
-            <h3 className="mt-2 text-2xl font-bold text-apple-text">{testerActive ? '完整功能已解锁' : plusActive ? `还剩约 ${plusDaysLeft} 天权益` : '把零散问题变成长期档案'}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-              {membershipLabel}。你留下的牌迹、日记和档案越多，星轨越能接住你的上下文；开通后不用每次重新解释自己。
-            </p>
-          </div>
-          <button
-            onClick={() => setShowMembershipModal(true)}
-            className="shrink-0 rounded-full bg-apple-gold px-4 py-2 text-xs font-bold text-[#080a11] shadow-[0_10px_28px_rgba(185,123,40,0.22)] dark:shadow-[0_10px_28px_rgba(244,207,131,0.25)]"
-          >
-            {testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}
-          </button>
-        </div>
-
-        <div className="relative z-10 mt-5 grid grid-cols-2 gap-3">
-          <GrowthMetric icon={<CalendarCheck size={15} />} label="连续陪伴" value={`${checkInStreak} 天`} />
-          <GrowthMetric icon={<Sparkles size={15} />} label="提问记录" value={`${userQuestionCount} 次`} />
-          <GrowthMetric icon={<Gift size={15} />} label="牌迹沉淀" value={`${tarotReadings.length} 次`} />
-          <GrowthMetric icon={<ShieldCheck size={15} />} label="沙盘推演" value={`${simulationHistory.length} 次`} />
-        </div>
-        <div className="relative z-10 mt-3 rounded-2xl border border-apple-border bg-apple-surface/70 p-3 text-xs leading-relaxed text-apple-text-muted dark:border-white/10 dark:bg-white/[0.045]">
-          当前状态：<span className="font-bold text-apple-text">{userSegment}</span> · 已陪伴 {engagement.activeDays} 天 · 已沉淀 {memorySeedCount} 份线索
-          <div className="mt-1 text-[11px]">每一次记录都会让星轨更接近你的语言，而不只是给你一次性的答案。</div>
-        </div>
-
-        <div className="relative z-10 mt-4">
-          <div className="mb-2 flex items-center justify-between text-xs text-apple-text-muted">
-            <span>成长解锁度</span>
-            <span>{valueScore}/100</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-apple-gold to-[#dcb66f] dark:to-[#7C9CFF]"
-              initial={{ width: 0 }}
-              animate={{ width: `${valueScore}%` }}
-              transition={{ duration: 1, ease: "easeOut" }}
-            />
-          </div>
-          <p className="mt-2 text-[11px] text-apple-text-muted">
-            上次签到：{lastCheckInLabel}。未成年人开通任何付费项前，应获得监护人同意。
-          </p>
-        </div>
-      </motion.div>
-
-      {/* Profiles Section */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-sans font-bold text-lg text-apple-text flex items-center gap-2">
-            <Compass size={18} className="text-apple-gold" />
-            命理档案
-          </h3>
-          <button 
-            onClick={() => navigate('/app/bazi')}
-            className="text-xs font-medium text-apple-gold bg-apple-gold/10 px-3 py-1.5 rounded-full hover:bg-apple-gold/20 transition-colors border border-apple-gold/30"
-          >
-            + 新建档案
-          </button>
-        </div>
-        
-        <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
-          {profiles.length === 0 ? (
-            <div className="w-full bg-apple-surface backdrop-blur-xl rounded-2xl p-6 flex flex-col items-center justify-center text-center border border-apple-border border-dashed shadow-inner">
-              <Compass size={32} className="text-apple-text-muted/20 mb-3" />
-              <p className="text-sm text-apple-text-muted mb-4">还没有添加任何命理档案</p>
-              <button 
-                onClick={() => navigate('/app/bazi')}
-                className="text-sm font-medium text-black bg-gradient-to-r from-apple-gold to-[#B8860B] px-5 py-2.5 rounded-xl shadow-[0_4px_15px_rgba(212,175,55,0.3)] hover:shadow-[0_4px_20px_rgba(212,175,55,0.5)] transition-all"
-              >
-                去添加
+          {trialAvailable && (
+            <div className="mt-5 border-b border-apple-border pb-5">
+              <button type="button" onClick={handleStartTrial} disabled={trialBusy || isCreatingPayment} className="rail-button-secondary w-full">
+                {trialBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                {trialBusy ? '正在开通试用' : '先试用 24 小时 Plus'}
               </button>
+              <p className="rail-muted mt-2">无需付款，不自动续费。登录后继续领取；试用包含普通 Plus 功能。</p>
             </div>
-          ) : (
-            profiles.map(profile => (
-              <div 
-                key={profile.id}
-                onClick={() => setActiveProfileId(profile.id)}
-                className={clsx(
-                  "min-w-[160px] bg-apple-surface backdrop-blur-xl rounded-2xl p-5 border transition-all cursor-pointer relative overflow-hidden group",
-                  activeProfileId === profile.id 
-                    ? "border-apple-gold shadow-[0_4px_20px_rgba(212,175,55,0.2)]" 
-                    : "border-apple-border hover:border-apple-border shadow-md"
-                )}
-              >
-                {activeProfileId === profile.id && (
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-apple-gold/20 to-transparent rounded-bl-full pointer-events-none"></div>
-                )}
-                <div className="flex justify-between items-start mb-3 relative z-10">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#fff7ea] to-[#ead8bd] flex items-center justify-center text-lg shadow-inner border border-apple-border group-hover:border-apple-border transition-colors dark:from-[#2A2A35] dark:to-[#141419]">
-                    {profile.gender === 'male' ? '👨' : '👩'}
-                  </div>
-                  {activeProfileId === profile.id && (
-                    <div className="bg-apple-gold text-black text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">当前</div>
-                  )}
-                </div>
-                <h4 className="font-bold text-apple-text mb-1 truncate relative z-10">{profile.name}</h4>
-                <p className="text-xs text-apple-text-muted font-mono relative z-10">{profile.birthDate}</p>
-                
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`确定要删除 ${profile.name} 的档案吗？`)) {
-                      setProfiles(prev => prev.filter(p => p.id !== profile.id));
-                      if (activeProfileId === profile.id) {
-                        setActiveProfileId(null);
-                      }
-                    }
-                  }}
-                  className="absolute bottom-4 right-4 p-1.5 rounded-full bg-apple-surface text-apple-text-muted hover:bg-red-500/20 hover:text-red-400 border border-transparent hover:border-red-500/30 transition-all z-20 opacity-0 group-hover:opacity-100"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))
           )}
-        </div>
-      </motion.div>
+          {trialNotice && <ActionNotice {...trialNotice} />}
 
-      {/* Bond Level Section */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-apple-surface backdrop-blur-xl rounded-3xl p-6 mb-8 border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-apple-accent/8 to-transparent pointer-events-none"></div>
-        <div className="absolute -top-10 -right-10 w-40 h-40 bg-apple-accent/12 blur-3xl rounded-full pointer-events-none"></div>
-        <div className="relative z-10">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-apple-accent/10 border border-apple-accent/20">
-                <Heart size={16} className="text-apple-accent" />
-              </div>
-              <span className="font-sans font-semibold text-lg tracking-widest text-apple-text">羁绊等级</span>
+          <section className="mt-5" aria-labelledby="shop-plan-heading">
+            <h3 id="shop-plan-heading" className="mb-3 text-base font-semibold">选择方案</h3>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {shopPlans.map((plan) => (
+                <button key={plan.id} type="button" aria-pressed={selectedPlanId === plan.id} onClick={() => { setSelectedPlanId(plan.id); setGuardianConsent(false); }} disabled={isCreatingPayment || trialBusy}
+                  className={cn('rounded-xl border p-3 text-left disabled:opacity-50', selectedPlanId === plan.id ? 'border-apple-gold bg-apple-gold/10' : 'border-apple-border hover:bg-apple-surface-hover')}>
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="text-base font-medium">{plan.label}</span>
+                    <span className="shrink-0 text-lg font-semibold tabular-nums text-apple-gold">¥{plan.price}</span>
+                  </span>
+                  <span className="rail-muted mt-1 flex items-center justify-between gap-2">
+                    <span>{getPlanPeriodLabel(plan)}</span>
+                    {selectedPlanId === plan.id ? <Check size={14} aria-label="已选择" className="text-apple-gold" /> : plan.id === recommendedPlanId && <span className="text-apple-gold">推荐</span>}
+                  </span>
+                </button>
+              ))}
             </div>
-            <span className="text-apple-accent font-bold font-mono bg-apple-accent/10 px-3 py-1 rounded-full border border-apple-accent/20 shadow-[0_8px_18px_rgba(185,123,40,0.12)] dark:shadow-[0_0_10px_rgba(107,138,255,0.2)]">LV.{bondLevel}</span>
-          </div>
-          
-          <div className="text-center mb-6">
-            <span className="text-2xl font-sans font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-apple-accent to-apple-gold drop-shadow-sm dark:from-[#6B8AFF] dark:to-[#4F46E5]">
-              {LEVEL_TITLES[bondLevel - 1]}
-            </span>
+          </section>
+
+          <section className="mt-5 border-t border-apple-border pt-5" aria-labelledby="selected-plan-heading">
+            <h3 id="selected-plan-heading" className="text-lg font-semibold">{selectedPlan.title}</h3>
+            <p className="mt-2 text-pretty text-sm leading-7 text-apple-text-muted">{selectedPlan.desc}</p>
+            <ul className="mt-3 space-y-2 text-sm leading-6">
+              {selectedPlan.bullets.map((item) => <li key={item} className="flex items-start gap-2"><Check size={15} aria-hidden="true" className="mt-1 shrink-0 text-apple-gold" /><span>{item}</span></li>)}
+            </ul>
+            <p id="shop-plan-terms" className="mt-4 rounded-xl bg-apple-surface-hover p-3 text-sm leading-6 text-apple-text">{getPlanTerms(selectedPlan)}</p>
+          </section>
+
+          <fieldset className="mt-5">
+            <legend className="mb-2 text-sm font-medium">支付方式</legend>
+            <div className="grid grid-cols-2 gap-2">
+              {PAY_METHODS.map((method) => (
+                <button key={method.id} type="button" aria-pressed={selectedPayMethod === method.id} disabled={isCreatingPayment} onClick={() => setSelectedPayMethod(method.id)}
+                  className={cn('rounded-xl border p-3 text-left', selectedPayMethod === method.id ? 'border-apple-gold bg-apple-gold/10' : 'border-apple-border hover:bg-apple-surface-hover')}>
+                  <span className="block text-base font-medium">{method.label}</span>
+                  <span className="rail-muted mt-1 block">{method.desc}</span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <label className="mt-4 flex items-start gap-3 text-sm leading-6 text-apple-text-muted">
+            <input type="checkbox" checked={guardianConsent} onChange={(event) => setGuardianConsent(event.target.checked)} aria-describedby="shop-plan-terms" className="mt-1 size-4 shrink-0 accent-apple-gold" />
+            <span>我已确认 ¥{selectedPlan.price} 的价格与上述权益规则；未成年人已获得监护人同意。</span>
+          </label>
+
+          {paymentStatus !== 'idle' || pendingOrderId ? (
+            <PaymentStatusPanel status={paymentStatus} message={paymentMessage} orderId={pendingOrderId} planLabel={selectedPlan.label} methodLabel={selectedPayMethodMeta.label} onRefresh={() => pendingOrderId && checkPaymentOrder(pendingOrderId)} />
+          ) : paymentMessage && <ActionNotice error message={paymentMessage} />}
+
+          <div className="sticky bottom-0 mt-5 border-t border-apple-border bg-apple-surface py-4">
+            <button type="button" onClick={handleCreatePaymentOrder} disabled={isCreatingPayment || trialBusy || !guardianConsent} className="rail-button w-full">
+              {isCreatingPayment ? <Loader2 size={18} className="animate-spin" /> : <WalletCards size={18} />}
+              {isCreatingPayment ? '正在创建订单' : '开通 ' + selectedPlan.label + ' · ¥' + selectedPlan.price}
+            </button>
+            <button type="button" onClick={() => setShowMembershipModal(false)} className="mt-3 w-full py-2 text-sm text-apple-text-muted hover:text-apple-text">暂时不用</button>
           </div>
 
-          <div className="w-full h-2.5 bg-apple-surface rounded-full overflow-hidden mb-3 border border-apple-border shadow-inner">
-            <motion.div 
-              className="h-full bg-gradient-to-r from-apple-gold to-apple-accent shadow-[0_0_10px_rgba(185,123,40,0.28)] dark:from-[#6B8AFF]/80 dark:to-[#6B8AFF] dark:shadow-[0_0_10px_rgba(107,138,255,0.8)]"
-              initial={{ width: 0 }}
-              animate={{ width: `${progressPercent}%` }}
-              transition={{ duration: 1.5, ease: "easeOut" }}
-            />
+          <details className="border-t border-apple-border pt-4">
+            <summary className="cursor-pointer py-2 text-sm font-medium">有兑换码？</summary>
+            <div className="mt-3 flex gap-2">
+              <input aria-label="兑换码" value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} placeholder="输入兑换码" className="rail-field min-w-0 flex-1" />
+              <button type="button" onClick={handleRedeemTesterCode} disabled={redeemBusy} className="rail-button-secondary shrink-0">{redeemBusy ? '兑换中' : '兑换'}</button>
+            </div>
+            {redeemNotice && <ActionNotice {...redeemNotice} />}
+          </details>
+        </div>
+      </ProfileDialog>
+
+      <section className="grid grid-cols-2 gap-4 mb-8" aria-label="能量与收藏">
+        <div className="rail-panel">
+          <p className="rail-muted flex items-center gap-2"><Sparkles size={16} className="text-apple-gold" />剩余能量</p>
+          <p className="mt-3 text-3xl font-medium tabular-nums">{testerActive ? '∞' : energy}</p>
+        </div>
+        <button type="button" onClick={() => navigate('/app/collection')} className="rail-panel text-left hover:bg-apple-surface-hover">
+          <p className="rail-muted flex items-center gap-2"><LibraryIcon width={16} height={16} className="text-apple-gold" />收集进度</p>
+          <p className="mt-3 text-3xl font-medium tabular-nums">{fragments.length}<span className="ml-2 text-base text-apple-text-muted">/ {FRAGMENTS_POOL.length}</span></p>
+        </button>
+      </section>
+
+      <section className="rail-panel mb-8" aria-labelledby="membership-heading">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="min-w-0 max-w-[56ch]">
+            <p className="rail-muted mb-2 flex items-center gap-2"><Crown size={17} className="text-apple-gold" />陪伴权益</p>
+            <h2 id="membership-heading" className="rail-section-title">{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 还剩约 ${plusDaysLeft} 天` : '星轨 Plus'}</h2>
+            <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">{membershipLabel}。你留下的牌迹、日记和档案越多，星轨越能接住你的上下文；开通后不用每次重新解释自己。</p>
           </div>
-          <div className="flex justify-between text-[10px] text-apple-text-muted font-mono">
-            <span>{bondExp} EXP</span>
-            <span>{nextLevelExp} EXP</span>
+          <button type="button" onClick={() => setShowMembershipModal(true)} className="rail-button-secondary shrink-0">{testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}<ChevronRight size={16} /></button>
+        </div>
+        <p className="rail-muted mt-5 border-t border-apple-border pt-4">未成年人开通任何付费项前，应获得监护人同意。</p>
+      </section>
+
+      <section className="mb-8" aria-labelledby="growth-heading">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 id="growth-heading" className="rail-section-title">陪伴与成长</h2>
+          <span className="rail-muted">{userSegment}</span>
+        </div>
+        <div className="rail-panel">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="rail-muted mb-1">羁绊等级 · LV.{bondLevel}</p>
+              <p className="font-serif text-2xl text-apple-text">{LEVEL_TITLES[bondLevel - 1]}</p>
+            </div>
+            <span className="rail-muted tabular-nums">{bondExp} / {nextLevelExp} EXP</span>
+          </div>
+          <div className="mt-5 mb-6 h-2 overflow-hidden rounded-full bg-apple-surface-hover" role="progressbar" aria-label="羁绊成长进度" aria-valuenow={Math.round(progressPercent)} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full bg-apple-gold" style={{ width: `${progressPercent}%` }} />
+          </div>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <GrowthMetric icon={<CalendarCheck size={16} />} label="连续陪伴" value={`${checkInStreak} 天`} />
+            <GrowthMetric icon={<Sparkles size={16} />} label="提问记录" value={`${userQuestionCount} 次`} />
+            <GrowthMetric icon={<Gift size={16} />} label="牌迹沉淀" value={`${tarotReadings.length} 次`} />
+            <GrowthMetric icon={<ShieldCheck size={16} />} label="沙盘记录" value={`${simulationHistory.length} 条`} />
+          </div>
+          <div className="mt-6 border-t border-apple-border pt-4">
+            <p className="rail-muted mt-3">已陪伴 {engagement.activeDays} 天 · 已沉淀 {memorySeedCount} 份线索 · 上次签到 {lastCheckInLabel}</p>
           </div>
         </div>
-      </motion.div>
+      </section>
 
-      {/* Settings List */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_40px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-        <SettingToggle 
-          icon={<Moon size={18} />} 
-          title="背景音乐" 
-          checked={settings.bgmEnabled} 
-          onChange={() => toggleSetting('bgmEnabled')} 
-        />
-        <SettingToggle 
-          icon={<Vibrate size={18} />} 
-          title="触觉反馈" 
-          checked={settings.hapticsEnabled} 
-          onChange={() => toggleSetting('hapticsEnabled')} 
-        />
-        <SettingItem title="关于星轨" hasBorder={false} onClick={() => navigate('/app/about')} />
-      </motion.div>
+      <section className="mb-8" aria-labelledby="archive-heading">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 id="archive-heading" className="rail-section-title">命理档案</h2>
+          <button type="button" onClick={() => navigate('/app/bazi?new=1')} className="rail-button-secondary">+ 新建档案</button>
+        </div>
+        {profiles.length === 0 ? (
+          <div className="rail-empty"><Compass size={28} className="mx-auto mb-3 text-apple-gold" /><p>还没有添加任何命理档案</p><button type="button" onClick={() => navigate('/app/bazi?new=1')} className="rail-button-secondary mt-5">添加第一份档案</button></div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {profiles.map((profile) => (
+              <div key={profile.id} className={cn('rail-surface p-5 relative', activeProfileId === profile.id && '!border-apple-gold')}>
+                <button type="button" onClick={() => {
+                  if (activeProfileId === profile.id) return;
+                  const { id: _id, ...input } = profile;
+                  setBaziFormData(input);
+                  setBaziMessages([]);
+                  setActiveProfileId(profile.id);
+                }} aria-pressed={activeProfileId === profile.id} className="w-full text-left">
+                  <span className="mb-4 flex items-center justify-between gap-3"><span className="flex size-10 items-center justify-center rounded-full bg-apple-surface-hover text-xl">{profile.gender === 'male' ? '👨' : '👩'}</span>{activeProfileId === profile.id && <span className="rail-muted !text-apple-gold">当前档案</span>}</span>
+                  <span className="block text-base font-medium truncate">{profile.name}</span>
+                  <span className="rail-muted mt-1 block tabular-nums">{profile.birthDate} · {profile.birthTime}</span>
+                  <span className="rail-muted mt-1 block break-words">出生：{profile.birthLocation} · 现居：{profile.currentLocation}</span>
+                </button>
+                <button type="button" onClick={() => navigate(`/app/bazi?profile=${encodeURIComponent(profile.id)}`)} className="mt-3 min-h-11 rounded-xl px-2 text-sm text-apple-text-muted hover:bg-apple-surface-hover">编辑这份档案</button>
+                <button type="button" aria-label={`删除 ${profile.name} 的档案`} onClick={() => { if (window.confirm(`确定要删除 ${profile.name} 的档案吗？`)) { setProfiles(prev => prev.filter(p => p.id !== profile.id)); if (activeProfileId === profile.id) setActiveProfileId(null); } }} className="absolute right-3 bottom-3 flex size-9 items-center justify-center rounded-lg text-apple-text-muted hover:bg-red-500/10 hover:text-red-600"><X size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="preferences-heading">
+        <h2 id="preferences-heading" className="rail-section-title mb-4">使用偏好</h2>
+        <div className="rail-surface overflow-hidden">
+          <SettingToggle icon={<Moon size={18} />} title="背景音乐" checked={settings.bgmEnabled} onChange={() => toggleSetting('bgmEnabled')} />
+          <SettingToggle icon={<Vibrate size={18} />} title="触觉反馈" checked={settings.hapticsEnabled} onChange={() => toggleSetting('hapticsEnabled')} />
+          <SettingItem title="关于星轨" hasBorder={false} onClick={() => navigate('/app/about')} />
+        </div>
+      </section>
+      </div>
     </div>
   );
 }
 
+function ActionNotice({ error, message }: { error: boolean; message: string }) {
+  return <p role={error ? 'alert' : 'status'} className={cn('mt-3 rounded-xl border p-3 text-sm leading-6', error ? 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300' : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text')}>{message}</p>;
+}
+
 function GrowthMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-white/[0.045]">
+    <div className="py-1">
       <div className="mb-2 flex items-center gap-2 text-apple-gold">
         {icon}
-        <span className="text-[11px] text-apple-text-muted">{label}</span>
+        <span className="text-[13px] text-apple-text-muted">{label}</span>
       </div>
-      <div className="text-lg font-bold text-apple-text">{value}</div>
+      <div className="text-xl font-medium tabular-nums text-apple-text">{value}</div>
     </div>
   );
 }
@@ -947,8 +709,8 @@ function PaymentStatusPanel({
     <div className="mt-3 rounded-[24px] border border-apple-gold/22 bg-apple-gold/10 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-apple-text">{title}</div>
-          <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+          <div className="text-[15px] font-semibold text-apple-text">{title}</div>
+          <div className="mt-1 text-[13px] leading-[1.8] text-apple-text-muted">
             {message || `正在处理 ${planLabel}。`}
           </div>
         </div>
@@ -964,11 +726,11 @@ function PaymentStatusPanel({
         {steps.map((step, index) => (
           <div
             key={step.id}
-            className={clsx(
-              'rounded-2xl border px-2 py-2 text-center text-[10px] font-black',
+            className={cn(
+              'rounded-2xl border px-2 py-2 text-center text-[13px] font-semibold',
               index <= statusIndex
                 ? 'border-apple-gold/30 bg-apple-gold/14 text-apple-gold'
-                : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+                : 'border-apple-border bg-apple-surface text-apple-text-muted dark:border-apple-border bg-apple-surface',
             )}
           >
             {step.label}
@@ -979,7 +741,7 @@ function PaymentStatusPanel({
         <button
           type="button"
           onClick={onRefresh}
-          className="mt-3 w-full rounded-full border border-apple-gold/24 bg-apple-surface/70 py-2.5 text-xs font-black text-apple-text dark:bg-white/[0.04]"
+          className="mt-3 w-full rounded-full border border-apple-gold/24 bg-apple-surface py-2.5 text-[13px] font-semibold text-apple-text"
         >
           刷新到账状态
         </button>
@@ -999,38 +761,33 @@ function LibraryIcon(props: any) {
   );
 }
 
-function SettingToggle({ icon, title, checked, onChange }: { icon: React.ReactNode, title: string, checked: boolean, onChange: () => void }) {
+function SettingToggle({ icon, title, checked, onChange }: { icon: React.ReactNode; title: string; checked: boolean; onChange: () => void }) {
   return (
-    <div className="flex items-center justify-between p-5 bg-apple-surface hover:bg-apple-surface-hover transition-colors border-b border-apple-border">
-      <div className="flex items-center gap-3 text-apple-text">
-        {icon}
-        <span className="font-medium tracking-wide text-sm">{title}</span>
-      </div>
-      <button 
-        onClick={onChange}
-        className={clsx(
-          "w-12 h-6 rounded-full transition-colors relative",
-          checked ? "bg-apple-accent" : "bg-apple-surface-hover"
-        )}
-      >
-        <motion.div 
-          className="w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm"
-          animate={{ left: checked ? "calc(100% - 22px)" : "2px" }}
-          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-        />
-      </button>
-    </div>
+    <label className="flex cursor-pointer items-center justify-between gap-4 p-5 border-b border-apple-border hover:bg-apple-surface-hover">
+      <span className="flex items-center gap-3"><span className="text-apple-gold">{icon}</span><span className="text-[15px] font-medium">{title}</span></span>
+      <span className="relative inline-flex shrink-0">
+        <input type="checkbox" role="switch" checked={checked} onChange={onChange} className="peer sr-only" />
+        <span className={cn('h-7 w-12 rounded-full border transition-colors duration-150 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-4 peer-focus-visible:outline-apple-gold', checked ? 'bg-apple-gold border-apple-gold' : 'bg-apple-surface-hover border-apple-border')}><span className={cn('absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform duration-150', checked && 'translate-x-5')} /></span>
+      </span>
+    </label>
   );
 }
 
-function SettingItem({ title, hasBorder = true, onClick }: { title: string, hasBorder?: boolean, onClick?: () => void }) {
-  return (
-    <div 
-      onClick={onClick}
-      className={`flex items-center justify-between p-5 bg-apple-surface hover:bg-apple-surface-hover transition-colors cursor-pointer ${hasBorder ? 'border-b border-apple-border' : ''}`}
-    >
-      <span className="font-medium tracking-wide text-sm text-apple-text">{title}</span>
-      <ChevronRight size={18} className="text-apple-text-muted" />
-    </div>
-  );
+function SettingItem({ title, hasBorder = true, onClick }: { title: string; hasBorder?: boolean; onClick?: () => void }) {
+  return <button type="button" onClick={onClick} className={cn('flex w-full items-center justify-between gap-3 p-5 text-left text-[15px] font-medium hover:bg-apple-surface-hover', hasBorder && 'border-b border-apple-border')}><span>{title}</span><ChevronRight size={18} className="text-apple-text-muted" /></button>;
+}
+
+function ProfileDialog({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (open && dialog && !dialog.open) dialog.showModal();
+    if (!open && dialog?.open) dialog.close();
+  }, [open]);
+  return createPortal(<dialog ref={dialogRef} aria-label={title} onCancel={onClose} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} className="m-auto w-[calc(100%_-_32px)] max-w-lg max-h-[calc(100dvh_-_32px)] overflow-y-auto overscroll-contain rounded-2xl border border-apple-border bg-apple-surface p-0 text-apple-text backdrop:bg-black/55">{open && children}</dialog>, document.body);
+}
+
+function handleAvatarError(event: React.SyntheticEvent<HTMLImageElement>) {
+  const image = event.currentTarget;
+  if (!image.src.endsWith('/avatar.png')) image.src = '/avatar.png';
 }

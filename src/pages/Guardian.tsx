@@ -17,8 +17,19 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import PageHeader from '../components/ui/PageHeader';
+import { useDialogFocus } from '../lib/useDialogFocus';
+import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
+import { getAppDateKey, getTrustedNow, getTrustedTimestamp, useTrustedTime } from '../lib/trustedTime';
+import { appendGuardianStarter, getGuardianLetterState, shouldRewardGuardianLetter } from '../lib/guardianLetter';
+import { getBaziResultStatus } from '../lib/baziProfiles';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const GUARDIAN_STARTERS = [
+  { label: '整理烦心事', text: '我现在最烦心的是：' },
+  { label: '找一个小行动', text: '今天我想先照顾自己一件小事：' },
+  { label: '记住好瞬间', text: '今天有一个让我觉得还不错的瞬间：' },
+];
 
 const getTime = (value?: string | number) => {
   const time = value ? new Date(value).getTime() : NaN;
@@ -39,41 +50,67 @@ const moodLabels: Record<string, string> = {
 };
 
 export default function Guardian() {
-  const { 
+  useTrustedTime();
+  const {
     userName, preferredAddress, bondLevel, setBondExp,
-    diaryEntries, baziResult,
+    diaryEntries, baziResult: storedBaziResult,
     tarotReadings, simulationHistory, profiles, activeProfileId,
     guardianMessages, setGuardianMessages,
     dailyLetter, setDailyLetter,
     dailyLetterDate, setDailyLetterDate,
-    setAppEvents
+    setAppEvents, settings, setSettings
   } = useAppContext();
-  
+
   const [input, setInput, clearInputDraft] = usePersistentDraft('draft:guardian:input', '');
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
+  const [, setDateKey] = useState(() => getAppDateKey(getTrustedNow()));
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatRequestRef = useRef(false);
+  const letterRequestRef = useRef(false);
+  const letterAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const letterDialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(letterDialogRef, showLetter, () => setShowLetter(false));
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; letterAbortRef.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    const updateDate = () => setDateKey(getAppDateKey(getTrustedNow()));
+    const interval = setInterval(updateDate, 60_000);
+    window.addEventListener('focus', updateDate);
+    document.addEventListener('visibilitychange', updateDate);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', updateDate);
+      document.removeEventListener('visibilitychange', updateDate);
+    };
+  }, []);
 
-  const todayStr = new Date().toLocaleDateString('zh-CN');
-  const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
+  const todayStr = getAppDateKey(getTrustedNow());
+  const letterState = getGuardianLetterState(todayStr, dailyLetter, dailyLetterDate, settings.guardianLetterStatus);
+  const hasLetterToday = letterState.completed;
   const bondTitle = LEVEL_TITLES[bondLevel - 1] || LEVEL_TITLES[0];
   const userAddress = normalizeUserAddress(preferredAddress) || normalizeUserAddress(userName) || '你';
   const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const recentReadings = [...tarotReadings]
-    .filter((reading) => Date.now() - getTime(reading.date) <= MEMORY_WINDOW_MS)
+    .filter((reading) => getTrustedTimestamp() - getTime(reading.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date));
   const recentDiaries = [...diaryEntries]
-    .filter((entry) => Date.now() - getTime(entry.date) <= MEMORY_WINDOW_MS)
+    .filter((entry) => getTrustedTimestamp() - getTime(entry.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date));
   const recentSimulation = [...simulationHistory]
-    .filter((item) => Date.now() - getTime(item.date) <= MEMORY_WINDOW_MS)
+    .filter((item) => getTrustedTimestamp() - getTime(item.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date))[0];
   const recentGuardianReplies = [...guardianMessages]
     .filter((message) => (
       message.role === 'ai' &&
-      Date.now() - message.timestamp <= MEMORY_WINDOW_MS &&
+      getTrustedTimestamp() - message.timestamp <= MEMORY_WINDOW_MS &&
       !message.text.includes('我是你的星轨守护灵')
     ))
     .sort((a, b) => b.timestamp - a.timestamp);
@@ -95,7 +132,7 @@ export default function Guardian() {
   // Initial greeting if empty
   useEffect(() => {
     if (guardianMessages.length === 0) {
-      const greeting = `你好，${userAddress}。我是你的星轨守护灵。我能看见你的命理星盘，也能感知你的情绪起伏。无论发生什么，我都在这里。`;
+      const greeting = `你好，${userAddress}。我是你的星轨守护灵，会参考你留下的日记、牌迹和档案，陪你把近况慢慢说清楚。也可以先从今天的一件小事开始。`;
       setGuardianMessages([{
         id: createRecordId('guardian'),
         role: 'ai',
@@ -110,6 +147,14 @@ export default function Guardian() {
   }, []);
 
   const generateDailyLetter = async () => {
+    if (letterRequestRef.current || isGeneratingLetter) return;
+    const requestDate = getAppDateKey(getTrustedNow());
+    const previousState = getGuardianLetterState(requestDate, dailyLetter, dailyLetterDate, settings.guardianLetterStatus);
+    if (!previousState.canGenerate) { setShowLetter(true); return; }
+    letterRequestRef.current = true;
+    const controller = new AbortController();
+    letterAbortRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     setIsGeneratingLetter(true);
     try {
       const recentDiary = recentDiaries[0] || null;
@@ -133,14 +178,16 @@ export default function Guardian() {
 
 【要求】：
 1. 先轻轻点出一条你记得的近况，再回应今天可以怎么照顾自己。
-2. 必须结合ta的八字命理（如五行喜忌、性格）和最近的日记情绪来写。如果线索不足，就温柔地邀请ta留下一个具体问题。
+2. 只引用已提供的命理和日记线索。缺少排盘或日记时，不要编造五行、性格或具体经历；可以邀请ta留下一个具体问题。
 3. 纯文本，不要使用任何Markdown格式。
 4. 字数控制在120字左右，分2段，最后给一个低压力小动作。`;
 
       let aiText = "";
+      let usedFallback = false;
       try {
         const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
@@ -165,33 +212,46 @@ export default function Guardian() {
           })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        aiText = data.choices[0].message.content;
+        if (!res.ok || data.error) throw new Error(data.error?.message || 'Letter generation failed');
+        aiText = data.choices?.[0]?.message?.content;
+        if (typeof aiText !== 'string' || !aiText.trim()) throw new Error('Empty letter response');
+        if (!cleanAiText(aiText)) throw new Error('Empty normalized letter response');
       } catch (err) {
         console.error("DeepSeek Error:", err);
         aiText = SERVICE_FALLBACK.guardianLetter;
+        usedFallback = true;
       }
 
+      if (!mountedRef.current) return;
       const cleanedText = cleanAiText(aiText);
       setDailyLetter(cleanedText);
-      setDailyLetterDate(todayStr);
+      setDailyLetterDate(requestDate);
+      setSettings(prev => ({ ...prev, guardianLetterStatus: { date: requestDate, usedFallback, generatedAt: getTrustedNow().toISOString() } }));
       setShowLetter(true);
-      setBondExp(prev => prev + 10); // Big bond boost for reading the letter
-      setAppEvents((events) => recordAppEvent(events, 'guardian_letter'));
+      if (shouldRewardGuardianLetter(previousState, usedFallback)) {
+        setBondExp(prev => prev + 10);
+        setAppEvents((events) => recordAppEvent(events, 'guardian_letter'));
+      }
 
     } catch (error) {
+      if (!mountedRef.current) return;
       console.error("Letter Generation Error:", error);
       setDailyLetter(SERVICE_FALLBACK.guardianLetter);
-      setDailyLetterDate(todayStr);
+      setDailyLetterDate(requestDate);
+      setSettings(prev => ({ ...prev, guardianLetterStatus: { date: requestDate, usedFallback: true, generatedAt: getTrustedNow().toISOString() } }));
       setShowLetter(true);
     } finally {
-      setIsGeneratingLetter(false);
+      clearTimeout(timeout);
+      letterAbortRef.current = null;
+      letterRequestRef.current = false;
+      if (mountedRef.current) setIsGeneratingLetter(false);
     }
   };
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (isTyping || chatRequestRef.current || !input.trim()) return;
 
+    chatRequestRef.current = true;
     const userText = input.trim();
     const newUserMsg = {
       id: createRecordId('guardian'),
@@ -290,88 +350,61 @@ export default function Guardian() {
         }),
       }]);
     } finally {
+      chatRequestRef.current = false;
       setIsTyping(false);
     }
   };
 
   return (
     <div className="relative h-full w-full overflow-hidden text-apple-text">
-      {/* Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <picture>
-          {/* 横版图片 (图2) 放在这里的 srcSet 里 */}
-          <source media="(min-aspect-ratio: 1/1)" srcSet="/image-262.png" />
-          {/* 竖版图片 (图1) 放在这里的 src 里 */}
-          <img src="/image-259.png" alt="Guardian Background" className="w-full h-full object-cover opacity-60 dark:opacity-40" referrerPolicy="no-referrer" />
-        </picture>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-apple-bg/50 to-apple-bg"></div>
-      </div>
-      
-      <div className="relative z-10 h-full overflow-y-auto overscroll-contain px-4 pb-[calc(var(--app-bottom-pad)+150px)] pt-7 no-scrollbar sm:px-6 sm:pt-9">
-      {/* Header & Guardian Orb */}
-      <div className="mx-auto flex w-full max-w-md flex-col items-center pb-6">
-        <h1 className="font-serif text-2xl font-bold tracking-widest text-apple-accent mb-4 relative z-10 dark:text-[#6B8AFF]">星轨守护</h1>
-        
-        {/* The "Guardian" Orb */}
-        <div className="relative mb-5 flex h-24 w-24 items-center justify-center">
-          <motion.div 
-            animate={{ scale: isTyping ? [1, 1.1, 1] : [1, 1.05, 1], opacity: 0.4 }}
-            transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute inset-0 bg-apple-gold rounded-full blur-2xl dark:bg-[#6B8AFF]"
-          />
-          <motion.div 
-            animate={{ scale: isTyping ? [1, 1.05, 1] : [1, 1.02, 1] }}
-            transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="relative w-16 h-16 bg-gradient-to-tr from-apple-gold to-[#dcb66f] rounded-full shadow-[0_18px_38px_rgba(185,123,40,0.26)] flex items-center justify-center overflow-hidden border border-apple-border dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:shadow-[0_0_30px_rgba(107,138,255,0.6)]"
-          >
-            <Moon size={28} className="text-white/90 drop-shadow-md" fill="currentColor" />
-          </motion.div>
-        </div>
-
+      <div className="rail-page pb-[calc(180px+var(--rail-nav-height)+var(--app-safe-bottom))]">
+        <PageHeader eyebrow="陪伴与回访" title="星轨守护" description="从你的近况里找一点线索，也留一个可以安心说话的地方。" />
+        <div className="rail-page-content pb-8">
         {/* Daily Letter Trigger */}
-        <div className="w-full max-w-md relative z-10">
+        <div className="grid gap-4 md:grid-cols-2">
           {!hasLetterToday ? (
-            <button 
+            <button
               onClick={generateDailyLetter}
               disabled={isGeneratingLetter}
-              className="w-full bg-apple-surface backdrop-blur-xl p-4 rounded-2xl border border-apple-border hover:bg-apple-surface-hover transition-all flex items-center justify-between shadow-sm group"
+              aria-busy={isGeneratingLetter}
+              className="rail-panel w-full flex items-center justify-between gap-3 text-left hover:bg-apple-surface-hover group"
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-apple-accent/10 flex items-center justify-center text-apple-accent">
                   {isGeneratingLetter ? <Loader2 size={20} className="animate-spin" /> : <Mail size={20} />}
                 </div>
                 <div className="text-left">
-                  <div className="font-medium text-apple-text">今日守护回访</div>
-                  <div className="text-xs text-apple-text-muted">
-                    {guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
+                  <div className="font-medium text-apple-text">{letterState.usedFallback ? '重试今日回访' : '今日守护回访'}</div>
+                  <div className="text-[13px] text-apple-text-muted">
+                    {letterState.usedFallback ? '上次为本地兜底，尚未计为完成' : guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
                   </div>
                 </div>
               </div>
               <Sparkles size={16} className="text-apple-accent opacity-50 group-hover:opacity-100 transition-opacity" />
             </button>
           ) : (
-            <button 
-              onClick={() => setShowLetter(true)}
-              className="w-full bg-gradient-to-r from-apple-gold to-[#dcb66f] p-4 rounded-2xl text-[#17130f] transition-all flex items-center justify-between shadow-lg shadow-[rgba(185,123,40,0.18)] dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:text-white dark:shadow-[#6B8AFF]/20"
+            <button
+              onClick={generateDailyLetter}
+              className="rail-panel w-full flex items-center justify-between gap-3 text-left hover:bg-apple-surface-hover"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                <div className="w-10 h-10 rounded-full bg-apple-accent/10 text-apple-accent flex items-center justify-center">
                   <Mail size={20} />
                 </div>
                 <div className="text-left">
                   <div className="font-medium">查看今日回访</div>
-                  <div className="text-xs text-white/75">已生成，随时可以重温</div>
+                  <div className="rail-muted">已生成，随时可以重温</div>
                 </div>
               </div>
             </button>
           )}
-          <div className="mt-3 rounded-2xl border border-apple-border bg-apple-surface/90 p-4 text-left shadow-sm backdrop-blur-xl">
+          <div className="rail-panel text-left">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-apple-text">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
                 <History size={16} className="text-apple-accent" />
                 今日引用线索
               </div>
-              <div className="flex items-center gap-1 rounded-full bg-apple-accent/10 px-2.5 py-1 text-[11px] font-medium text-apple-accent">
+              <div className="flex items-center gap-1 rounded-full bg-apple-accent/10 px-2.5 py-1 text-[13px] font-medium text-apple-accent">
                 <ScrollText size={12} />
                 档案 + 近 7 天
               </div>
@@ -379,27 +412,35 @@ export default function Guardian() {
             {visibleContextLines.length ? (
               <div className="space-y-2">
                 {visibleContextLines.map((line) => (
-                  <div key={line} className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                  <div key={line} className="rounded-xl bg-apple-bg px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
                     {line}
                   </div>
                 ))}
                 {hiddenContextCount > 0 && (
-                  <div className="text-xs font-medium text-apple-accent">还有 {hiddenContextCount} 条线索会放进回访里</div>
+                  <div className="text-[13px] font-medium text-apple-accent">还有 {hiddenContextCount} 条线索会放进回访里</div>
                 )}
               </div>
             ) : (
-              <div className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+              <div className="rounded-xl bg-apple-bg px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
                 还没有可引用的近况。写一篇日记、抽一次牌，或做一次沙盘后，守护会更像是在接着你的故事说话。
               </div>
             )}
           </div>
         </div>
+        {letterState.usedFallback && <button onClick={() => setShowLetter(true)} className="rail-button-secondary mt-3">查看已保存的兜底回访</button>}
+        <section className="mt-4 rounded-[20px] border border-apple-border bg-apple-surface p-4" aria-labelledby="guardian-starters-title">
+          <h2 id="guardian-starters-title" className="text-[15px] font-semibold">不知道从哪句开始？</h2>
+          <p className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">选一句放进输入框。有内容时会追加在末尾，你可以补充后再发送。</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {GUARDIAN_STARTERS.map(starter => <button key={starter.label} className="rail-button-secondary px-3 text-[13px]" onClick={() => { setInput(current => appendGuardianStarter(current, starter.text)); composerRef.current?.focus(); }}>{starter.label}</button>)}
+          </div>
+        </section>
       </div>
 
       {/* Chat Area */}
-      <div className="mx-auto w-full max-w-md space-y-6 pb-6">
+      <div className="rail-page-content space-y-6 pb-6" role="log" aria-label="与守护的对话" aria-live="polite">
           {guardianMessages.map((msg) => (
-            <motion.div 
+            <motion.div
               key={msg.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -409,22 +450,22 @@ export default function Guardian() {
               )}
             >
               <div className={clsx(
-                "max-w-[80%] rounded-3xl px-5 py-3.5 text-[15px] leading-relaxed shadow-sm",
-                msg.role === 'user' 
-                  ? "bg-apple-gold text-[#17130f] rounded-tr-sm dark:bg-[#6B8AFF] dark:text-white" 
-                  : "bg-apple-surface backdrop-blur-xl border border-apple-border rounded-tl-sm text-apple-text"
+                "max-w-[88%] rounded-[20px] px-5 py-4 text-base leading-7 whitespace-pre-wrap break-words sm:max-w-[76%]",
+                msg.role === 'user'
+                  ? "bg-apple-text text-apple-bg rounded-tr-sm"
+                  : "bg-apple-surface border border-apple-border rounded-tl-sm text-apple-text"
               )}>
                 {msg.text}
               </div>
             </motion.div>
           ))}
-          
+
           {isTyping && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              className="flex justify-start"
+              className="flex justify-start" role="status" aria-label="守护正在回复"
             >
-              <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-3xl rounded-tl-sm px-5 py-4 flex gap-1.5 shadow-sm">
+              <div className="bg-apple-surface border border-apple-border rounded-[20px] rounded-tl-sm px-5 py-4 flex gap-1.5">
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
@@ -436,68 +477,79 @@ export default function Guardian() {
       </div>
 
       {/* Input Area */}
-      <div className="fixed left-0 w-full px-4 pb-4 bg-gradient-to-t from-apple-bg via-apple-bg/95 to-transparent pt-10 z-20 dark:from-[#05050A] dark:via-[#05050A]" style={{ bottom: 'calc(var(--app-bottom-pad) + 76px)' }}>
-        <div className="max-w-md mx-auto relative">
-          <input
-            type="text"
+      <div className="absolute inset-x-0 z-20 border-t border-apple-border bg-apple-bg px-5 py-4 sm:px-10" style={{ bottom: 'calc(var(--rail-nav-height) + var(--app-safe-bottom))' }}>
+        <div className="mx-auto max-w-[960px] relative">
+          <textarea
+            ref={composerRef}
+            aria-label="向守护倾诉"
+            rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => {
+              if (e.shiftKey) return;
+              if (!shouldSubmitOnEnter(e.nativeEvent)) return;
+              e.preventDefault();
+              void handleSend();
+            }}
             placeholder="向守护灵倾诉..."
-            className="w-full bg-apple-surface backdrop-blur-xl border border-apple-border rounded-full pl-6 pr-14 py-4 text-[15px] focus:outline-none focus:ring-2 focus:ring-apple-accent/35 shadow-[0_12px_34px_rgba(117,82,42,0.13)] text-apple-text placeholder:text-apple-text-muted/55 dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
+            className="rail-field min-h-20 resize-y pr-16"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
             aria-label="发送给守护"
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-apple-gold text-[#17130f] rounded-full flex items-center justify-center shadow-[0_12px_24px_rgba(185,123,40,0.20)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#c88a34] dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_0_15px_rgba(107,138,255,0.4)] dark:hover:bg-[#5A75E6]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-xl bg-apple-text text-apple-bg disabled:opacity-50 hover:opacity-85"
           >
             <Send size={18} className="ml-0.5" />
           </button>
         </div>
+        <p className="mx-auto mt-1 max-w-[960px] text-[12px] text-apple-text-muted">Enter 发送 · Shift + Enter 换行</p>
       </div>
 
       {/* Daily Letter Modal */}
       <AnimatePresence>
         {showLetter && dailyLetter && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center p-3 pb-[calc(12px+var(--app-safe-bottom))] pt-[calc(12px+var(--app-safe-top))] sm:items-center sm:p-6">
-            <motion.div 
+          <div className="fixed inset-0 z-[160] flex items-end justify-center p-3 pb-[calc(12px+var(--app-safe-bottom))] pt-[calc(12px+var(--app-safe-top))] sm:items-center sm:p-6">
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60"
               onClick={() => setShowLetter(false)}
             />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative z-10 flex w-full max-w-md flex-col rounded-[30px] border border-apple-border bg-apple-surface p-5 shadow-2xl backdrop-blur-xl sm:p-7"
+              ref={letterDialogRef}
+              role="dialog" aria-modal="true" aria-labelledby="guardian-letter-title" tabIndex={-1}
+              className="relative z-10 flex w-full max-w-2xl flex-col rounded-[20px] border border-apple-border bg-apple-surface p-5 sm:p-7"
               style={{
                 height: 'min(82svh, 680px)',
                 maxHeight: 'calc(100svh - var(--app-safe-top) - var(--app-safe-bottom) - 24px)',
               }}
             >
-              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-apple-accent/10 to-transparent rounded-t-3xl pointer-events-none shrink-0"></div>
-              
+
               <div className="flex justify-center mb-4 relative z-10 shrink-0">
                 <div className="w-12 h-12 rounded-full bg-apple-accent/10 flex items-center justify-center">
                   <Moon size={24} className="text-apple-accent" />
                 </div>
               </div>
-              
-              <h3 className="font-serif font-bold text-xl text-center text-apple-text mb-4 tracking-widest relative z-10 shrink-0">
+
+              <h2 id="guardian-letter-title" className="font-serif text-2xl text-center text-apple-text mb-5 relative z-10 shrink-0">
                 今日守护回访
-              </h3>
-              
-              <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg/48 p-4 pr-3 font-serif text-[15px] leading-8 text-apple-text-muted whitespace-pre-wrap custom-scrollbar">
+              </h2>
+              {letterState.usedFallback && <p role="status" className="relative z-10 mb-3 text-[13px] leading-relaxed text-apple-text-muted">这封是服务失败时的本地兜底，未计为今日完成，也未增加羁绊经验。可以保留阅读，或重试生成。</p>}
+
+              <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg p-4 pr-3 text-base leading-8 text-apple-text whitespace-pre-wrap custom-scrollbar">
                 {dailyLetter}
               </div>
-              
-              <div className="mt-6 flex justify-center relative z-10 shrink-0 pt-2">
-                <button 
+
+              <div className="mt-6 flex flex-wrap justify-center gap-3 relative z-10 shrink-0 pt-2">
+                {letterState.usedFallback && <button onClick={generateDailyLetter} disabled={isGeneratingLetter} aria-busy={isGeneratingLetter} className="rail-button">{isGeneratingLetter ? '正在重试…' : '重试今日回访'}</button>}
+                <button
                   onClick={() => setShowLetter(false)}
-                  className="px-8 py-3 bg-apple-gold text-[#17130f] rounded-full font-bold shadow-[0_12px_24px_rgba(185,123,40,0.20)] hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)] dark:hover:bg-[#5A75E6]"
+                  className="rail-button px-10"
                 >
-                  收下回访
+                  {letterState.usedFallback ? '先收下这封' : '收下回访'}
                 </button>
               </div>
             </motion.div>

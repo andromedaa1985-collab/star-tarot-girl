@@ -1,5 +1,5 @@
 import React from 'react';
-import { LockKeyhole, Sparkles, WalletCards } from 'lucide-react';
+import { Check, LockKeyhole, WalletCards } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../store';
 import { hasFeatureAccess, type PremiumFeature } from '../lib/membership';
@@ -90,48 +90,48 @@ export function FeatureGate({
       : '先解锁一块长期底稿，之后每一次追问都不用重新铺垫。';
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-y-auto px-5 py-10 text-apple-text">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(244,207,131,0.24),transparent_42%),linear-gradient(180deg,rgba(255,248,237,0.70),rgba(231,218,199,0.62))] dark:bg-[radial-gradient(circle_at_top,rgba(244,207,131,0.16),transparent_42%),linear-gradient(180deg,rgba(10,13,21,0.12),rgba(4,6,12,0.76))]" />
-      <div className="relative z-10 w-full max-w-md rounded-[34px] border border-[#e5d3b7]/72 bg-[#fff8ee]/92 p-6 shadow-[0_24px_70px_rgba(96,66,28,0.22),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111722]/88 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.08)]">
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[22px] border border-[#b97b28]/22 bg-[#f4cf83]/20 text-[#9a6a28] dark:border-[#F4CF83]/28 dark:bg-[#F4CF83]/12 dark:text-[#F4CF83]">
-          <LockKeyhole size={26} />
+    <section className="rail-page bg-apple-bg" aria-labelledby="feature-gate-title">
+      <div className="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center">
+        <div className="rail-panel sm:p-8">
+        <div className="mb-6 flex size-14 items-center justify-center rounded-2xl border border-apple-border bg-apple-bg text-apple-accent">
+          <LockKeyhole size={25} aria-hidden="true" />
         </div>
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#b97b28]/22 bg-[#f4cf83]/18 px-3 py-1 text-xs font-bold text-[#9a6a28] dark:border-[#F4CF83]/20 dark:bg-[#F4CF83]/10 dark:text-[#F4CF83]">
-          <Sparkles size={14} />
-          {paidCopy.eyebrow}
-        </div>
-        <h2 className="text-2xl font-black text-apple-text">{paidCopy.title}</h2>
-        <p className="mt-3 text-sm leading-7 text-apple-text-muted">{paidCopy.desc}</p>
-        <div className="mt-5 rounded-[24px] border border-[#e5d3b7]/72 bg-white/54 p-4 dark:border-white/10 dark:bg-white/[0.045]">
-          <div className="text-xs font-bold text-[#9a6a28] dark:text-[#F4CF83]">解锁后不会从零开始</div>
-          <p className="mt-1 text-xs leading-6 text-apple-text-muted">{memoryHint}</p>
-          <div className="mt-3 grid gap-2">
+        <p className="rail-eyebrow text-pretty">{paidCopy.eyebrow}</p>
+        <h1 id="feature-gate-title" className="text-balance font-serif text-3xl font-medium leading-relaxed">{paidCopy.title}</h1>
+        <p className="rail-body mt-4 text-pretty text-apple-text-muted">{paidCopy.desc}</p>
+        <div className="mt-7 border-y border-apple-border py-6">
+          <h3 className="rail-section-title">解锁后，你可以</h3>
+          <ul className="mt-4 space-y-3">
             {paidCopy.gains.map((gain) => (
-              <div key={gain} className="flex items-center gap-2 text-xs text-apple-text">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#b97b28] dark:bg-[#F4CF83]" />
-                <span>{gain}</span>
-              </div>
+              <li key={gain} className="flex items-start gap-3 text-base leading-7 text-apple-text">
+                <Check size={18} className="mt-1 shrink-0 text-apple-accent" aria-hidden="true" /><span>{gain}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
-        <div className="mt-6 grid gap-3">
+        <div className="mt-5 rounded-xl bg-apple-bg p-4">
+          <p className="text-sm font-medium text-apple-text">接着你的故事，慢慢往下看</p>
+          <p className="rail-muted mt-2 text-pretty">{memoryHint}</p>
+        </div>
+        <div className="mt-7 grid gap-3">
           <button
             type="button"
             onClick={() => navigate(`/app/profile?plus=1&plan=${paidCopy.planId}`)}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-[#F4CF83] py-3 font-black text-[#0b0d13] shadow-[0_16px_42px_rgba(244,207,131,0.22)] transition-transform active:scale-[0.98]"
+            className="rail-button w-full"
           >
-            <WalletCards size={18} />
+            <WalletCards size={18} aria-hidden="true" />
             {paidCopy.cta}
           </button>
           <button
             type="button"
             onClick={() => navigate('/app')}
-            className="w-full rounded-full border border-[#e5d3b7]/72 bg-white/48 py-3 font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]"
+            className="rail-button-secondary w-full"
           >
-            先返回塔罗
+            返回今日塔罗
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

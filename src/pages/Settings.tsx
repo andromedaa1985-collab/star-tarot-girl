@@ -1,20 +1,21 @@
+import PageHeader from '../components/ui/PageHeader';
 import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, ChevronLeft, Cloud, Database, Download, KeyRound, Mail, RotateCcw, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload, UserRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clearAppStorage, createAppBackup, downloadAppBackup, getAutoRecoveryMeta, getBackupSummary, importAppBackup, parseBackupFile, restoreAutoRecoveryPoint } from '../lib/appBackup';
+import { clearAppStorage, downloadAppBackup, getAutoRecoveryMeta, getAutoRecoveryPoint, getBackupSummary, parseBackupFile } from '../lib/appBackup';
 import {
-  clearAccountSession,
+  beginAccountTransitionSafely,
   downloadCloudArchive,
   getStoredAccountSession,
   loginAccount,
+  isAccountTransitioning,
+  isCurrentAccountSession,
   refreshAccountSession,
   registerAccount,
-  storeAccountSession,
-  uploadCloudArchive,
   type AccountSession,
 } from '../lib/accountClient';
-import { activateAccountWorkspace, clearActiveLocalWorkspace, saveAccountWorkspace } from '../lib/accountWorkspace';
+import { activateAccountWorkspace, logoutAccountWorkspace, restoreActiveWorkspaceBackup, uploadAccountWorkspaceSnapshot } from '../lib/accountWorkspace';
 
 type BackupNotice = {
   type: 'success' | 'error' | 'info';
@@ -55,12 +56,17 @@ export default function Settings() {
     const session = getStoredAccountSession();
     if (!session) return;
 
+    let disposed = false;
     refreshAccountSession(session)
-      .then(setAccountSession)
+      .then((nextSession) => {
+        if (!disposed && !isAccountTransitioning() && isCurrentAccountSession(session)) setAccountSession(nextSession);
+      })
       .catch(() => {
-        clearAccountSession();
-        setAccountSession(null);
+        if (!disposed && !isAccountTransitioning() && isCurrentAccountSession(session)) {
+          setAccountNotice({ type: 'error', message: '暂时无法刷新账户状态，当前账户和本机记录已保留。请稍后重试。' });
+        }
       });
+    return () => { disposed = true; };
   }, []);
 
   const handleClearData = () => {
@@ -95,19 +101,25 @@ export default function Settings() {
     const confirmed = window.confirm('导入会合并备份里的日记、牌阵、档案和记录；同名设置会以备份为准。继续导入吗？');
     if (!confirmed) return;
 
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const backup = await parseBackupFile(file);
-      const result = importAppBackup(backup);
+      const result = await restoreActiveWorkspaceBackup(backup);
       setBackupNotice({
         type: 'success',
         message: `已导入 ${result.importedKeys} 类存档，其中 ${result.mergedKeys} 类记录已自动合并。页面即将刷新。`,
       });
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setBackupNotice({
         type: 'error',
         message: error?.message || '导入失败，请确认选择的是星轨存档文件。',
       });
+    } finally {
+      if (!reloading) await releaseSync?.();
     }
   };
 
@@ -115,54 +127,71 @@ export default function Settings() {
     const confirmed = window.confirm('恢复最近自动恢复点会合并其中的记录，并以恢复点里的设置为准。继续恢复吗？');
     if (!confirmed) return;
 
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
-      const result = await restoreAutoRecoveryPoint();
+      releaseSync = await beginAccountTransitionSafely();
+      const backup = await getAutoRecoveryPoint();
+      if (!backup) throw new Error('还没有可恢复的自动恢复点。');
+      const result = await restoreActiveWorkspaceBackup(backup);
       setBackupNotice({
         type: 'success',
         message: `已恢复最近恢复点，合并 ${result.mergedKeys} 类记录。页面即将刷新。`,
       });
       setAutoRecoveryMeta(getAutoRecoveryMeta());
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setBackupNotice({
         type: 'error',
         message: error?.message || '恢复失败，当前没有可用的自动恢复点。',
       });
+    } finally {
+      if (!reloading) await releaseSync?.();
     }
   };
 
   const handleAccountSubmit = async () => {
+    if (accountBusy) return;
     setAccountBusy(true);
     setAccountNotice(null);
     const previousSession = getStoredAccountSession();
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const session = accountMode === 'login'
         ? await loginAccount({ email: accountEmail, password: accountPassword })
         : await registerAccount({ email: accountEmail, password: accountPassword, displayName: accountDisplayName });
       await activateAccountWorkspace(session, previousSession);
-      setAccountSession(session);
+      setAccountSession(getStoredAccountSession());
       setAccountPassword('');
       setAccountNotice({
         type: 'success',
-        message: accountMode === 'login' ? '登录成功，可以同步或恢复云端存档。' : '账户已创建，可以把当前本机存档同步到云端。',
+        message: accountMode === 'login' ? '登录成功，正在载入账户存档。' : '账户已创建，正在载入账户存档。',
       });
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setAccountNotice({
         type: 'error',
         message: getAccountErrorMessage(error),
       });
     } finally {
-      setAccountBusy(false);
+      if (!reloading) {
+        await releaseSync?.();
+        setAccountBusy(false);
+      }
     }
   };
 
   const handleCloudSync = async () => {
-    if (!accountSession) return;
+    if (!accountSession || accountBusy || isAccountTransitioning()) return;
     setAccountBusy(true);
     setAccountNotice(null);
     try {
-      const nextSession = await uploadCloudArchive(accountSession, createAppBackup());
-      setAccountSession(nextSession);
+      const nextSession = await uploadAccountWorkspaceSnapshot(accountSession);
+      if (isCurrentAccountSession(accountSession) && !isAccountTransitioning()) setAccountSession(nextSession);
       setAccountNotice({
         type: 'success',
         message: `已同步到云端，共 ${nextSession.user.archiveRecordCount} 条核心记录。`,
@@ -178,15 +207,17 @@ export default function Settings() {
   };
 
   const handleCloudRestore = async () => {
-    if (!accountSession) return;
+    if (!accountSession || accountBusy) return;
     const confirmed = window.confirm('从云端恢复会合并云端记录，并以云端设置为准。继续恢复吗？');
     if (!confirmed) return;
 
     setAccountBusy(true);
     setAccountNotice(null);
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const data = await downloadCloudArchive(accountSession);
-      importAppBackup(data.archive);
       const nextSession = {
         ...accountSession,
         user: {
@@ -195,79 +226,76 @@ export default function Settings() {
           archiveRecordCount: data.archiveRecordCount,
         },
       };
-      storeAccountSession(nextSession);
+      await restoreActiveWorkspaceBackup(data.archive, nextSession);
       setAccountSession(nextSession);
       setAccountNotice({
         type: 'success',
         message: '云端存档已恢复，页面即将刷新。',
       });
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setAccountNotice({
         type: 'error',
         message: getAccountErrorMessage(error, '恢复失败，请确认这个账户已有云端存档。'),
       });
     } finally {
-      setAccountBusy(false);
+      if (!reloading) {
+        await releaseSync?.();
+        setAccountBusy(false);
+      }
     }
   };
 
-  const handleAccountLogout = () => {
-    if (accountSession) {
-      saveAccountWorkspace(accountSession.user.id);
+  const handleAccountLogout = async () => {
+    if (accountBusy) return;
+    let releaseSync: (() => Promise<void>) | undefined;
+    try {
+      releaseSync = await beginAccountTransitionSafely();
+      setAccountBusy(true);
+      await logoutAccountWorkspace();
+      setShowLogoutConfirm(false);
+      window.location.replace(`/auth?next=${encodeURIComponent('/app')}`);
+    } catch (error: any) {
+      await releaseSync?.();
+      setAccountBusy(false);
+      setShowLogoutConfirm(false);
+      setAccountNotice({ type: 'error', message: getAccountErrorMessage(error, '退出失败，当前账户和记录已保留。') });
     }
-    clearAccountSession();
-    clearActiveLocalWorkspace();
-    setAccountSession(null);
-    setAccountPassword('');
-    setAccountNotice({
-      type: 'info',
-      message: '已退出当前账户，并为这个账户保留本机工作区。',
-    });
-    window.setTimeout(() => {
-      window.location.href = `/auth?next=${encodeURIComponent('/app')}`;
-    }, 360);
   };
 
   return (
-    <div className="relative h-full w-full overflow-y-auto overscroll-contain px-6 pt-4 pb-40 text-apple-text no-scrollbar">
-      <div className="flex items-center mb-8">
-        <button 
-          onClick={() => navigate(-1)}
-          className="p-2 -ml-2 rounded-full hover:bg-apple-surface-hover transition-colors text-apple-text"
-        >
-          <ChevronLeft size={24} />
-        </button>
-        <h1 className="font-sans text-2xl font-bold tracking-widest text-[#6B8AFF] ml-2">设置</h1>
-      </div>
+    <div className="rail-page relative">
+      <div className="rail-page-content">
+      <PageHeader eyebrow="你的星轨" title="设置" description="管理账号、云端同步与本机存档。" backTo="/app/profile" />
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
         className="flex flex-col gap-6"
       >
         {/* Account Section */}
-        <div className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-          <div className="px-5 py-3 bg-apple-surface border-b border-apple-border">
-            <span className="text-xs font-medium text-apple-text-muted tracking-widest">账号与隐私</span>
+        <div className="rail-surface overflow-hidden">
+          <div className="px-5 py-4 border-b border-apple-border">
+            <h2 className="rail-section-title">账号与隐私</h2>
           </div>
           <div className="border-b border-apple-border p-5">
-            <div className="rounded-3xl border border-apple-border bg-apple-surface/70 p-4 shadow-inner dark:bg-white/[0.035]">
+            <div className="space-y-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-apple-gold/25 bg-apple-gold/12 text-apple-gold">
                   <Cloud size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-base font-bold text-apple-text">云端账户</div>
-                  <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
-                    登录后可以把本机存档同步到云端，换设备时再恢复。当前阶段先支持邮箱和密码。
+                  <div className="text-base font-semibold text-apple-text">云端账户</div>
+                  <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">
+                    登录后会自动同步本机存档，也可以手动同步或从云端恢复。切换账户时会暂停同步，并重新载入该账户的记录。
                   </p>
                 </div>
               </div>
 
               {accountSession ? (
                 <div className="mt-4 space-y-3">
-                  <div className="rounded-2xl border border-apple-border bg-apple-surface/80 p-3 text-xs leading-relaxed text-apple-text-muted dark:bg-white/[0.035]">
-                    <div className="font-bold text-apple-text">{accountSession.user.displayName}</div>
+                  <div className="rounded-2xl border border-apple-border bg-apple-surface p-3 text-[13px] leading-[1.8] text-apple-text-muted">
+                    <div className="font-semibold text-apple-text">{accountSession.user.displayName}</div>
                     <div className="mt-1 break-all">{accountSession.user.email}</div>
                     <div className="mt-2">云端存档：<span className="font-semibold text-apple-text">{cloudArchiveLabel}</span></div>
                     <div className="mt-1">核心记录：<span className="font-semibold text-apple-text">{accountSession.user.archiveRecordCount} 条</span></div>
@@ -277,7 +305,7 @@ export default function Settings() {
                       type="button"
                       onClick={handleCloudSync}
                       disabled={accountBusy}
-                      className="flex items-center justify-center gap-2 rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] disabled:opacity-60"
+                      className="rail-button"
                     >
                       <Upload size={16} />
                       同步到云端
@@ -286,7 +314,7 @@ export default function Settings() {
                       type="button"
                       onClick={handleCloudRestore}
                       disabled={accountBusy || !accountSession.user.archiveUpdatedAt}
-                      className="flex items-center justify-center gap-2 rounded-2xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-sm font-bold text-apple-text disabled:opacity-50"
+                      className="rail-button-secondary"
                     >
                       <Download size={16} />
                       从云端恢复
@@ -296,7 +324,7 @@ export default function Settings() {
                     type="button"
                     onClick={handleAccountLogout}
                     disabled={accountBusy}
-                    className="w-full rounded-2xl border border-apple-border bg-apple-surface/70 px-4 py-3 text-sm font-bold text-apple-text-muted"
+                    className="rail-button-secondary w-full"
                   >
                     退出云端账户
                   </button>
@@ -307,14 +335,16 @@ export default function Settings() {
                     <button
                       type="button"
                       onClick={() => setAccountMode('login')}
-                      className={`rounded-xl py-2 text-xs font-bold ${accountMode === 'login' ? 'bg-apple-gold text-[#121018]' : 'text-apple-text-muted'}`}
+                      aria-pressed={accountMode === 'login'}
+                      className={`rounded-xl py-2 text-[13px] font-semibold ${accountMode === 'login' ? 'bg-apple-surface text-apple-text' : 'text-apple-text-muted'}`}
                     >
                       登录
                     </button>
                     <button
                       type="button"
                       onClick={() => setAccountMode('register')}
-                      className={`rounded-xl py-2 text-xs font-bold ${accountMode === 'register' ? 'bg-apple-gold text-[#121018]' : 'text-apple-text-muted'}`}
+                      aria-pressed={accountMode === 'register'}
+                      className={`rounded-xl py-2 text-[13px] font-semibold ${accountMode === 'register' ? 'bg-apple-surface text-apple-text' : 'text-apple-text-muted'}`}
                     >
                       注册
                     </button>
@@ -345,7 +375,7 @@ export default function Settings() {
                     type="button"
                     onClick={handleAccountSubmit}
                     disabled={accountBusy}
-                    className="w-full rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] disabled:opacity-60"
+                    className="rail-button w-full"
                   >
                     {accountBusy ? '处理中...' : accountMode === 'login' ? '登录并查看云端存档' : '创建账户'}
                   </button>
@@ -362,32 +392,32 @@ export default function Settings() {
         </div>
 
         {/* Data Section */}
-        <div className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-          <div className="px-5 py-3 bg-apple-surface border-b border-apple-border">
-            <span className="text-xs font-medium text-apple-text-muted tracking-widest">数据管理</span>
+        <div className="rail-surface overflow-hidden">
+          <div className="px-5 py-4 border-b border-apple-border">
+            <h2 className="rail-section-title">数据管理</h2>
           </div>
           <div className="border-b border-apple-border p-5">
-            <div className="rounded-3xl border border-apple-border bg-apple-surface/70 p-4 shadow-inner dark:bg-white/[0.035]">
+            <div className="space-y-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-apple-gold/25 bg-apple-gold/12 text-apple-gold">
                   <Database size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-base font-bold text-apple-text">星轨存档备份</div>
-                  <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                  <div className="text-base font-semibold text-apple-text">星轨存档备份</div>
+                  <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">
                     保存日记、塔罗记录、八字档案、沙盘推演、守护消息和权益状态。换设备前先导出，导入后会自动合并记录。
                   </p>
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
                 <ArchiveStat label="命理档案" value={`${backupSummary.profiles} 份`} />
                 <ArchiveStat label="日记记录" value={`${backupSummary.diaryEntries} 篇`} />
                 <ArchiveStat label="牌阵记录" value={`${backupSummary.tarotReadings} 次`} />
                 <ArchiveStat label="总存档" value={`${archiveCount} 条`} />
               </div>
 
-              <div className="mt-4 rounded-2xl border border-apple-border bg-apple-surface/80 p-3 text-[11px] leading-relaxed text-apple-text-muted">
+              <div className="mt-4 rounded-2xl border border-apple-border bg-apple-surface p-3 text-[13px] leading-[1.8] text-apple-text-muted">
                 <div>上次手动备份：<span className="font-semibold text-apple-text">{lastBackupLabel}</span></div>
                 <div className="mt-1">最近自动恢复点：<span className="font-semibold text-apple-text">{autoRecoveryLabel}</span></div>
               </div>
@@ -396,7 +426,7 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={handleExportBackup}
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] shadow-[0_10px_24px_rgba(185,123,40,0.18)]"
+                  className="rail-button"
                 >
                   <Download size={16} />
                   导出存档
@@ -404,7 +434,7 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={() => backupFileInputRef.current?.click()}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-sm font-bold text-apple-text"
+                  className="rail-button-secondary"
                 >
                   <Upload size={16} />
                   导入存档
@@ -413,7 +443,7 @@ export default function Settings() {
                   type="button"
                   onClick={handleRestoreAutoRecovery}
                   disabled={!autoRecoveryMeta}
-                  className="col-span-2 flex items-center justify-center gap-2 rounded-2xl border border-apple-gold/25 bg-apple-gold/10 px-4 py-3 text-sm font-bold text-apple-gold disabled:cursor-not-allowed disabled:border-apple-border disabled:bg-apple-surface-hover disabled:text-apple-text-muted"
+                  className="rail-button-secondary col-span-2"
                 >
                   <RotateCcw size={16} />
                   恢复最近自动恢复点
@@ -429,9 +459,9 @@ export default function Settings() {
 
               {backupNotice && (
                 <div
-                  className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+                  role="status" className={`mt-4 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-[1.8] ${
                     backupNotice.type === 'error'
-                      ? 'border-red-500/25 bg-red-500/10 text-red-300'
+                      ? 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300'
                       : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text'
                   }`}
                 >
@@ -441,107 +471,90 @@ export default function Settings() {
               )}
             </div>
           </div>
-          <div 
+          <button type="button"
             onClick={() => setShowClearConfirm(true)}
-            className="flex items-center gap-3 p-5 hover:bg-apple-surface transition-colors cursor-pointer text-red-400"
+            className="flex w-full items-center gap-3 p-5 text-left text-red-700 dark:text-red-300 hover:bg-red-500/5"
           >
             <Trash2 size={18} />
-            <span className="font-medium tracking-wide text-sm">清除所有数据</span>
-          </div>
+            <span className="font-medium text-[15px]">清除所有数据</span>
+          </button>
         </div>
 
         {/* Support Section */}
-        <div className="bg-apple-surface backdrop-blur-xl rounded-3xl overflow-hidden border border-apple-border shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-          <div className="px-5 py-3 bg-apple-surface border-b border-apple-border">
-            <span className="text-xs font-medium text-apple-text-muted tracking-widest">支持与帮助</span>
+        <div className="rail-surface overflow-hidden">
+          <div className="px-5 py-4 border-b border-apple-border">
+            <h2 className="rail-section-title">支持与帮助</h2>
           </div>
           <SettingRow icon={<HelpCircle size={18} />} title="帮助中心" onClick={() => navigate('/app/settings/help')} />
           <SettingRow icon={<Compass size={18} />} title="查看应用详情页" onClick={() => navigate('/')} />
-          <SettingRow 
+          {accountSession && <SettingRow
             icon={<LogOut size={18} />} 
             title="退出登录" 
             hasBorder={false} 
             onClick={() => setShowLogoutConfirm(true)} 
-          />
+          />}
         </div>
       </motion.div>
 
       <AnimatePresence>
-        {showClearConfirm && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-xl flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-apple-surface backdrop-blur-xl rounded-3xl p-8 flex flex-col items-center text-center border border-apple-border shadow-2xl"
-            >
-              <h3 className="font-sans font-bold text-2xl text-apple-text mb-4">清除所有数据</h3>
-              <p className="text-apple-text-muted mb-8 text-sm">
+        <SettingsDialog open={showClearConfirm} title="清除所有数据" onClose={() => setShowClearConfirm(false)}>
+          <div className="p-6 text-left">
+              <h3 className="text-xl font-semibold text-apple-text mb-4">清除所有数据</h3>
+              <p className="text-apple-text-muted mb-6 text-[15px] leading-[1.8]">
                 此操作会清除本机的日记、塔罗记录、八字档案、沙盘推演、守护消息和能量；已领取的试用记录与生效权益不会重置。建议先导出存档备份。
               </p>
               <div className="flex w-full gap-3">
                 <button 
                   onClick={() => setShowClearConfirm(false)}
-                  className="flex-1 py-3 rounded-xl bg-apple-surface-hover text-apple-text font-semibold hover:bg-apple-surface-hover transition-colors"
+                  className="rail-button-secondary flex-1"
                 >
                   取消
                 </button>
                 <button 
                   onClick={handleClearData}
-                  className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold shadow-[0_4px_15px_rgba(239,68,68,0.3)] hover:bg-red-600 transition-colors"
+                  className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition-colors"
                 >
                   确认清除
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
+          </div>
+        </SettingsDialog>
 
-        {showLogoutConfirm && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-xl flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-apple-surface backdrop-blur-xl rounded-3xl p-8 flex flex-col items-center text-center border border-apple-border shadow-2xl"
-            >
-              <h3 className="font-sans font-bold text-2xl text-apple-text mb-4">退出登录</h3>
-              <p className="text-apple-text-muted mb-8 text-sm">
+        <SettingsDialog open={showLogoutConfirm} title="退出登录" onClose={() => setShowLogoutConfirm(false)}>
+          <div className="p-6 text-left">
+              <h3 className="text-xl font-semibold text-apple-text mb-4">退出登录</h3>
+              <p className="text-apple-text-muted mb-6 text-[15px] leading-[1.8]">
                 确定要退出当前账号吗？
               </p>
               <div className="flex w-full gap-3">
                 <button 
                   onClick={() => setShowLogoutConfirm(false)}
-                  className="flex-1 py-3 rounded-xl bg-apple-surface-hover text-apple-text font-semibold hover:bg-apple-surface-hover transition-colors"
+                  className="rail-button-secondary flex-1"
                 >
                   取消
                 </button>
                 <button 
-                  onClick={() => {
-                    setShowLogoutConfirm(false);
-                    navigate('/');
-                  }}
-                  className="flex-1 py-3 rounded-xl bg-[#6B8AFF] text-white font-semibold shadow-[0_4px_15px_rgba(107,138,255,0.3)] hover:bg-[#4F46E5] transition-colors"
+                  onClick={handleAccountLogout}
+                  disabled={accountBusy}
+                  className="rail-button flex-1"
                 >
                   确认退出
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
+          </div>
+        </SettingsDialog>
 
         {showSuccessToast && (
           <motion.div 
             initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }}
-            className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-[#6B8AFF] text-white px-6 py-3 rounded-full text-sm font-medium shadow-[0_4px_15px_rgba(107,138,255,0.4)] z-[100]"
+            className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-apple-text text-apple-bg px-6 py-3 rounded-full text-[15px] font-medium z-[100]"
           >
             数据已清除
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+      </div>
   );
 }
 
@@ -587,18 +600,24 @@ function AccountInput({
   placeholder: string;
   type?: React.HTMLInputTypeAttribute;
 }) {
+  const id = React.useId();
+  const label = type === 'email' ? '邮箱' : type === 'password' ? '密码' : '昵称';
   return (
-    <label className="flex items-center gap-2 rounded-2xl border border-apple-border bg-apple-surface/80 px-3 py-3 text-apple-text-muted focus-within:border-apple-gold/60 focus-within:text-apple-gold dark:bg-white/[0.035]">
-      <span className="shrink-0">{icon}</span>
+    <div>
+      <label htmlFor={id} className="mb-2 block text-[13px] font-medium text-apple-text">{label}</label>
+      <div className="flex min-h-12 items-center gap-2 rounded-xl border border-apple-border bg-apple-surface px-3 text-apple-text-muted focus-within:border-apple-gold/60 focus-within:text-apple-gold">
+      <span aria-hidden="true" className="shrink-0">{icon}</span>
       <input
+        id={id}
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         autoComplete={type === 'password' ? 'current-password' : type === 'email' ? 'email' : 'nickname'}
-        className="min-w-0 flex-1 bg-transparent text-sm font-medium text-apple-text placeholder:text-apple-text-muted/70 outline-none"
+        className="min-w-0 flex-1 bg-transparent text-base text-apple-text outline-none"
       />
-    </label>
+      </div>
+    </div>
   );
 }
 
@@ -606,9 +625,9 @@ function NoticeBox({ notice }: { notice: BackupNotice }) {
   const isError = notice.type === 'error';
   return (
     <div
-      className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+      role="status" className={`mt-4 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-[1.8] ${
         isError
-          ? 'border-red-500/25 bg-red-500/10 text-red-300'
+          ? 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300'
           : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text'
       }`}
     >
@@ -620,24 +639,28 @@ function NoticeBox({ notice }: { notice: BackupNotice }) {
 
 function ArchiveStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-apple-border bg-apple-surface/80 px-3 py-2 dark:bg-white/[0.035]">
-      <div className="text-[11px] text-apple-text-muted">{label}</div>
-      <div className="mt-1 text-sm font-bold text-apple-text">{value}</div>
+    <div className="rounded-xl bg-apple-surface-hover px-3 py-3">
+      <div className="text-[13px] text-apple-text-muted">{label}</div>
+      <div className="mt-1 text-xl font-medium tabular-nums text-apple-text">{value}</div>
     </div>
   );
 }
 
-function SettingRow({ icon, title, hasBorder = true, onClick }: { icon: React.ReactNode, title: string, hasBorder?: boolean, onClick?: () => void }) {
+function SettingRow({ icon, title, hasBorder = true, onClick }: { icon: React.ReactNode; title: string; hasBorder?: boolean; onClick?: () => void }) {
   return (
-    <div 
-      onClick={onClick}
-      className={`flex items-center justify-between p-5 hover:bg-apple-surface transition-colors cursor-pointer ${hasBorder ? 'border-b border-apple-border' : ''}`}
-    >
-      <div className="flex items-center gap-3 text-apple-text">
-        {icon}
-        <span className="font-medium tracking-wide text-sm">{title}</span>
-      </div>
-      <ChevronLeft size={18} className="text-apple-text-muted rotate-180" />
-    </div>
+    <button type="button" onClick={onClick} className={`flex w-full items-center justify-between gap-4 p-5 text-left hover:bg-apple-surface-hover ${hasBorder ? 'border-b border-apple-border' : ''}`}>
+      <span className="flex items-center gap-3 text-apple-text"><span className="text-apple-gold">{icon}</span><span className="text-[15px] font-medium">{title}</span></span>
+      <ChevronLeft size={18} aria-hidden="true" className="text-apple-text-muted rotate-180" />
+    </button>
   );
+}
+
+function SettingsDialog({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  React.useEffect(() => {
+    const dialog = dialogRef.current;
+    if (open && dialog && !dialog.open) dialog.showModal();
+    if (!open && dialog?.open) dialog.close();
+  }, [open]);
+  return <dialog ref={dialogRef} role="alertdialog" aria-label={title} onCancel={onClose} className="m-auto w-[calc(100%_-_32px)] max-w-md max-h-[calc(100dvh_-_48px)] overflow-y-auto rounded-2xl border border-apple-border bg-apple-surface p-0 text-apple-text backdrop:bg-black/55">{open && children}</dialog>;
 }

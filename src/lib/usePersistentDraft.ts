@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { getStoredAccountSession } from './accountClient';
+import { removeWorkspaceStorage, writeWorkspaceStorage } from './workspacePersistence';
 
 export function usePersistentDraft<T>(key: string, initialValue: T) {
+  const owner = useRef(getStoredAccountSession()?.user.id || null);
   const [value, setValue] = useState<T>(() => {
     try {
       const saved = localStorage.getItem(key);
@@ -12,7 +15,7 @@ export function usePersistentDraft<T>(key: string, initialValue: T) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      void writeWorkspaceStorage(owner.current, key, JSON.stringify(value)).catch(() => undefined);
     } catch {
       // Draft saving is a convenience. If storage is unavailable, keep the UI usable.
     }
@@ -20,7 +23,7 @@ export function usePersistentDraft<T>(key: string, initialValue: T) {
 
   const clearDraft = (nextValue = initialValue) => {
     try {
-      localStorage.removeItem(key);
+      void removeWorkspaceStorage(owner.current, key).catch(() => undefined);
     } catch {
       // Ignore storage errors.
     }

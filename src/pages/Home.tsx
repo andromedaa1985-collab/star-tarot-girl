@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Copy,
   Crown,
+  Download,
   Gift,
   Globe,
   History,
@@ -28,10 +29,14 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { clsx } from 'clsx';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { filterTarotArchive, getReadingSource, type ReadingSource } from '../lib/tarotArchiveSearch';
+import { formatRecordDate, type RecordRange } from '../lib/recordSearch';
+import { getAppDateKey, getTrustedNow } from '../lib/trustedTime';
+import { getBaziResultStatus } from '../lib/baziProfiles';
+import { getGuardianLetterState } from '../lib/guardianLetter';
 import {
   LEVEL_THRESHOLDS,
-  LEVEL_TITLES,
   type CompanionMessage,
   type DiaryEntry,
   type Message,
@@ -45,7 +50,6 @@ import {
   getDailyCheckInEnergy,
   getDailyFortuneDeepCredits,
   getDailyMissionEnergy,
-  getMembershipLabel,
   getReadingLimit,
   hasDailyFortuneDeepAccess,
   isPlusActive,
@@ -63,6 +67,11 @@ import { shareImageWithNativeSheet } from '../lib/nativeShare';
 import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
 import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
 import { drawTarotCardIndices, drawTarotPositions, type TarotPosition } from '../lib/tarotRandom';
+import { preloadImages } from '../lib/preloadImages';
+import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
+import { useDialogFocus } from '../lib/useDialogFocus';
+import { downloadAppBackup } from '../lib/appBackup';
+import { appendTarotReading, canAddTarotReading, getRegenerationSource, removeTarotReading, replaceTarotAnswer, type RegenerationSource } from '../lib/tarotConversation';
 import CompanionSprite, {
   CompanionActionBadge,
   CompanionExpressionBadge,
@@ -104,33 +113,6 @@ const TAROT_CARDS = [
 ];
 
 const TAROT_IMAGE_PATHS = TAROT_CARDS.map((card) => `/tarot/${card.file}`);
-const preloadedImages = new Set<string>();
-
-const preloadImage = (src: string) =>
-  new Promise<void>((resolve) => {
-    if (!src || preloadedImages.has(src) || typeof window === 'undefined') {
-      resolve();
-      return;
-    }
-
-    const image = new Image();
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      preloadedImages.add(src);
-      resolve();
-    };
-
-    image.onload = finish;
-    image.onerror = finish;
-    image.decoding = 'async';
-    image.src = src;
-    if (image.complete) finish();
-  });
-
-const preloadImages = (sources: string[]) =>
-  Promise.all(Array.from(new Set(sources)).map((src) => preloadImage(src))).then(() => undefined);
 
 const QUICK_PROMPTS = [
   { label: '今日运势', prompt: '今日运势' },
@@ -296,6 +278,15 @@ const drawCards = (
 
 const formatCards = (cards: DrawnCard[]) =>
   cards.map((card) => `${card.name}（${card.position}）`).join('，');
+
+const restoreReadingCards = (reading: TarotReading): DrawnCard[] => {
+  const images = reading.cardImages?.length ? reading.cardImages : [reading.cardImage || ''];
+  return [...reading.cards.matchAll(/([^，,]+)[（(](正位|逆位)[）)]/g)].map((match, index) => ({
+    name: match[1].trim(),
+    position: match[2] as TarotPosition,
+    image: images[index] || reading.cardImage || '/default-card.png',
+  }));
+};
 
 const getDrawCount = (question: string) => {
   if (question.includes('圣三角')) return 3;
@@ -1457,6 +1448,7 @@ const buildMemoryRecall = (input: {
 };
 
 export default function Home() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const {
     bondExp,
@@ -1473,7 +1465,7 @@ export default function Home() {
     preferredAddress,
     theme,
     setTheme,
-    baziResult,
+    baziResult: storedBaziResult,
     diaryEntries,
     simulationHistory,
     profiles,
@@ -1493,6 +1485,8 @@ export default function Home() {
     engagement,
     setEngagement,
     dailyLetterDate,
+    dailyLetter,
+    settings,
     guardianMessages,
     setAppEvents,
   } = useAppContext();
@@ -1522,6 +1516,20 @@ export default function Home() {
   const [dailyDeepImpressionIds, setDailyDeepImpressionIds] = useState<Set<string>>(() => new Set());
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
   const [petExpressionOverride, setPetExpressionOverride] = useState<CompanionExpression | null>(null);
+  const [historyQuotaNotice, setHistoryQuotaNotice] = useState(false);
+  const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(null);
+  const [requestedArchiveId, setRequestedArchiveId] = useState<string | null>(null);
+  const closeReadingLog = () => { setShowReadingLog(false); setRequestedArchiveId(null); };
+
+  useEffect(() => {
+    if (searchParams.get('history') !== '1' && !searchParams.get('reading')) return;
+    setRequestedArchiveId(searchParams.get('reading'));
+    setShowReadingLog(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('history');
+    next.delete('reading');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -1563,10 +1571,10 @@ export default function Home() {
   const dailyDeepCredits = getDailyFortuneDeepCredits(membership);
   const dailyDeepAccess = hasDailyFortuneDeepAccess(membership);
   const readingLimit = getReadingLimit(membership);
+  const followUpReading = tarotReadings.find((reading) => reading.id === followUpReadingId);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
-  const membershipLabel = getMembershipLabel(membership);
-  const hasGuardianLetterToday = dailyLetterDate === new Date().toLocaleDateString('zh-CN');
+  const hasGuardianLetterToday = getGuardianLetterState(getAppDateKey(getTrustedNow()), dailyLetter, dailyLetterDate, settings.guardianLetterStatus).completed;
   const nextBestAction = getNextBestAction({
     plusActive,
     tarotReadings: tarotReadings.length,
@@ -1577,8 +1585,6 @@ export default function Home() {
     activeDays: engagement.activeDays,
   });
 
-  const nextLevelExp = LEVEL_THRESHOLDS[bondLevel] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
-  const progressPercent = Math.min(100, Math.round((bondExp / nextLevelExp) * 100));
   const visibleMessages = messages.filter((message) => message.id !== 'init');
   const hasDrawnCard = cardImage && cardImage !== '/default-card.png' && cardImage !== 'default-card.png';
   const memoryRecall = useMemo(
@@ -1586,6 +1592,7 @@ export default function Home() {
     [tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId],
   );
   const activeProfile = useMemo(() => getActiveProfile(profiles, activeProfileId), [profiles, activeProfileId]);
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const visibleMemoryInsights = memoryRecall.insights.slice(0, plusActive ? 3 : 1);
   const profileTarotContextText = useMemo(
     () => buildProfileTarotContext(activeProfile, baziResult),
@@ -1622,8 +1629,12 @@ export default function Home() {
     ? basePetExpression
     : petExpressionOverride || basePetExpression;
   const activePetAction = getCompanionAction(activePetExpression, activeOutfitId);
-  const petStageClass = 'left-1/2 top-[262px] h-[164px] w-[164px] -translate-x-1/2 sm:top-[244px] sm:h-[188px] sm:w-[188px]';
-  const petDockClass = 'bottom-[calc(var(--app-bottom-pad)+112px)] right-[-34px] h-[104px] w-[104px] sm:right-[-38px] sm:h-[118px] sm:w-[118px]';
+  const petStageClass = 'rail-stage-pet';
+  const petIsDocked = visibleMessages.length > 0;
+  useEffect(() => {
+    // Ritual and conversation areas use different anchors; reset the old drag offset.
+    setPetOffset({ x: 0, y: 0 });
+  }, [petIsDocked]);
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1631,15 +1642,16 @@ export default function Home() {
     const baseLeft = rect.left - petOffset.x;
     const baseTop = rect.top - petOffset.y;
     const edge = 8;
+    const stageRect = (event.currentTarget.closest('[data-pet-stage]') || event.currentTarget.closest('.rail-main'))?.getBoundingClientRect();
     petDragRef.current = {
       startX: event.clientX,
       startY: event.clientY,
       originX: petOffset.x,
       originY: petOffset.y,
-      minX: edge - baseLeft,
-      maxX: window.innerWidth - edge - rect.width - baseLeft,
-      minY: edge - baseTop,
-      maxY: window.innerHeight - edge - rect.height - baseTop,
+      minX: (stageRect ? stageRect.left + edge : edge) - baseLeft,
+      maxX: (stageRect ? stageRect.right : window.innerWidth) - edge - rect.width - baseLeft,
+      minY: (stageRect ? stageRect.top + edge : edge) - baseTop,
+      maxY: (stageRect ? stageRect.bottom - edge : window.innerHeight - edge) - rect.height - baseTop,
       moved: false,
     };
   };
@@ -1774,7 +1786,7 @@ export default function Home() {
   useEffect(() => {
     const timers = PRELOAD_IMAGE_PATHS.map((src, index) =>
       window.setTimeout(() => {
-        void preloadImage(src);
+        void preloadImages([src]);
       }, index < 8 ? 0 : index * 42),
     );
 
@@ -1953,7 +1965,7 @@ export default function Home() {
 
   const isDailyFortuneResult = (message: Message, index: number, list: Message[]) => {
     if (message.role !== 'ai' || dailyDeepExpandedIds.has(message.id)) return false;
-    const previousQuestion = getPreviousUserQuestion(list, index);
+    const previousQuestion = message.sourceQuestion || getPreviousUserQuestion(list, index);
     return isDailyFortuneQuestion(previousQuestion);
   };
 
@@ -1973,7 +1985,7 @@ export default function Home() {
     navigate(`/app/profile?plus=1&plan=${planId}`);
   };
 
-  const handleDailyDeepDive = async (sourceMessage: Message, sourceIndex: number) => {
+  const handleDailyDeepDive = async (sourceMessage: Message, sourceIndex: number, replaceMessageId?: string) => {
     if (isThinking) return;
     if (!dailyDeepAccess) {
       setShowDailyDeepPaywall(true);
@@ -1983,7 +1995,7 @@ export default function Home() {
     const accountSession = requireAccountForPaidFeature('/app');
     if (!accountSession) return;
 
-    const sourceQuestion = getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
+    const sourceQuestion = sourceMessage.sourceQuestion || getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
     const linkedReading =
       tarotReadings.find((reading) => reading.generationId && reading.generationId === sourceMessage.generationId) ||
       tarotReadings.find((reading) => isDailyFortuneQuestion(reading.question) && reading.cardImage === sourceMessage.cardImage) ||
@@ -2001,8 +2013,8 @@ export default function Home() {
     };
 
     setIsThinking(true);
-    setAutoScrollOnNextMessage(true);
-    setMessages((prev) => [...prev, userMessage]);
+    setAutoScrollOnNextMessage(!replaceMessageId);
+    if (!replaceMessageId) setMessages((prev) => [...prev, userMessage]);
 
     let answer = fallbackDailyFortuneDeepAnswer(sourceQuestion, readingContext);
     let usedFallbackAnswer = false;
@@ -2084,10 +2096,18 @@ export default function Home() {
       timestamp: Date.now(),
       cardImage: sourceMessage.cardImage || linkedReading?.cardImage,
       cardImages: sourceMessage.cardImages || linkedReading?.cardImages,
+      sourceQuestion: userMessage.text,
+      replyToMessageId: userMessage.id,
+      readingId: linkedReading?.id,
       ...answerTrace,
     };
 
-    setMessages((prev) => [...prev, aiMessage]);
+    setMessages((prev) => replaceMessageId
+      ? replaceTarotAnswer(prev, replaceMessageId, {
+        ...aiMessage,
+        replyToMessageId: prev.find((message) => message.id === replaceMessageId)?.replyToMessageId,
+      })
+      : [...prev, aiMessage]);
     setDailyDeepExpandedIds((current) => {
       const next = new Set(current);
       next.add(sourceMessage.id);
@@ -2097,11 +2117,11 @@ export default function Home() {
     setIsThinking(false);
   };
 
-  const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
+  const handleSend = async (textOverride?: string, options: { mode?: SendMode; regeneration?: RegenerationSource } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
     const accountSession = getStoredAccountSession();
-    if ((options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
+    if (!options.regeneration && (options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
       const source = getLatestDailyFortuneDeepSource();
       if (source) {
         clearInputDraft('');
@@ -2132,20 +2152,28 @@ export default function Home() {
       return;
     }
 
-    const currentReading = tarotReadings[0];
+    const currentReading = options.regeneration ? options.regeneration.reading : followUpReading || tarotReadings[0];
     const hasCurrentReading = Boolean(currentReading || hasDrawnCard);
-    const mode = options.mode ?? 'auto';
+    const mode = options.mode ?? (followUpReading ? 'current' : 'auto');
     const shouldChatOnly = mode === 'auto' && isCasualChatQuestion(question);
-    const shouldDraw =
-      mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading));
-    const isDailyFortune = shouldDraw && isDailyFortuneQuestion(question);
+    const shouldDraw = !options.regeneration && (
+      mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading))
+    );
+    if (shouldDraw && !canAddTarotReading(tarotReadings, readingLimit)) {
+      setHistoryQuotaNotice(true);
+      if (!plusActive) openUpgradePrompt('history');
+      return;
+    }
+    setHistoryQuotaNotice(false);
+    const shouldReadDraw = shouldDraw || Boolean(options.regeneration?.originalDraw);
+    const isDailyFortune = shouldReadDraw && isDailyFortuneQuestion(question);
     const cards = shouldDraw
       ? drawCards(
         getDrawCount(question),
         getRecentTarotPositions(tarotReadings),
         getRecentTarotCardIndices(tarotReadings),
       )
-      : [];
+      : options.regeneration?.originalDraw && currentReading ? restoreReadingCards(currentReading) : [];
     const currentImages = currentReading?.cardImages?.length
       ? currentReading.cardImages
       : currentReading?.cardImage
@@ -2153,9 +2181,9 @@ export default function Home() {
         : hasDrawnCard
           ? [cardImage]
           : [];
-    const cardsText = shouldDraw ? formatCards(cards) : currentReading?.cards ?? '当前牌面';
-    const image = shouldDraw ? cards[0]?.image || '/default-card.png' : currentImages[0] || cardImage || '/default-card.png';
-    const images = shouldDraw ? cards.map((card) => card.image) : currentImages;
+    const cardsText = shouldReadDraw ? formatCards(cards) : currentReading?.cards ?? '当前牌面';
+    const image = shouldReadDraw ? cards[0]?.image || '/default-card.png' : currentImages[0] || cardImage || '/default-card.png';
+    const images = shouldReadDraw ? cards.map((card) => card.image) : currentImages;
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
@@ -2164,21 +2192,22 @@ export default function Home() {
     };
     let drawingStartedAt = Date.now();
 
-    clearInputDraft('');
+    if (!options.regeneration) clearInputDraft('');
+    if (shouldDraw) setFollowUpReadingId(null);
     setIsThinking(true);
     setIsDrawingCards(false);
     setDrawingCards(shouldDraw ? cards : []);
     setComposerFocused(false);
-    setAutoScrollOnNextMessage(true);
+    setAutoScrollOnNextMessage(!options.regeneration);
     if (shouldDraw) setCardImage(image);
-    setMessages((prev) => [...prev, userMessage]);
+    if (!options.regeneration) setMessages((prev) => [...prev, userMessage]);
     if (shouldDraw) {
       await preloadImages(images);
       drawingStartedAt = Date.now();
       setIsDrawingCards(true);
     }
 
-    let answer = shouldDraw
+    let answer = shouldReadDraw
       ? fallbackAnswer(question, cards)
       : fallbackCurrentReadingAnswer(question, currentReading);
     let usedFallbackAnswer = false;
@@ -2208,7 +2237,7 @@ export default function Home() {
                 userAddressInstruction,
                 tarotContextPolicy.memoryText,
                 tarotContextPolicy.profileText,
-                shouldDraw
+                shouldReadDraw
                   ? buildPrompt(question, cards, isInternetMode)
                   : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
               ].filter(Boolean).join('\n\n'),
@@ -2249,7 +2278,7 @@ export default function Home() {
       usedFallbackAnswer = true;
     }
     answer = cleanTarotAnswer(answer);
-    if (!usedFallbackAnswer && shouldDraw && isDailyFortune && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
+    if (!usedFallbackAnswer && shouldReadDraw && isDailyFortune && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
       answer = completeTruncatedTarotAnswer(answer, true);
     }
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
@@ -2263,7 +2292,7 @@ export default function Home() {
       await new Promise((resolve) => window.setTimeout(resolve, DRAW_ANIMATION_MIN_MS - drawingElapsed));
     }
 
-    const answerTrace = createGenerationTrace(shouldDraw ? 'tarot' : 'tarot_followup', {
+    const answerTrace = createGenerationTrace(shouldReadDraw ? 'tarot' : 'tarot_followup', {
       model: DEEPSEEK_TAROT_FAST_MODEL,
       usedFallback: usedFallbackAnswer,
     });
@@ -2273,16 +2302,22 @@ export default function Home() {
       role: 'ai' as const,
       text: answer,
       timestamp: Date.now(),
+      sourceQuestion: question,
+      replyToMessageId: options.regeneration ? options.regeneration.message.replyToMessageId : userMessage.id,
+      readingId: shouldDraw ? undefined : currentReading?.id,
       ...answerTrace,
-      ...(shouldDraw ? { cardImage: image, cardImages: images } : {}),
+      ...(shouldReadDraw ? { cardImage: image, cardImages: images } : {}),
     };
 
-    setMessages((prev) => [...prev, aiMessage]);
+    const newReadingId = shouldDraw ? crypto.randomUUID() : undefined;
+    if (newReadingId) aiMessage.readingId = newReadingId;
+    setMessages((prev) => options.regeneration
+      ? replaceTarotAnswer(prev, options.regeneration.message.id, aiMessage)
+      : [...prev, aiMessage]);
     if (shouldDraw) {
-      setTarotReadings((prev) => {
-        const nextReadings = [
+      setTarotReadings((prev) => appendTarotReading(prev,
           {
-            id: crypto.randomUUID(),
+            id: newReadingId!,
             date: new Date().toISOString(),
             question,
             cards: cardsText,
@@ -2290,14 +2325,7 @@ export default function Home() {
             cardImage: image,
             cardImages: images,
             ...answerTrace,
-          },
-          ...prev,
-        ];
-        if (!plusActive && nextReadings.length > readingLimit) {
-          window.setTimeout(() => openUpgradePrompt('history'), 450);
-        }
-        return nextReadings.slice(0, readingLimit);
-      });
+          }, readingLimit));
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
         spread: cards.length,
         plus: plusActive,
@@ -2311,6 +2339,17 @@ export default function Home() {
         }));
       }
       addExp(Math.floor(Math.random() * 8) + 8);
+    } else if (options.regeneration) {
+      if (options.regeneration.originalDraw && currentReading) {
+        setTarotReadings((prev) => prev.map((reading) => reading.id === currentReading.id
+          ? { ...reading, summary: answer.trim(), ...answerTrace }
+          : reading));
+      }
+      setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
+        kind: 'regenerate',
+        plus: plusActive,
+        energySpent: plusActive ? 0 : (accountSession?.token || consumedGuestEnergy ? 1 : 0),
+      }));
     } else {
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
         kind: 'followup',
@@ -2325,9 +2364,40 @@ export default function Home() {
     setDrawingCards([]);
   };
 
-  const handleRegenerate = () => {
-    const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-    if (lastUserMessage) handleSend(lastUserMessage.text);
+  const handleRegenerate = (messageId: string) => {
+    if (isThinking) return;
+    const source = getRegenerationSource(messages, tarotReadings, messageId);
+    if (!source) return;
+    if (source.message.model === DEEPSEEK_TAROT_DEEP_MODEL && source.reading) {
+      const originalIndex = visibleMessages.findIndex((message) => message.generationId === source.reading?.generationId);
+      const originalMessage = visibleMessages[originalIndex] || {
+        id: source.reading.id,
+        role: 'ai' as const,
+        text: source.reading.summary,
+        timestamp: Date.parse(source.reading.date),
+        cardImage: source.reading.cardImage,
+        cardImages: source.reading.cardImages,
+        generationId: source.reading.generationId,
+        sourceQuestion: source.reading.question,
+      };
+      void handleDailyDeepDive(originalMessage, originalIndex, messageId);
+      return;
+    }
+    void handleSend(source.question, { mode: 'current', regeneration: source });
+  };
+
+  const handleContinueReading = (messageId: string) => {
+    const source = getRegenerationSource(messages, tarotReadings, messageId);
+    setFollowUpReadingId(source?.reading?.id || null);
+    setShowComposerTools(false);
+    setShowPetMenu(false);
+    inputRef.current?.focus();
+  };
+
+  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!shouldSubmitOnEnter(event.nativeEvent)) return;
+    event.preventDefault();
+    void handleSend();
   };
 
   const handleCopy = async (text: string) => {
@@ -2789,7 +2859,7 @@ export default function Home() {
               setShowComposerTools(false);
               setShowReadingLog(true);
             }}
-            className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#f4cf83]/32 bg-[#f4cf83]/18 px-2.5 py-1.5 text-[11px] font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] transition-transform active:scale-[0.98] dark:border-[#f4cf83]/20 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83] sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
+            className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#f4cf83]/32 bg-[#f4cf83]/18 px-2.5 py-1.5 text-xs font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] transition-transform active:scale-[0.98] dark:border-[#f4cf83]/20 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83] sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[13px]"
             aria-label="打开牌迹档案"
           >
             <BookOpen size={13} />
@@ -2801,7 +2871,7 @@ export default function Home() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => handleSend(item.prompt, { mode: 'draw' })}
-              className="shrink-0 rounded-[14px] border border-[#eadcc8]/64 bg-white/52 px-2.5 py-1.5 text-[11px] font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64 sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[12px]"
+              className="shrink-0 rounded-[14px] border border-[#eadcc8]/64 bg-white/52 px-2.5 py-1.5 text-xs font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64 sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[13px]"
             >
               {item.label}
             </button>
@@ -2812,7 +2882,7 @@ export default function Home() {
   );
 
   const composer = (
-    <div className="mx-auto flex w-full max-w-[540px] items-center gap-2 rounded-[24px] border border-[#efe3cf]/80 bg-[#fffaf2]/92 p-2 shadow-[0_18px_48px_rgba(84,55,24,0.12),inset_0_1px_0_rgba(255,255,255,0.88)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/92 dark:shadow-[0_20px_54px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.08)]">
+    <div className="rail-composer mx-auto flex w-full max-w-[760px] items-center gap-2 p-2">
       <button
         onClick={() => setIsInternetMode((value) => !value)}
         className={clsx(
@@ -2822,6 +2892,7 @@ export default function Home() {
             : 'bg-[#efe2cc] text-[#7f715f] dark:bg-white/[0.06] dark:text-white/55',
         )}
         aria-label={isInternetMode ? '关闭联网提示' : '开启联网提示'}
+        aria-pressed={isInternetMode}
         title={isInternetMode ? '关闭联网提示' : '开启联网提示'}
       >
         <Globe size={19} />
@@ -2848,10 +2919,11 @@ export default function Home() {
             setComposerFocused(true);
           }}
           onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
-          onKeyDown={(event) => event.key === 'Enter' && handleSend()}
+          onKeyDown={handleComposerKeyDown}
           disabled={isThinking}
+          aria-label="想问星轨的问题"
           placeholder="说说你现在最想问的事"
-          className="h-10 w-full rounded-[18px] bg-[#f3eadc] pl-4 pr-[74px] text-[14px] font-medium text-[#241c14] placeholder:text-[#8b7e6d]/72 outline-none transition-all focus:bg-white focus:ring-4 focus:ring-[#d9a84f]/16 dark:bg-black/24 dark:text-white dark:placeholder:text-white/38 dark:focus:bg-black/34"
+          className="h-12 w-full rounded-xl bg-transparent pl-3 pr-[80px] text-base text-apple-text placeholder:text-apple-text-muted outline-none"
         />
         <button
           onClick={handleVoiceInput}
@@ -2933,12 +3005,12 @@ export default function Home() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            className="fixed inset-x-4 bottom-[calc(var(--app-bottom-pad)+226px)] z-[70] mx-auto w-auto max-w-[360px] rounded-[28px] border border-[#eadcc8]/80 bg-[#fff8ee]/98 p-3 shadow-[0_18px_56px_rgba(84,55,24,0.16),inset_0_1px_0_rgba(255,255,255,0.78)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/98 dark:shadow-[0_20px_58px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.08)]"
+            className="fixed inset-x-4 bottom-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+140px)] z-[70] mx-auto w-auto max-w-[360px] rounded-[28px] border border-[#eadcc8]/80 bg-[#fff8ee]/98 p-3 shadow-[0_18px_56px_rgba(84,55,24,0.16),inset_0_1px_0_rgba(255,255,255,0.78)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/98 dark:shadow-[0_20px_58px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.08)]"
           >
             <div className="mb-2 flex items-center justify-between gap-3 px-1">
               <div className="min-w-0">
-                <div className="text-[13px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">星轨桌宠</div>
-                <div className="mt-0.5 truncate text-[11px] text-apple-text-muted">点我就能去常用入口</div>
+                <div className="text-[13px] font-semibold text-[#8f5e1b] dark:text-[#f4cf83]">星轨桌宠</div>
+                <div className="mt-0.5 truncate text-xs text-apple-text-muted">点我就能去常用入口</div>
               </div>
               <button
                 type="button"
@@ -2957,8 +3029,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-[#f4cf83]/20 px-2 text-center text-[#8f5e1b] transition-transform active:scale-[0.98] dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
               >
                 <CalendarCheck size={18} />
-                <span className="text-[11px] font-black">任务</span>
-                <span className="text-[9px] text-[#7b6c5a] dark:text-white/46">{missionCount}/3</span>
+                <span className="text-xs font-black">任务</span>
+                <span className="text-xs text-[#7b6c5a] dark:text-white/46">{missionCount}/3</span>
               </button>
 
               <button
@@ -2970,8 +3042,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <BookOpen size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">牌迹</span>
-                <span className="text-[9px] text-apple-text-muted">{tarotReadings.length} 条</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">牌迹</span>
+                <span className="text-xs text-apple-text-muted">{tarotReadings.length} 条</span>
               </button>
 
               <button
@@ -2983,8 +3055,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <Shirt size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">衣柜</span>
-                <span className="text-[9px] text-apple-text-muted">换装</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">衣柜</span>
+                <span className="text-xs text-apple-text-muted">换装</span>
               </button>
 
               <button
@@ -2996,8 +3068,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <User size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">我的</span>
-                <span className="text-[9px] text-apple-text-muted">账户</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">我的</span>
+                <span className="text-xs text-apple-text-muted">账户</span>
               </button>
 
               <button
@@ -3009,8 +3081,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <History size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">八字</span>
-                <span className="text-[9px] text-apple-text-muted">档案</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">八字</span>
+                <span className="text-xs text-apple-text-muted">档案</span>
               </button>
 
               <button
@@ -3022,8 +3094,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <BookOpen size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">日记</span>
-                <span className="text-[9px] text-apple-text-muted">心情</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">日记</span>
+                <span className="text-xs text-apple-text-muted">心情</span>
               </button>
 
               <button
@@ -3035,8 +3107,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <Moon size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">守护</span>
-                <span className="text-[9px] text-apple-text-muted">回访</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">守护</span>
+                <span className="text-xs text-apple-text-muted">回访</span>
               </button>
 
               <button
@@ -3048,8 +3120,8 @@ export default function Home() {
                 className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[20px] bg-apple-surface-hover px-2 text-center text-[#7b6c5a] transition-transform active:scale-[0.98] dark:text-white/62"
               >
                 <Globe size={18} />
-                <span className="text-[11px] font-black text-[#8f5e1b] dark:text-[#f4cf83]">沙盘</span>
-                <span className="text-[9px] text-apple-text-muted">选择</span>
+                <span className="text-xs font-black text-[#8f5e1b] dark:text-[#f4cf83]">沙盘</span>
+                <span className="text-xs text-apple-text-muted">选择</span>
               </button>
             </div>
           </motion.div>
@@ -3115,175 +3187,66 @@ export default function Home() {
   };
 
   return (
-    <div className="relative h-full overflow-hidden bg-[#f2eadf] text-[#241c14] dark:bg-[#07080f] dark:text-[#f8f2e7]">
-      <div className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              theme === 'dark'
-                ? 'linear-gradient(180deg, rgba(16,19,31,0.98) 0%, rgba(7,8,15,1) 54%, rgba(3,4,8,1) 100%)'
-                : 'linear-gradient(180deg, rgba(252,246,236,1) 0%, rgba(242,234,223,1) 52%, rgba(226,212,193,1) 100%)',
-          }}
-        />
-        <div className="absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(208,147,63,0.24),transparent_64%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(244,207,131,0.12),transparent_64%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(86,61,32,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(86,61,32,0.032)_1px,transparent_1px)] bg-[size:42px_42px] opacity-70 dark:bg-[linear-gradient(rgba(255,255,255,0.026)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.34)_48%,transparent_72%)] opacity-45 dark:opacity-[0.04]" />
-      </div>
-
-      <div className="absolute inset-x-0 top-0 z-50 border-b border-[#eadcc8]/68 bg-[#fff8ed]/86 shadow-[0_12px_34px_rgba(84,55,24,0.08)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#0d111d]/86 dark:shadow-[0_14px_38px_rgba(0,0,0,0.32)]">
-        <div className="mx-auto grid h-16 w-full max-w-[540px] grid-cols-[minmax(0,1fr)_minmax(86px,28vw)_minmax(0,1fr)] items-center gap-2 px-4">
-          <div className="min-w-0">
-            <p className="truncate text-[10px] font-semibold tracking-[0.18em] text-[#9a6a28] dark:text-[#f4cf83]">
-              星轨塔罗
-            </p>
-            <div className="truncate text-[16px] font-semibold leading-tight text-[#241c14] dark:text-[#f8f2e7]">
-              LV.{bondLevel} {LEVEL_TITLES[bondLevel - 1]}
-            </div>
-            <div className="mt-1 flex items-center gap-1.5">
-              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
-                <motion.div
-                  className="h-full rounded-full bg-gradient-to-r from-[#c88a34] to-[#6f84e8]"
-                  initial={false}
-                  animate={{ width: `${progressPercent}%` }}
-                />
-              </div>
-              <span className="text-[10px] font-medium text-apple-text-muted">{progressPercent}%</span>
-            </div>
-          </div>
-          <div aria-hidden="true" />
-          <div className="flex min-w-0 items-center justify-end gap-1.5">
-            <button
-              onClick={() => openUpgradePrompt('energy')}
-              className="flex h-9 shrink-0 items-center gap-1 rounded-[16px] bg-[#f1dfbc] px-2.5 text-[#8e5d19] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
-              title={membershipLabel}
-            >
-              <Sparkles size={15} />
-              <span className="text-[13px] font-semibold">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
-            </button>
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
-              aria-label="切换日夜模式"
-              title="切换日夜模式"
-            >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            <button
-              onClick={() => setShowWardrobe(true)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
-              aria-label="打开衣柜"
-              title="衣柜"
-            >
-              <Shirt size={17} />
-            </button>
-          </div>
+    <div className="rail-home relative h-full overflow-hidden bg-apple-bg text-apple-text">
+      <header className="rail-home-header">
+        <div>
+          <p className="rail-eyebrow mb-1">RAILSTAR · 每日陪伴</p>
+          <h1 className="font-serif text-2xl font-medium text-apple-text">今日星轨</h1>
         </div>
-      </div>
+        <div className="flex items-center gap-2">
+          <button type="button" className="rail-energy" onClick={() => openUpgradePrompt('energy')} aria-label="查看能量与会员权益">
+            <Sparkles size={16} aria-hidden="true" /><span className="tabular-nums">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
+          </button>
+          <button type="button" className="rail-icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="切换日夜模式" aria-pressed={theme === 'dark'}>
+            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+          <button type="button" className="rail-icon-button" onClick={() => setShowWardrobe(true)} aria-label="打开衣柜"><Shirt size={19} /></button>
+        </div>
+      </header>
 
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className={clsx(
-          'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-[76px] no-scrollbar sm:px-6',
+          'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-[100px] no-scrollbar sm:px-6',
           visibleMessages.length > 0
             ? showComposerTools || showComposerSuggestions
-              ? 'pb-[calc(var(--app-bottom-pad)+214px)]'
-              : 'pb-[calc(var(--app-bottom-pad)+136px)]'
-            : 'pb-[calc(var(--app-bottom-pad)+122px)]',
+              ? 'pb-[calc(var(--app-bottom-pad)+280px)]'
+              : 'pb-[calc(var(--app-bottom-pad)+220px)]'
+            : 'pb-[calc(var(--app-bottom-pad)+200px)]',
         )}
       >
         <div
-          className="mx-auto flex max-w-[540px] min-w-0 flex-col gap-3.5"
-          style={{ width: 'min(540px, calc(100vw - 32px))' }}
+          className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-3.5"
         >
-          <header className="hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-              <div className="h-11 w-11 shrink-0 overflow-hidden rounded-[18px] bg-[#efe0c7] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-white/[0.08]">
-                <CompanionSprite
-                  outfit={activeOutfitId}
-                  expression={activePetExpression}
-                  action={activePetAction}
-                  label="星轨塔罗少女 Q 版头像"
-                  className="p-0.5"
-                />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a6a28] dark:text-[#f4cf83]">
-                  星轨塔罗
-                </p>
-                <h1 className="truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]">
-                  LV.{bondLevel} {LEVEL_TITLES[bondLevel - 1]}
-                </h1>
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <div className="h-1.5 w-24 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
-                    <motion.div
-                      className="h-full rounded-full bg-gradient-to-r from-[#c88a34] to-[#6f84e8]"
-                      initial={false}
-                      animate={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  <span className="text-[11px] font-medium text-apple-text-muted">{progressPercent}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-1.5">
-              <button
-                onClick={() => openUpgradePrompt('energy')}
-                className="flex h-9 items-center gap-1 rounded-[16px] bg-[#f1dfbc] px-3 text-[#8e5d19] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
-                title={membershipLabel}
-              >
-                <Sparkles size={15} />
-                <span className="text-[13px] font-semibold">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
-              </button>
-              <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="hidden h-9 w-9 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 min-[430px]:flex dark:bg-white/[0.07] dark:text-white/55"
-                aria-label="切换白天和夜间"
-                title="切换白天和夜间"
-              >
-                {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button
-                onClick={() => setShowWardrobe(true)}
-                className="flex h-9 w-9 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
-                aria-label="打开衣柜"
-                title="衣柜"
-              >
-                <Shirt size={17} />
-              </button>
-            </div>
-          </header>
-
           <motion.section
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 180, damping: 24 }}
             className={clsx(
-              'relative overflow-hidden border border-[#e4d3ba]/80 bg-[#fff7ea]/72 shadow-[0_26px_74px_rgba(91,61,27,0.13),inset_0_1px_0_rgba(255,255,255,0.82)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#101420]/72 dark:shadow-[0_28px_74px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(255,255,255,0.08)]',
+              'rail-surface rail-today relative flex flex-col overflow-hidden',
               visibleMessages.length > 0 ? 'rounded-[24px] p-3' : 'rounded-[34px] p-4',
             )}
           >
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.38),transparent_44%),linear-gradient(180deg,transparent,rgba(124,90,45,0.08))] dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%),linear-gradient(180deg,transparent,rgba(244,207,131,0.05))]" />
-            <div className="pointer-events-none absolute inset-x-5 top-[86px] h-px bg-gradient-to-r from-transparent via-[#a47a42]/18 to-transparent dark:via-white/10" />
             <DrawCardAnimation
               active={isDrawingCards}
               image={cardImage}
               cards={drawingCards}
               compact={visibleMessages.length > 0}
             />
-            <div className="relative z-10 flex min-w-0 items-center justify-between gap-2">
+            <div className="relative z-10 order-2 mt-4 flex min-w-0 items-center justify-between gap-2 border-t border-apple-border pt-3">
               <button
                 onClick={() => setShowDailyPanel((value) => !value)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[18px] bg-[#f3e8d8]/82 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-transform active:scale-[0.98] dark:bg-white/[0.07]"
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-xl px-2 text-left text-apple-text-muted hover:bg-apple-surface-hover"
                 title={showDailyPanel ? '收起今日任务' : '展开今日任务'}
+                aria-expanded={showDailyPanel}
               >
                 <CalendarCheck size={15} className="shrink-0 text-[#b97b28] dark:text-[#f4cf83]" />
-                <span className="truncate text-[12px] font-semibold text-[#4c3b29] dark:text-white/78">
-                  今日任务 {missionCount}/3 · 连续 {checkInStreak} 天
+                <span className="truncate text-[13px] font-semibold text-[#4c3b29] dark:text-white/78">
+                  今日任务 · {missionCount}/3
                 </span>
-                <span className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-white/48 px-2 py-1 text-[10px] font-semibold text-[#7c674c] dark:bg-white/[0.08] dark:text-white/58">
+                <span className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-white/48 px-2 py-1 text-xs font-semibold text-[#7c674c] dark:bg-white/[0.08] dark:text-white/58">
                   {showDailyPanel ? '收起' : '展开'}
                   {showDailyPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </span>
@@ -3292,17 +3255,17 @@ export default function Home() {
                 onClick={handleDailyCheckIn}
                 disabled={hasCheckedInToday}
                 className={clsx(
-                  'h-9 shrink-0 rounded-[18px] px-3.5 text-[13px] font-semibold transition-all',
+                  'min-h-11 shrink-0 rounded-xl px-3.5 text-[13px] font-medium transition-colors',
                   hasCheckedInToday
                     ? 'bg-[#f6eddf] text-[#877967] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:bg-white/[0.07] dark:text-white/52'
-                    : 'bg-[#17130f] text-[#f4cf83] shadow-[0_14px_34px_rgba(53,34,13,0.18)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]',
+                    : 'bg-apple-surface-hover text-apple-text hover:bg-apple-border/60',
                 )}
               >
-                {hasCheckedInToday ? '已领取' : '今日可领'}
+                {hasCheckedInToday ? '已签到' : '签到领能量'}
               </button>
             </div>
 
-            <div className={clsx('relative z-10 mt-2', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[300px]')}>
+            <div className={clsx('relative z-10 order-1', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[0px]')}>
               {visibleMessages.length > 0 && (
                 <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                   <div className="relative h-14 w-12">
@@ -3316,7 +3279,7 @@ export default function Home() {
                     )}
                   </div>
                   <div className="min-w-0 rounded-[20px] border border-white/60 bg-white/56 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.045]">
-                    <p className="text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">当前牌面</p>
+                    <p className="text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">当前牌面</p>
                     <p className="mt-1 line-clamp-2 break-words text-sm font-medium leading-snug text-[#3b3024] dark:text-white/72">
                       {isThinking ? '解读中...' : companionBubbleText}
                     </p>
@@ -3324,7 +3287,7 @@ export default function Home() {
                   <div className="flex w-[58px] shrink-0 flex-col gap-1.5">
                     <button
                       onClick={() => setShowReadingLog(true)}
-                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] border border-[#f4cf83]/28 bg-[#f4cf83]/14 text-[10px] font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.50)] dark:border-[#f4cf83]/18 dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
+                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] border border-[#f4cf83]/28 bg-[#f4cf83]/14 text-xs font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.50)] dark:border-[#f4cf83]/18 dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
                       aria-label="打开牌迹档案"
                       title="牌迹档案"
                     >
@@ -3334,7 +3297,7 @@ export default function Home() {
                     <button
                       onClick={() => handleSend('解读当前牌面', { mode: 'current' })}
                       disabled={isThinking}
-                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] bg-[#17130f] text-[10px] font-bold text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] bg-[#17130f] text-xs font-bold text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
                       aria-label="解读当前牌面"
                       title="解读当前牌面"
                     >
@@ -3345,98 +3308,32 @@ export default function Home() {
                 </div>
               )}
               {visibleMessages.length === 0 && (
-                <>
-              <div className="absolute right-0 top-1 flex h-[86px] w-[86px] items-center justify-center rounded-[28px] bg-[#f0e4d2]/72 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] dark:bg-white/[0.055]">
-                <div>
-                  <p className="text-[12px] font-semibold text-apple-text-muted">羁绊</p>
-                  <p className="mt-1 text-2xl font-semibold text-[#9b641e] dark:text-[#f4cf83]">{progressPercent}%</p>
-                </div>
-              </div>
-
-              <div className="absolute left-0 top-9 h-[172px] w-[148px]">
-                {cardStackImages.length > 0 ? (
-                  <AnimatePresence initial={false}>
-                    {cardStackImages.map((image, index) => {
-                      const rotate = -13 + index * 8;
-                      return (
-                        <motion.img
-                          key={`${image}-${index}`}
-                          src={image}
-                          alt="抽到的塔罗牌"
-                          initial={{ opacity: 0, y: -40, rotate: rotate - 12, scale: 0.72 }}
-                          animate={{
-                            opacity: 1,
-                            x: index * 18,
-                            y: index * 7,
-                            rotate,
-                            scale: 1 - index * 0.035,
-                          }}
-                          exit={{ opacity: 0, y: 20, scale: 0.8 }}
-                          transition={{ type: 'spring', stiffness: 260, damping: 22, delay: index * 0.035 }}
-                          className="absolute left-2 top-2 h-[154px] w-[100px] rounded-[20px] object-cover object-top shadow-[0_22px_42px_rgba(54,37,18,0.22)] ring-1 ring-black/5 dark:shadow-[0_20px_46px_rgba(0,0,0,0.48)] dark:ring-white/10"
-                          style={{ zIndex: 20 - index }}
-                        />
-                      );
-                    })}
-                  </AnimatePresence>
-                ) : (
-                  <button
-                    onClick={() => handleSend('今日运势')}
-                    disabled={isThinking}
-                    className="flex h-[154px] w-[100px] -rotate-6 flex-col items-center justify-center gap-3 rounded-[20px] bg-[linear-gradient(145deg,#182035,#05070e)] text-[#f4cf83] shadow-[0_22px_42px_rgba(54,37,18,0.22)] ring-1 ring-white/10 transition-transform active:scale-95 disabled:opacity-50"
-                  >
-                    <Sparkles size={30} />
-                    <span className="text-[10px] font-semibold tracking-[0.2em]">TAROT</span>
-                  </button>
-                )}
-              </div>
-
-              {isDrawingCards && (
-                <motion.div
-                  initial={{ opacity: 0, x: 220, y: 40, rotate: 22, scale: 0.5 }}
-                  animate={{
-                    opacity: [0, 1, 1, 0],
-                    x: [220, 122, 46, 18],
-                    y: [40, -8, 18, 28],
-                    rotate: [22, -9, -17, -12],
-                    scale: [0.5, 0.82, 1, 0.96],
-                  }}
-                  transition={{ duration: 0.95, ease: 'easeInOut' }}
-                  className="pointer-events-none absolute left-0 top-9 z-40 h-[154px] w-[100px] rounded-[20px] bg-[linear-gradient(145deg,#182035,#05070e)] shadow-[0_20px_44px_rgba(54,37,18,0.24)]"
-                >
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[#f4cf83]">
-                    <Sparkles size={28} />
-                    <span className="text-[10px] font-semibold tracking-[0.22em]">DRAW</span>
+                <div className="rail-ritual">
+                  <p className="rail-eyebrow mt-3 text-center">今日塔罗 · 给自己一点时间</p>
+                  <h2 className="font-serif text-center text-2xl font-medium leading-relaxed text-apple-text">一张牌，听听自己的心事</h2>
+                  <div data-pet-stage className="rail-ritual-art">
+                    <div className="rail-card-pile">
+                      {cardStackImages.length > 0 ? cardStackImages.map((image, index) => (
+                        <img key={image} src={image} alt="抽到的塔罗牌" className="rail-ritual-card" style={{ transform: 'rotate(' + (-8 + index * 7) + 'deg)', left: index * 14 }} />
+                      )) : (
+                        <button type="button" className="rail-tarot-back" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking} aria-label="从牌堆抽取今日牌">
+                          <span className="rail-card-star"><Sparkles size={30} aria-hidden="true" /></span>
+                          <span className="text-xs font-medium">RAILSTAR</span>
+                          <span className="text-xs opacity-65">今日一张牌</span>
+                        </button>
+                      )}
+                    </div>
+                    {companionPet(clsx('absolute z-30', petStageClass))}
                   </div>
-                </motion.div>
-              )}
-
-              <div className="pointer-events-none absolute bottom-[70px] left-[29%] right-0 z-30 rounded-[24px] border border-white/60 bg-[rgba(255,250,241,0.78)] px-4 py-3.5 shadow-[0_16px_34px_rgba(88,62,30,0.10),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[rgba(14,18,27,0.78)] dark:shadow-[0_18px_38px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)]">
-                <p className="text-[12px] font-semibold text-[#b97b28] dark:text-[#f4cf83]">星轨碎碎念</p>
-                <p className="mt-1 line-clamp-3 text-[14px] font-medium leading-relaxed">
-                  {companionBubbleText}
-                </p>
-              </div>
-
-              <div className="absolute inset-x-0 bottom-0 z-30 grid grid-cols-[1fr_auto] gap-3">
-                <button
-                  onClick={() => handleSend('今日运势')}
-                  disabled={isThinking}
-                  className="h-[52px] rounded-[22px] bg-[#17130f] text-[17px] font-semibold text-[#f4cf83] shadow-[0_18px_36px_rgba(55,35,12,0.18)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                >
-                  抽一张今日牌
-                </button>
-                <button
-                  onClick={() => setShowReadingLog(true)}
-                  className="flex h-[52px] w-[74px] flex-col items-center justify-center gap-0.5 rounded-[22px] bg-[#f4ecdf] text-[#806f5c] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/58"
-                  aria-label="打开牌迹"
-                  title="牌迹档案"
-                >
-                  <BookOpen size={18} />
-                  <span className="text-[10px] font-bold leading-none">牌迹</span>
-                </button>
-              </div>
-                </>
+                  <p className="rail-ritual-note">{companionBubbleText}</p>
+                  <div className="mt-6 flex items-center gap-3">
+                    <button type="button" className="rail-button flex-1" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking}>
+                      <Sparkles size={17} aria-hidden="true" />开始今日塔罗
+                    </button>
+                    <button type="button" className="rail-button-secondary" onClick={() => setShowReadingLog(true)} aria-label="打开牌迹"><BookOpen size={18} aria-hidden="true" />牌迹</button>
+                  </div>
+                  <p className="mt-3 text-center text-[13px] leading-6 text-apple-text-muted">抽牌 → 阅读 → 追问。牌面与解读会自动留在牌迹里。</p>
+                </div>
               )}
 
               <AnimatePresence>
@@ -3464,29 +3361,29 @@ export default function Home() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">
                     <CalendarCheck size={13} />
                     <span>今日先看</span>
-                    <span className="rounded-full bg-[#f1dfbd]/78 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
+                    <span className="rounded-full bg-[#f1dfbd]/78 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
                       {missionCount}/3
                     </span>
                   </div>
                   <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
                     {nextBestAction.title}
                   </h3>
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
                     {nextBestAction.desc}
                   </p>
                 </div>
                 <button
                   onClick={handleNextBestAction}
                   disabled={isThinking}
-                  className="shrink-0 whitespace-nowrap rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                  className="shrink-0 whitespace-nowrap rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
                 >
                   {nextBestAction.cta}
                 </button>
               </div>
-              <div className="mt-3 rounded-[18px] bg-[#f3e5ce]/58 px-3 py-2 text-[11px] leading-relaxed text-[#746653] dark:bg-white/[0.05] dark:text-white/50">
+              <div className="mt-3 rounded-[18px] bg-[#f3e5ce]/58 px-3 py-2 text-xs leading-relaxed text-[#746653] dark:bg-white/[0.05] dark:text-white/50">
                 做完这一步，再写心情或做选择，今天的回访就会更像接着你的故事往下说。
               </div>
             </motion.section>
@@ -3501,17 +3398,17 @@ export default function Home() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#a06b22] dark:text-[#f4cf83]">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#a06b22] dark:text-[#f4cf83]">
                     <Sparkles size={13} />
                     <span>星轨记得你</span>
-                    <span className="rounded-full bg-[#f3e5ce]/72 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/50">
+                    <span className="rounded-full bg-[#f3e5ce]/72 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/50">
                       {memoryRecall.meta}
                     </span>
                   </div>
                   <h2 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
                     {memoryRecall.title}
                   </h2>
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
                     {memoryRecall.desc}
                   </p>
                   <div className="mt-3 grid gap-1.5">
@@ -3520,10 +3417,10 @@ export default function Home() {
                         key={`${insight.label}-${insight.text}`}
                         className="grid gap-0.5 rounded-[16px] border border-[#eadcc8]/64 bg-white/42 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:border-white/[0.06] dark:bg-white/[0.045]"
                       >
-                        <span className="text-[10px] font-semibold text-[#a06b22] dark:text-[#f4cf83]">
+                        <span className="text-xs font-semibold text-[#a06b22] dark:text-[#f4cf83]">
                           {insight.label}
                         </span>
-                        <span className="line-clamp-2 text-[11px] leading-relaxed text-[#746653] dark:text-white/52">
+                        <span className="line-clamp-2 text-xs leading-relaxed text-[#746653] dark:text-white/52">
                           {insight.text}
                         </span>
                       </div>
@@ -3532,7 +3429,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => openUpgradePrompt('history')}
-                        className="h-8 rounded-[16px] border border-[#eadcc8]/64 bg-[#f8ecd7]/52 px-3 text-[11px] font-semibold text-[#9b641e] transition-colors hover:bg-[#f2dfbf]/70 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-[#f4cf83]"
+                        className="h-8 rounded-[16px] border border-[#eadcc8]/64 bg-[#f8ecd7]/52 px-3 text-xs font-semibold text-[#9b641e] transition-colors hover:bg-[#f2dfbf]/70 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-[#f4cf83]"
                       >
                         解锁完整 3 条记忆线索
                       </button>
@@ -3542,7 +3439,7 @@ export default function Home() {
                 <button
                   onClick={handleMemoryRecallAction}
                   disabled={isThinking}
-                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
+                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
                 >
                   {memoryRecall.cta}
                 </button>
@@ -3559,20 +3456,20 @@ export default function Home() {
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#9b641e] dark:text-[#f4cf83]">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">
                     <CalendarCheck size={13} />
                     <span>7 日星轨复盘</span>
-                    <span className="rounded-full bg-[#f1dfbd]/80 px-2 py-0.5 text-[10px] text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
+                    <span className="rounded-full bg-[#f1dfbd]/80 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
                       {weeklyMaterialCount} 条材料
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/54">
+                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/54">
                     {plusActive ? '完整趋势、证据和行动建议已经可看。' : '你已经有材料做复盘了，免费版先看摘要，Plus 解锁完整报告。'}
                   </p>
                 </div>
                 <button
                   onClick={() => setShowReadingLog(true)}
-                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
+                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
                 >
                   查看复盘
                 </button>
@@ -3589,14 +3486,14 @@ export default function Home() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#3558d4] dark:text-[#b8c7ff]">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#3558d4] dark:text-[#b8c7ff]">
                     <Crown size={13} />
                     <span>Plus 时机到了</span>
                   </div>
                   <h3 className="mt-1 line-clamp-1 text-[14px] font-semibold text-[#241c14] dark:text-white/86">
                     {softConversionTrigger.title}
                   </h3>
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-[#746653] dark:text-white/52">
+                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
                     {softConversionTrigger.desc}
                   </p>
                 </div>
@@ -3612,7 +3509,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={handleSoftConversion}
-                    className="rounded-[16px] bg-[#17130f] px-3 py-2 text-[12px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.14)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
+                    className="rounded-[16px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.14)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
                   >
                     {softConversionTrigger.cta}
                   </button>
@@ -3623,13 +3520,14 @@ export default function Home() {
 
           {visibleMessages.length === 0 && !showDailyPanel && (
           <section className="order-2 space-y-2">
+            <p className="px-1 text-[13px] leading-6 text-apple-text-muted">也可以从一件具体的事开始</p>
             <div className="grid grid-cols-2 gap-2">
-              {QUICK_PROMPTS.map((item) => (
+              {QUICK_PROMPTS.filter((item) => item.prompt !== '今日运势').map((item) => (
                 <button
                   key={item.label}
                   onClick={() => handleSend(item.prompt, { mode: 'draw' })}
                   disabled={isThinking}
-                  className="flex h-8 min-w-0 items-center justify-center rounded-[16px] border border-[#eadcc8]/64 bg-[#fff8ee]/58 px-2 text-[12px] font-medium text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] transition-colors hover:text-[#241c14] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-white/52 dark:hover:text-white"
+                  className="flex min-h-11 min-w-0 items-center justify-center rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-apple-text disabled:opacity-50"
                 >
                   <span className="truncate">{item.label}</span>
                 </button>
@@ -3638,25 +3536,26 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setShowSpreadTools((value) => !value)}
-                className="flex h-8 items-center justify-center gap-1.5 rounded-[16px] bg-[#2347d9]/10 px-3 text-[12px] font-semibold text-[#3558d4] dark:bg-[#7c9cff]/12 dark:text-[#b8c7ff]"
+                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
+                aria-expanded={showSpreadTools}
               >
                 <Sparkles size={14} />
-                牌阵
+                选择牌阵
               </button>
               <button
                 onClick={() => setShowReadingLog(true)}
-                className="flex h-8 items-center justify-center gap-1.5 rounded-[16px] bg-[#d59a3a]/13 px-3 text-[12px] font-semibold text-[#9b641e] dark:text-[#f4cf83]"
+                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
               >
                 <History size={14} />
-                牌迹
+                查看牌迹
               </button>
               {showSpreadTools &&
                 SPREADS.map((spread) => (
                   <button
                     key={spread.name}
-                    onClick={() => handleSend(spread.prompt)}
+                    onClick={() => handleSend(spread.prompt, { mode: 'draw' })}
                     disabled={isThinking}
-                    className="h-8 min-w-0 truncate rounded-[16px] border border-[#eadcc8]/60 bg-[#fff8ee]/46 px-2 text-[11px] font-medium text-[#736554] shadow-[inset_0_1px_0_rgba(255,255,255,0.48)] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.045] dark:text-white/48"
+                    className="min-h-11 min-w-0 truncate rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted disabled:opacity-50"
                   >
                     {spread.name}
                   </button>
@@ -3721,26 +3620,54 @@ export default function Home() {
             )}
           </AnimatePresence>
 
+          {historyQuotaNotice && (
+            <section role="status" className="order-2 rounded-2xl border border-apple-border bg-apple-surface p-4">
+              <p className="text-base font-medium text-apple-text">已有 {tarotReadings.length} 条牌迹，全部为你保留</p>
+              <p className="mt-2 text-[13px] leading-6 text-apple-text-muted">
+                当前可新增保存的容量为 {readingLimit} 条，已达到额度。这次没有抽取新牌，也没有消耗能量；你可以继续追问已有牌面，或先查看、导出已有记录。
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setShowReadingLog(true)} className="rail-button-secondary">查看已有牌迹</button>
+                <button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary">导出存档</button>
+              </div>
+            </section>
+          )}
+
           {visibleMessages.length > 0 && (
-            <section className="order-2 flex flex-col gap-3 pt-1">
-              {visibleMessages.map((message, index) => (
+            <section className="rail-conversation order-2 flex flex-col gap-3 pt-1">
+              <div data-pet-stage className="flex min-h-28 items-center gap-3 overflow-hidden border-b border-apple-border px-2 py-2">
+                {companionPet('relative h-24 w-24 shrink-0')}
+                <div className="min-w-0">
+                  <p className="text-[15px] font-medium text-apple-text">星轨在这里</p>
+                  <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">读完以后，也可以继续问我。</p>
+                </div>
+              </div>
+              {visibleMessages.map((message, index) => {
+                const source = message.role === 'ai' ? getRegenerationSource(messages, tarotReadings, message.id) : null;
+                const canRegenerate = Boolean(source && (message.model !== DEEPSEEK_TAROT_DEEP_MODEL || source.reading));
+                return (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   className={clsx(
-                    'flex max-w-[90%] flex-col gap-1',
+                    'flex max-w-full flex-col gap-2',
                     message.role === 'user' ? 'self-end items-end' : 'self-start items-start',
                   )}
                 >
                   <div
                     className={clsx(
-                      'whitespace-pre-wrap rounded-[24px] px-4 py-3 text-[14px] leading-relaxed shadow-sm',
+                      'rail-reading-bubble whitespace-pre-wrap rounded-[20px] px-5 py-4 text-base leading-8',
                       message.role === 'user'
-                        ? 'rounded-tr-[10px] bg-[#17130f] text-[#f4cf83] shadow-[0_14px_28px_rgba(55,35,12,0.14)] dark:bg-[#f4cf83] dark:text-[#17130f]'
-                        : 'rounded-tl-[10px] border border-[#eadcc8]/72 bg-[#fff8ee]/72 text-[#2a2118] backdrop-blur-2xl dark:border-white/[0.07] dark:bg-white/[0.065] dark:text-[#f8f2e7]',
+                        ? 'rail-user-bubble'
+                        : 'rail-ai-bubble',
                     )}
                   >
+                    {message.role === 'ai' && (
+                      <p className="mb-3 text-[13px] font-medium leading-6 text-apple-text-muted">
+                        {message.usedFallback ? '本地参考解读 · 连接恢复后可重试' : source?.originalDraw ? '这张牌的解读' : '沿着你的问题，继续聊'}
+                      </p>
+                    )}
                     {message.role === 'ai' &&
                       (() => {
                         const messageCardImages = (
@@ -3785,47 +3712,60 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                    {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
+                    {message.role === 'ai' ? (
+                      <div className="rail-reader space-y-5">
+                        {cleanTarotAnswer(message.text).split(/\n\s*\n/).filter(Boolean).map((paragraph, paragraphIndex) => (
+                          <p key={paragraphIndex} className="whitespace-pre-wrap">{paragraph}</p>
+                        ))}
+                      </div>
+                    ) : message.text}
                   </div>
-                  <div className={clsx('flex items-center gap-2 px-2', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  <div className={clsx('flex flex-wrap items-center gap-1 px-1', message.role === 'user' ? 'justify-end' : 'justify-start')}>
                     {message.role === 'ai' && (
                       <>
-                      <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="p-1 text-apple-text-muted" title="复制">
-                        <Copy size={13} />
+                      <button type="button" onClick={() => handleContinueReading(message.id)} disabled={isThinking || !source} title={source ? '继续追问这条解读' : '对应牌迹已移除；已存对话仍可阅读'} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text hover:bg-apple-surface-hover disabled:opacity-40">
+                        <Send size={14} aria-hidden="true" />继续追问
                       </button>
-                      <button onClick={handleRegenerate} disabled={isThinking} className="p-1 text-apple-text-muted disabled:opacity-30" title="重新生成">
-                        <RefreshCw size={13} />
+                      <button type="button" onClick={() => navigate('/app/diary')} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] text-apple-text-muted hover:bg-apple-surface-hover">
+                        <BookOpen size={14} aria-hidden="true" />写下感受
+                      </button>
+                      <button type="button" onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover" title="复制" aria-label="复制这条解读">
+                        <Copy size={16} />
+                      </button>
+                      <button type="button" onClick={() => handleRegenerate(message.id)} disabled={isThinking || !canRegenerate} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover disabled:opacity-30" title={canRegenerate ? '重新生成这条解读，保留原牌面' : '对应牌迹已移除；已存对话仍可阅读'} aria-label="重新生成这条解读">
+                        <RefreshCw size={16} />
                       </button>
                       </>
                     )}
                     <button
                       onClick={() => handleDeleteMessage(message.id)}
-                      className="p-1 text-apple-text-muted transition-colors hover:text-[#b94a28]"
+                      disabled={isThinking}
+                      className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-[#b94a28] disabled:opacity-30"
                       title="删除这一条"
                       aria-label="删除这一条消息"
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                   {renderDailyDeepCta(message, index, visibleMessages)}
                 </motion.div>
-              ))}
+              );
+              })}
               <div ref={endRef} className="h-8 shrink-0" />
             </section>
           )}
         </div>
       </div>
 
-      {companionPet(
-        clsx(
-          'absolute z-40',
-          visibleMessages.length > 0 ? petDockClass : petStageClass,
-        ),
-        visibleMessages.length > 0,
-      )}
       {petMenu}
 
-      <div className="absolute inset-x-0 bottom-[var(--app-bottom-pad)] z-50 px-4">
+      <div className="rail-composer-position">
+        {followUpReading && (
+          <div className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 rounded-xl border border-apple-border bg-apple-surface px-3 py-2">
+            <p className="min-w-0 flex-1 truncate text-[13px] leading-6 text-apple-text-muted">正在追问：{followUpReading.question} · 保留原牌面</p>
+            <button type="button" onClick={() => setFollowUpReadingId(null)} aria-label="取消追问这条牌迹" className="flex size-11 shrink-0 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover"><X size={16} /></button>
+          </div>
+        )}
         {composerSuggestions}
         {composer}
       </div>
@@ -3890,7 +3830,8 @@ export default function Home() {
 
       <ReadingLog
         open={showReadingLog}
-        onClose={() => setShowReadingLog(false)}
+        initialReadingId={requestedArchiveId}
+        onClose={closeReadingLog}
         readings={tarotReadings}
         messages={messages}
         diaryEntries={diaryEntries}
@@ -3900,11 +3841,25 @@ export default function Home() {
         weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
-        onUpgrade={() => openUpgradePrompt('weekly')}
+        readingLimit={readingLimit}
+        onUpgrade={() => {
+          closeReadingLog();
+          openUpgradePrompt('weekly');
+        }}
         onShare={handleShareReadingCard}
         onContinue={(prompt) => {
-          setShowReadingLog(false);
+          closeReadingLog();
           handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
+        }}
+        onSelectReading={(readingId) => {
+          closeReadingLog();
+          setFollowUpReadingId(readingId);
+          window.setTimeout(() => inputRef.current?.focus(), 80);
+        }}
+        onDeleteReading={(readingId) => {
+          setTarotReadings((readings) => removeTarotReading(readings, readingId));
+          setFollowUpReadingId((currentId) => currentId === readingId ? null : currentId);
+          setHistoryQuotaNotice(false);
         }}
       />
 
@@ -3979,7 +3934,7 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-              <p className="mt-3 text-center text-[11px] leading-relaxed text-apple-text-muted">
+              <p className="mt-3 text-center text-xs leading-relaxed text-apple-text-muted">
                 不卖焦虑，不做“付费化解”。只是把今天这张牌讲得更完整一点。
               </p>
             </motion.div>
@@ -4039,589 +3994,7 @@ export default function Home() {
     </div>
   );
 
-  return (
-    <div className="relative h-full overflow-hidden bg-apple-bg text-apple-text">
-      <div className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute inset-0 opacity-95"
-          style={{
-            background:
-              'radial-gradient(circle at 50% -10%, rgba(244,207,131,0.16), transparent 30%), radial-gradient(circle at 12% 28%, rgba(124,156,255,0.13), transparent 28%), var(--app-bg)',
-          }}
-        />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(65,45,24,0.045)_1px,transparent_1px)] bg-[size:100%_48px] opacity-45 dark:bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px)] dark:opacity-35" />
-      </div>
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="relative z-10 h-full overflow-y-auto px-4 pb-[calc(var(--app-bottom-pad)+164px)] pt-4 no-scrollbar sm:px-6 sm:pt-6"
-      >
-        <div className="mx-auto flex w-full max-w-[540px] flex-col gap-3">
-          <header className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-[18px] bg-[#F5DFB1]/45 shadow-[0_8px_22px_rgba(111,77,31,0.10)] dark:bg-white/[0.07]">
-                <CompanionSprite
-                  outfit={activeOutfitId}
-                  expression={activePetExpression}
-                  action={activePetAction}
-                  label="星轨塔罗少女 Q 版头像"
-                  className="p-0.5"
-                />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold text-[#B97B28] dark:text-[#F4CF83]/80">
-                  星轨塔罗
-                </div>
-                <div className="truncate text-[14px] font-bold leading-tight text-apple-text">
-                  LV.{bondLevel} {LEVEL_TITLES[bondLevel - 1]}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <div className="flex h-9 items-center gap-1.5 rounded-full bg-[#F4CF83]/18 px-2.5 text-[#B97B28] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] dark:bg-[#F4CF83]/10 dark:text-[#F4CF83]">
-                <Sparkles size={15} />
-                <span className="text-sm font-bold" title={membershipLabel}>{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
-              </div>
-              <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-apple-surface/72 text-apple-text-muted shadow-[0_8px_20px_rgba(70,45,20,0.09)] transition-transform active:scale-95 dark:bg-white/[0.07]"
-                aria-label="切换白天/夜晚"
-                title="切换白天/夜晚"
-              >
-                {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button
-                onClick={() => setShowWardrobe(true)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-apple-surface/72 text-apple-text-muted shadow-[0_8px_20px_rgba(70,45,20,0.09)] transition-transform active:scale-95 dark:bg-white/[0.07]"
-                aria-label="打开衣柜"
-                title="衣柜"
-              >
-                <Shirt size={16} />
-              </button>
-              <button
-                onClick={() => setShowClearConfirm(true)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-apple-surface/72 text-apple-text-muted shadow-[0_8px_20px_rgba(70,45,20,0.09)] transition-transform active:scale-95 dark:bg-white/[0.07]"
-                aria-label="清空对话"
-                title="清空对话"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          </header>
-
-          <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: 'spring', stiffness: 180, damping: 24 }}
-            className="relative overflow-hidden rounded-[32px] bg-[rgba(255,251,243,0.76)] p-2.5 shadow-[0_22px_64px_rgba(90,62,27,0.12),inset_0_1px_0_rgba(255,255,255,0.48)] backdrop-blur-2xl dark:bg-[rgba(14,17,27,0.76)] dark:shadow-[0_24px_70px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.08)]"
-          >
-            <div
-              className="absolute inset-0 opacity-80"
-              style={{
-                background:
-                  'radial-gradient(circle at 48% 0%, rgba(244,207,131,0.18), transparent 34%), radial-gradient(circle at 82% 54%, rgba(124,156,255,0.10), transparent 34%)',
-              }}
-            />
-
-            <div className="relative z-10 flex items-center justify-between gap-3">
-              <button
-                onClick={() => setShowDailyPanel((value) => !value)}
-                className="flex min-w-0 items-center gap-1.5 rounded-full bg-white/48 px-2.5 py-1.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.52)] transition-transform active:scale-[0.98] dark:bg-white/[0.06]"
-              >
-                <CalendarCheck size={14} className="shrink-0 text-[#B97B28] dark:text-[#F4CF83]" />
-                <span className="truncate text-[11px] font-semibold text-apple-text">
-                  今日 {missionCount}/3 · 连续 {checkInStreak} 天
-                </span>
-              </button>
-              <button
-                onClick={handleDailyCheckIn}
-                disabled={hasCheckedInToday}
-                className={clsx(
-                  'h-9 shrink-0 rounded-full px-3.5 text-[13px] font-bold transition-all',
-                  hasCheckedInToday
-                    ? 'bg-white/45 text-apple-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] dark:bg-white/[0.06]'
-                    : 'bg-[#F4CF83] text-[#17130f] shadow-[0_14px_34px_rgba(185,123,40,0.18)]',
-                )}
-              >
-                {hasCheckedInToday ? '已领取' : '今日可领'}
-              </button>
-            </div>
-
-            <div className="relative z-10 mt-1.5 min-h-[178px]">
-              <div className="absolute left-4 top-4 h-28 w-[74px] -rotate-6 overflow-hidden rounded-[22px] bg-[#101521] shadow-[0_18px_40px_rgba(61,40,18,0.18)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.42)]">
-                {hasDrawnCard ? (
-                  <img src={cardImage} alt="塔罗牌" className="h-full w-full object-cover object-top" />
-                ) : (
-                  <button
-                    onClick={() => handleSend('今日运势')}
-                    disabled={isThinking}
-                    className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[radial-gradient(circle_at_50%_20%,rgba(244,207,131,0.22),transparent_36%),linear-gradient(145deg,rgba(19,25,39,0.98),rgba(5,7,14,0.98))] text-[#F4CF83] disabled:opacity-60"
-                  >
-                    <Sparkles size={25} />
-                    <span className="text-[9px] font-black">TAROT</span>
-                    <span className="h-px w-10 bg-[#F4CF83]/28" />
-                  </button>
-                )}
-              </div>
-
-              {cardStackImages.length > 0 && (
-                <div className="pointer-events-none absolute left-2 top-1 z-20 h-[136px] w-[160px]">
-                  <AnimatePresence initial={false}>
-                    {cardStackImages.map((image, index) => {
-                      const rotate = -14 + index * 8;
-                      return (
-                        <motion.img
-                          key={`${image}-${index}`}
-                          src={image}
-                          alt="抽到的塔罗牌"
-                          initial={{ opacity: 0, y: -34, rotate: rotate - 12, scale: 0.72 }}
-                          animate={{
-                            opacity: 1,
-                            x: index * 15,
-                            y: index * 4,
-                            rotate,
-                            scale: 1 - index * 0.035,
-                          }}
-                          exit={{ opacity: 0, y: 20, scale: 0.8 }}
-                          transition={{ type: 'spring', stiffness: 260, damping: 22, delay: index * 0.035 }}
-                          className="absolute left-3 top-3 h-28 w-[74px] rounded-[20px] object-cover object-top shadow-[0_16px_34px_rgba(61,40,18,0.20)] dark:shadow-[0_16px_36px_rgba(0,0,0,0.42)]"
-                          style={{ zIndex: 20 - index }}
-                        />
-                      );
-                    })}
-                  </AnimatePresence>
-                </div>
-              )}
-
-              {isDrawingCards && (
-                <motion.div
-                  initial={{ opacity: 0, x: 230, y: 8, rotate: 18, scale: 0.45 }}
-                  animate={{ opacity: [0, 1, 1, 0], x: [230, 126, 48, 16], y: [8, -16, 6, 16], rotate: [18, -8, -18, -10], scale: [0.45, 0.78, 1, 0.96] }}
-                  transition={{ duration: 0.95, ease: 'easeInOut' }}
-                  className="pointer-events-none absolute left-3 top-4 z-40 h-28 w-[74px] rounded-[20px] bg-[radial-gradient(circle_at_50%_20%,rgba(244,207,131,0.35),transparent_38%),linear-gradient(145deg,#171d2d,#05070e)] shadow-[0_16px_38px_rgba(92,63,21,0.20)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.42)]"
-                >
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[#F4CF83]">
-                    <Sparkles size={24} />
-                    <span className="text-[9px] font-black tracking-[0.22em]">DRAW</span>
-                  </div>
-                </motion.div>
-              )}
-
-              <div className="absolute right-1 top-1 flex h-16 w-16 items-center justify-center rounded-full bg-[#F4CF83]/[0.11] text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.42)] dark:bg-[#F4CF83]/[0.08]">
-                <div>
-                  <div className="text-[10px] font-semibold text-apple-text-muted">羁绊</div>
-                  <div className="mt-0.5 text-sm font-black text-[#B97B28] dark:text-[#F4CF83]">{progressPercent}%</div>
-                </div>
-              </div>
-
-              <motion.div
-                animate={{ y: [0, -8, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                className="absolute bottom-7 left-1/2 z-10 h-[96px] w-[96px] -translate-x-1/2 object-contain drop-shadow-[0_16px_22px_rgba(0,0,0,0.16)] sm:h-36 sm:w-36"
-              >
-                <CompanionSprite
-                  outfit={activeOutfitId}
-                  expression={activePetExpression}
-                  action={activePetAction}
-                  label="星轨塔罗少女 Q 版引路人"
-                />
-              </motion.div>
-
-              <div className="absolute bottom-2 right-2 z-20 max-w-[58%] rounded-[19px] bg-[rgba(255,250,239,0.72)] px-2.5 py-1.5 shadow-[0_10px_22px_rgba(95,66,27,0.09),inset_0_1px_0_rgba(255,255,255,0.50)] backdrop-blur-xl after:absolute after:bottom-3.5 after:-left-1 after:h-2 after:w-2 after:rotate-45 after:bg-[rgba(255,250,239,0.72)] dark:bg-[rgba(11,14,23,0.72)] dark:shadow-[0_12px_26px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.07)] dark:after:bg-[rgba(11,14,23,0.72)]">
-                <div className="mb-px text-[8.5px] font-semibold text-[#B97B28] dark:text-[#F4CF83]/80">
-                  星轨碎碎念
-                </div>
-                <p className="line-clamp-2 text-[10.5px] font-normal leading-relaxed text-apple-text text-pretty">
-                  {companionBubbleText}
-                </p>
-              </div>
-
-              <AnimatePresence>
-                {isThinking && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#F4CF83]/28 bg-apple-surface/86 px-3 py-2 text-xs font-bold text-[#B97B28] shadow-[0_12px_30px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:text-[#F4CF83]"
-                  >
-                    <Loader2 className="animate-spin" size={14} />
-                    星轨解读中
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="relative z-10 mt-1 grid grid-cols-[1fr_auto] gap-2">
-              <button
-                onClick={() => handleSend('今日运势')}
-                disabled={isThinking}
-                className="h-10 rounded-full bg-[#F4CF83] px-4 text-[13px] font-bold text-[#17130f] shadow-[0_10px_24px_rgba(185,123,40,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50"
-              >
-                抽一张今日牌
-              </button>
-              <button
-                onClick={() => setShowReadingLog(true)}
-                className="flex h-10 w-[64px] items-center justify-center gap-1 rounded-full bg-white/46 text-apple-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition-transform active:scale-95 dark:bg-white/[0.06]"
-                aria-label="打开牌迹"
-                title="牌迹档案"
-              >
-                <BookOpen size={15} />
-                <span className="text-[10px] font-bold">牌迹</span>
-              </button>
-            </div>
-          </motion.section>
-
-          <section className="relative z-10 -mt-1 space-y-1">
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
-              {QUICK_PROMPTS.map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => handleSend(item.prompt, { mode: 'draw' })}
-                  disabled={isThinking}
-                  className="flex h-6 shrink-0 items-center justify-center rounded-full bg-white/34 px-2 text-[10px] font-normal text-apple-text-muted shadow-[0_5px_12px_rgba(87,61,28,0.05),inset_0_1px_0_rgba(255,255,255,0.34)] transition-colors hover:text-apple-text disabled:opacity-50 dark:bg-white/[0.05]"
-                >
-                  <span className="truncate">{item.label}</span>
-                </button>
-              ))}
-              <button
-                onClick={() => setShowSpreadTools((value) => !value)}
-                className="flex h-6 shrink-0 items-center justify-center gap-1 rounded-full bg-[#7C9CFF]/10 px-2 text-[10px] font-medium text-[#6076E8] shadow-[0_5px_12px_rgba(72,85,160,0.05)] dark:text-[#B8C7FF]"
-              >
-                <Sparkles size={11} />
-                <span className="truncate">牌阵</span>
-              </button>
-              <button
-                onClick={() => setShowReadingLog(true)}
-                className="flex h-6 shrink-0 items-center justify-center gap-1 rounded-full bg-[#F4CF83]/12 px-2 text-[10px] font-medium text-[#B97B28] shadow-[0_5px_12px_rgba(185,123,40,0.05)] dark:text-[#F4CF83]"
-              >
-                <History size={11} />
-                <span className="truncate">牌迹</span>
-              </button>
-            </div>
-
-            <AnimatePresence initial={false}>
-              {showSpreadTools && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="flex gap-1.5 overflow-x-auto rounded-[16px] bg-white/28 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.30)] backdrop-blur-xl no-scrollbar dark:bg-white/[0.05]">
-                    {SPREADS.map((spread) => (
-                      <button
-                        key={spread.name}
-                        onClick={() => handleSend(spread.prompt)}
-                        disabled={isThinking}
-                        className="h-6 shrink-0 rounded-full bg-apple-surface-hover/56 px-2 text-[10px] font-normal leading-none text-apple-text-muted transition-transform active:scale-[0.98] disabled:opacity-50"
-                      >
-                        {spread.name}
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
-
-          <AnimatePresence initial={false}>
-            {showDailyPanel && (
-              <motion.section
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden rounded-[32px] border border-[#F4CF83]/24 bg-[#F4CF83]/[0.08] p-3 backdrop-blur-xl"
-              >
-                <div className="grid grid-cols-3 gap-2">
-                  <DailyMission icon={<Sparkles size={13} />} done={askedToday} title="问一件事" />
-                  <DailyMission icon={<Gift size={13} />} done={wroteDiaryToday} title="写心情" />
-                  <DailyMission icon={<Crown size={13} />} done={simulatedToday} title="做选择" />
-                </div>
-                <div className="mt-3 rounded-[24px] border border-apple-border bg-apple-surface p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-bold text-apple-text">{nextBestAction.title}</div>
-                      <div className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-apple-text-muted">
-                        {nextBestAction.desc}
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleNextBestAction}
-                      className="shrink-0 rounded-full border border-[#F4CF83]/24 bg-[#F4CF83]/12 px-3 py-2 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
-                    >
-                      {nextBestAction.cta}
-                    </button>
-                  </div>
-                </div>
-                {canClaimReturnReward && (
-                  <div className="mt-3 rounded-[24px] border border-[#7C9CFF]/20 bg-[#7C9CFF]/[0.07] p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-apple-text">回访奖励</div>
-                        <div className="mt-0.5 text-xs text-apple-text-muted">
-                          已累计打开 {engagement.activeDays} 天，今天可以领一次续航。
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleClaimReturnReward}
-                        className="shrink-0 rounded-full bg-[#7C9CFF]/14 px-3 py-2 text-xs font-bold text-[#6076E8] dark:text-[#B8C7FF]"
-                      >
-                        +{plusActive ? 3 : 2} 能量
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="mt-3 rounded-[24px] border border-apple-border bg-apple-surface p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-bold text-apple-text">今日奖励</div>
-                      <div className="mt-0.5 text-xs text-apple-text-muted">
-                        {hasClaimedDailyReward
-                          ? '今天已经领过了，明天再来。'
-                          : missionCount >= 3
-                            ? '三件小事完成，可以加一点续航。'
-                            : `还差 ${3 - missionCount} 件小仪式。`}
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleClaimDailyReward}
-                      disabled={!canClaimDailyReward}
-                      className={clsx(
-                        'shrink-0 rounded-full px-4 py-2 text-xs font-black transition-all',
-                        canClaimDailyReward
-                          ? 'bg-gradient-to-r from-[#F4CF83] to-[#B8C7FF] text-[#090b13] shadow-[0_12px_28px_rgba(244,207,131,0.22)]'
-                          : 'border border-apple-border bg-apple-surface-hover text-apple-text-muted',
-                      )}
-                    >
-                      {hasClaimedDailyReward ? '已领' : `+${dailyMissionEnergy} 能量`}
-                    </button>
-                  </div>
-                </div>
-              </motion.section>
-            )}
-          </AnimatePresence>
-
-          {visibleMessages.length > 0 && (
-            <section className="flex flex-col gap-3 pb-5">
-              {visibleMessages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={clsx(
-                    'flex max-w-[88%] flex-col gap-1',
-                    message.role === 'user' ? 'self-end items-end' : 'self-start items-start',
-                  )}
-                >
-                  <div
-                    className={clsx(
-                      'rounded-[28px] px-4 py-3 text-[15px] leading-relaxed shadow-sm whitespace-pre-wrap',
-                      message.role === 'user'
-                        ? 'rounded-tr-[12px] bg-[#F4CF83] text-[#11131a]'
-                        : 'rounded-tl-[12px] border border-apple-border bg-apple-surface text-apple-text backdrop-blur-xl',
-                    )}
-                  >
-                    {message.cardImage && message.role === 'ai' && (
-                      <img
-                        src={message.cardImage}
-                        alt="抽到的塔罗牌"
-                        className="mb-3 h-44 w-28 rounded-[22px] object-cover shadow-[0_12px_32px_rgba(0,0,0,0.25)]"
-                      />
-                    )}
-                    {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
-                  </div>
-                  {message.role === 'ai' && (
-                    <div className="flex items-center gap-2 px-2">
-                      <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="p-1 text-apple-text-muted" title="复制">
-                        <Copy size={13} />
-                      </button>
-                      <button onClick={handleRegenerate} disabled={isThinking} className="p-1 text-apple-text-muted disabled:opacity-30" title="重新生成">
-                        <RefreshCw size={13} />
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              ))}
-              <div ref={endRef} className="h-4 shrink-0" />
-            </section>
-          )}
-        </div>
-      </div>
-
-      <div className="absolute inset-x-0 bottom-[calc(var(--app-bottom-pad)+76px)] z-40 px-4">
-        {composerSuggestions}
-        <div className="mx-auto flex w-full max-w-[540px] items-center gap-1.5 rounded-[28px] bg-[rgba(255,251,244,0.84)] p-1.5 shadow-[0_14px_40px_rgba(79,54,24,0.13),inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-2xl dark:bg-[rgba(14,18,27,0.84)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]">
-          <button
-            onClick={() => setIsInternetMode((value) => !value)}
-            className={clsx(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all',
-              isInternetMode
-                ? 'bg-[#7C9CFF]/16 text-[#6076E8] dark:text-[#B8C7FF]'
-                : 'bg-white/42 text-apple-text-muted dark:bg-white/[0.06]',
-            )}
-            aria-label={isInternetMode ? '关闭联网提示' : '开启联网提示'}
-            title={isInternetMode ? '关闭联网提示' : '开启联网提示'}
-          >
-            <Globe size={18} />
-          </button>
-          <div className="relative flex flex-1 items-center">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(event) => setInputText(event.target.value)}
-              onPointerDown={() => {
-                setShowPetMenu(false);
-                setComposerFocused(true);
-              }}
-              onClick={() => {
-                setShowPetMenu(false);
-                setComposerFocused(true);
-              }}
-              onFocus={() => {
-                setShowPetMenu(false);
-                setComposerFocused(true);
-              }}
-              onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
-              onKeyDown={(event) => event.key === 'Enter' && handleSend()}
-              disabled={isThinking}
-              placeholder="说说你现在最想问的事"
-              className="h-10 w-full rounded-full bg-apple-bg/72 pl-3.5 pr-[74px] text-[13px] font-normal text-apple-text shadow-[inset_0_1px_2px_rgba(70,45,20,0.08)] placeholder:text-apple-text-muted/65 outline-none transition-all focus:ring-4 focus:ring-[#F4CF83]/14 dark:bg-black/22"
-            />
-            <button
-              onClick={handleVoiceInput}
-              disabled={isThinking}
-              title="语音输入"
-              aria-label="语音输入"
-              className="absolute right-9 flex h-8 w-8 items-center justify-center rounded-full text-apple-text-muted transition-colors disabled:opacity-50"
-            >
-              <Mic size={19} />
-            </button>
-            <button
-              onClick={() => handleSend()}
-              disabled={!inputText.trim() || isThinking}
-              aria-label="发送"
-              className="absolute right-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#F4CF83] text-[#17130f] shadow-[0_8px_18px_rgba(185,123,40,0.16)] transition-transform active:scale-95 disabled:opacity-40"
-            >
-              <Send size={15} className="ml-0.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {showScrollTop && !showPetMenu && (
-          <motion.button
-            initial={{ opacity: 0, y: 10, scale: 0.9 }}
-            animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.9 }}
-            whileHover={{ opacity: 1 }}
-            whileFocus={{ opacity: 1 }}
-            whileTap={{ opacity: 1, scale: 0.96 }}
-            onPointerEnter={markScrollControlsActive}
-            onFocus={markScrollControlsActive}
-            onClick={() => {
-              markScrollControlsActive();
-              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="absolute bottom-[calc(var(--app-bottom-pad)+174px)] right-5 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-apple-surface text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl"
-            aria-label="回到顶部"
-            title="回到顶部"
-          >
-            <ArrowUp size={16} />
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      <ReadingLog
-        open={showReadingLog}
-        onClose={() => setShowReadingLog(false)}
-        readings={tarotReadings}
-        messages={messages}
-        diaryEntries={diaryEntries}
-        guardianMessages={guardianMessages}
-        activeProfile={activeProfile}
-        baziResult={baziResult}
-        weeklyReportText={weeklyReviewText}
-        weekCount={weekReadings.length}
-        plusActive={plusActive}
-        onUpgrade={() => openUpgradePrompt('weekly')}
-        onShare={handleShareReadingCard}
-        onContinue={(prompt) => {
-          setShowReadingLog(false);
-          handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
-        }}
-      />
-
-      <WardrobeModal
-        open={showWardrobe}
-        bondLevel={bondLevel}
-        selectedId={companionOutfit}
-        onSelect={setCompanionOutfit}
-        onClose={() => setShowWardrobe(false)}
-      />
-
-      <UpgradePromptModal
-        open={showUpgradePrompt}
-        reason={upgradeReason}
-        trialAvailable={trialAvailable}
-        onStartTrial={handleStartTrial}
-        onGoPlus={handleOpenPlusPage}
-        onClose={() => setShowUpgradePrompt(false)}
-      />
-
-      <AnimatePresence>
-        {showClearConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm rounded-[30px] border border-apple-border bg-apple-surface p-5 shadow-2xl"
-            >
-              <div className="text-lg font-black text-apple-text">清空对话？</div>
-              <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-                只会清空首页聊天和当前牌面，不会删除你的牌迹记录。
-              </p>
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setShowClearConfirm(false)}
-                  className="rounded-full border border-apple-border bg-apple-surface-hover py-3 text-sm font-bold text-apple-text"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleClearHistory}
-                  className="rounded-full bg-[#F4CF83] py-3 text-sm font-black text-[#11131a]"
-                >
-                  清空
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {floatingExp && (
-          <motion.div
-            initial={{ opacity: 0, y: 12, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -12, scale: 0.92 }}
-            className="absolute left-1/2 top-24 z-[120] -translate-x-1/2 rounded-full border border-[#F4CF83]/35 bg-[#F4CF83]/15 px-4 py-2 text-sm font-black text-[#B97B28] backdrop-blur-xl dark:text-[#F4CF83]"
-          >
-            +{floatingExp} 经验
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
 }
 
 function DailyMission({
@@ -4724,7 +4097,7 @@ function DrawCardAnimation({
               <span className="font-serif text-[18px] font-semibold tracking-[0.08em] text-[#fff7e8] drop-shadow-[0_10px_26px_rgba(0,0,0,0.42)]">
                 {spreadTitle}
               </span>
-              <span className="max-w-full truncate rounded-full border border-[#f4cf83]/24 bg-[#111621]/72 px-4 py-1.5 text-[10px] font-semibold tracking-[0.18em] text-[#f4cf83] shadow-[0_12px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+              <span className="max-w-full truncate rounded-full border border-[#f4cf83]/24 bg-[#111621]/72 px-4 py-1.5 text-xs font-semibold tracking-[0.18em] text-[#f4cf83] shadow-[0_12px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
                 {singleCard ? cardMetaText : 'ARCANA REVEAL'}
               </span>
             </motion.div>
@@ -4747,7 +4120,7 @@ function DrawCardAnimation({
               >
                 <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[#f4cf83]">
                   <Sparkles size={compact ? 22 : 26} />
-                  <span className="text-[9px] font-semibold tracking-[0.24em]">TAROT</span>
+                  <span className="text-xs font-semibold tracking-[0.24em]">TAROT</span>
                 </div>
               </motion.div>
             ))}
@@ -4784,12 +4157,12 @@ function DrawCardAnimation({
                         compact ? '-top-[46px] min-w-[82px]' : '-top-[50px] min-w-[90px]',
                       )}
                     >
-                      <span className="max-w-[108px] truncate font-serif text-[10px] font-semibold leading-none text-[#fff7e8]">
+                      <span className="max-w-[108px] truncate font-serif text-xs font-semibold leading-none text-[#fff7e8]">
                         {card.name}
                       </span>
                       <span
                         className={clsx(
-                          'mt-1 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-[0.16em]',
+                          'mt-1 rounded-full border px-1.5 py-0.5 text-xs font-semibold leading-none tracking-[0.16em]',
                           card.position === '逆位'
                             ? 'border-[#b8c7ff]/30 bg-[#b8c7ff]/12 text-[#cbd5ff]'
                             : 'border-[#f4cf83]/34 bg-[#f4cf83]/12 text-[#f4cf83]',
@@ -4808,7 +4181,7 @@ function DrawCardAnimation({
                     )}
                   >
                     <Sparkles size={compact ? 28 : 32} />
-                    <span className="text-[10px] font-semibold tracking-[0.24em]">TAROT</span>
+                    <span className="text-xs font-semibold tracking-[0.24em]">TAROT</span>
                   </motion.div>
                   <motion.img
                     src={cardSrc}
@@ -4874,9 +4247,9 @@ function UpgradePromptModal({
       cta: '继续这条线',
     },
     history: {
-      title: '旧牌迹快被新的覆盖了',
-      desc: '免费版只保留最近 30 次。Plus 会扩展到 200 次，把反复出现的问题和代表牌留下来。',
-      cta: '留下我的牌迹',
+      title: '已有牌迹会一直保留',
+      desc: '免费版可新增保存至 30 条，Plus 扩展至 200 条。达到额度后暂停新增，已有牌迹不会被覆盖；会员到期也不会删除旧记录。',
+      cta: '扩展新增牌迹额度',
     },
     weekly: {
       title: '你已经有材料做复盘了',
@@ -4891,9 +4264,9 @@ function UpgradePromptModal({
       cta: '继续这条线索',
     },
     history: {
-      title: '把你的牌迹留下来',
-      desc: '免费版适合体验，Plus 适合长期记录。它会保留更多牌迹，并把反复出现的问题整理成可复盘的线索。',
-      cta: '留下我的长期档案',
+      title: '给后续记录留出空间',
+      desc: 'Plus 增加新增牌迹的容量，并把反复出现的问题整理成复盘线索。你已经保存的记录始终可以回来查看。',
+      cta: '查看 Plus 权益',
     },
     weekly: {
       title: '你已经有材料做 7 日复盘了',
@@ -4921,7 +4294,7 @@ function UpgradePromptModal({
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
-            className="mx-auto w-full max-w-[540px] rounded-[32px] border border-apple-border bg-apple-surface p-5 shadow-[0_24px_80px_rgba(0,0,0,0.32)]"
+            className="mx-auto w-full max-w-[760px] rounded-[32px] border border-apple-border bg-apple-surface p-5 shadow-[0_24px_80px_rgba(0,0,0,0.32)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
@@ -4941,7 +4314,7 @@ function UpgradePromptModal({
                 <X size={17} />
               </button>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-apple-text-muted">
               {valuePillars.map((item) => (
                 <div key={item.title} className="rounded-2xl border border-apple-border bg-apple-surface-hover px-2 py-2">
                   <div className="font-black text-apple-text">{item.title}</div>
@@ -5017,7 +4390,7 @@ function WardrobeModal({
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
-            className="mx-auto flex max-h-[82vh] w-full max-w-[540px] flex-col overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
+            className="mx-auto flex max-h-[82vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-apple-border px-5 py-4">
@@ -5055,7 +4428,7 @@ function WardrobeModal({
                     <div className="relative z-10 flex h-36 items-end justify-center sm:h-40">
                       <div className="relative h-full w-[86%] max-w-[132px] drop-shadow-[0_16px_22px_rgba(0,0,0,0.18)]">
                         {outfit.id === 'auto' && (
-                          <div className="absolute left-1/2 top-5 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[#F4CF83]/34 bg-white/42 px-2 py-1 text-[9px] font-black text-[#B97B28] backdrop-blur-xl dark:bg-white/[0.08] dark:text-[#F4CF83]">
+                          <div className="absolute left-1/2 top-5 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[#F4CF83]/34 bg-white/42 px-2 py-1 text-xs font-black text-[#B97B28] backdrop-blur-xl dark:bg-white/[0.08] dark:text-[#F4CF83]">
                             <Sparkles size={11} />
                             自动
                           </div>
@@ -5071,17 +4444,17 @@ function WardrobeModal({
                     <div className="relative z-10 mt-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="line-clamp-2 text-sm font-black leading-tight text-apple-text">{outfit.name}</div>
-                        <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-apple-text-muted">{outfit.desc}</div>
+                        <div className="mt-1 line-clamp-2 text-xs leading-snug text-apple-text-muted">{outfit.desc}</div>
                         <div className="mt-2 flex flex-wrap gap-1">
                           <CompanionActionBadge
                             action={previewAction}
-                            className="bg-[#f4cf83]/16 px-1.5 py-0.5 text-[9px] text-[#9a6a28] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
+                            className="bg-[#f4cf83]/16 px-1.5 py-0.5 text-xs text-[#9a6a28] dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
                           />
                           {(['idle', 'thinking', 'drawing', 'happy', 'memory'] as CompanionExpression[]).map((expression) => (
                             <React.Fragment key={expression}>
                               <CompanionExpressionBadge
                                 expression={expression}
-                                className="bg-apple-surface/70 px-1.5 py-0.5 text-[9px] text-[#9a6a28] dark:bg-white/[0.07] dark:text-[#f4cf83]"
+                                className="bg-apple-surface/70 px-1.5 py-0.5 text-xs text-[#9a6a28] dark:bg-white/[0.07] dark:text-[#f4cf83]"
                               />
                             </React.Fragment>
                           ))}
@@ -5105,6 +4478,7 @@ function WardrobeModal({
 
 function ReadingLog({
   open,
+  initialReadingId,
   onClose,
   readings,
   messages,
@@ -5115,11 +4489,15 @@ function ReadingLog({
   weeklyReportText,
   weekCount,
   plusActive,
+  readingLimit,
   onUpgrade,
   onShare,
   onContinue,
+  onSelectReading,
+  onDeleteReading,
 }: {
   open: boolean;
+  initialReadingId?: string | null;
   onClose: () => void;
   readings: TarotReading[];
   messages: Message[];
@@ -5130,16 +4508,82 @@ function ReadingLog({
   weeklyReportText: string;
   weekCount: number;
   plusActive: boolean;
+  readingLimit: number;
   onUpgrade: () => void;
   onShare: (reading: TarotReading) => void;
   onContinue: (prompt: string) => void;
+  onSelectReading: (readingId: string) => void;
+  onDeleteReading: (readingId: string) => void;
 }) {
   const [expandedTimelineIds, setExpandedTimelineIds] = useState<Set<string>>(() => new Set());
   const [expandedReadingIds, setExpandedReadingIds] = useState<Set<string>>(() => new Set());
+  const [visibleReadingCount, setVisibleReadingCount] = useState(20);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState('');
+  const [query, setQuery] = useState('');
+  const [range, setRange] = useState<RecordRange>('all');
+  const [source, setSource] = useState<ReadingSource>('all');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const readingScrollRef = useRef<HTMLDivElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const pendingDeleteReading = readings.find((reading) => reading.id === pendingDeleteId);
+  useDialogFocus(dialogRef, open && !pendingDeleteId, onClose);
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (open && pendingDeleteReading && dialog && !dialog.open) {
+      dialog.showModal();
+      cancelDeleteRef.current?.focus();
+    }
+    if ((!open || !pendingDeleteReading) && dialog?.open) dialog.close();
+    if (!open || pendingDeleteId && !pendingDeleteReading) setPendingDeleteId(null);
+  }, [open, pendingDeleteId, pendingDeleteReading]);
+  useEffect(() => {
+    setVisibleReadingCount((count) => Math.min(count, Math.max(20, readings.length)));
+  }, [readings.length]);
+  useEffect(() => {
+    const index = open && initialReadingId && !query.trim() && range === 'all' && source === 'all' ? readings.findIndex(reading => reading.id === initialReadingId) : -1;
+    setVisibleReadingCount(index < 0 ? 20 : Math.max(20, Math.ceil((index + 1) / 20) * 20));
+  }, [query, range, source]);
+  useEffect(() => {
+    if (!open || !initialReadingId) return;
+    const index = readings.findIndex(reading => reading.id === initialReadingId);
+    if (index < 0) return;
+    setQuery(''); setRange('all'); setSource('all');
+    setVisibleReadingCount(Math.max(20, Math.ceil((index + 1) / 20) * 20));
+    setExpandedReadingIds(current => new Set([...current, initialReadingId]));
+    const frame = window.requestAnimationFrame(() => {
+      const container = readingScrollRef.current;
+      const target = document.getElementById(`archive-reading-${initialReadingId}`);
+      if (container && target) container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - 12;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, initialReadingId]);
+  const handleExport = () => {
+    try {
+      downloadAppBackup();
+      setExportStatus('已发起存档下载，请确认备份文件已保存。');
+    } catch {
+      setExportStatus('导出未完成，请再试一次。');
+    }
+  };
+  const handleConfirmDelete = () => {
+    if (!pendingDeleteReading) return;
+    onDeleteReading(pendingDeleteReading.id);
+    setExpandedReadingIds((current) => {
+      const next = new Set(current);
+      next.delete(pendingDeleteReading.id);
+      return next;
+    });
+    setPendingDeleteId(null);
+  };
   if (typeof document === 'undefined') return null;
   const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages, activeProfile, baziResult);
   const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
   const getDisplaySummary = (reading: TarotReading) => getFullReadingSummary(reading, messages);
+  const filteredReadings = filterTarotArchive(readings, { query, range, source, now: getTrustedNow() }, getDisplaySummary);
+  const hasFilters = Boolean(query.trim()) || range !== 'all' || source !== 'all';
+  const clearFilters = () => { setQuery(''); setRange('all'); setSource('all'); };
   const toggleTimeline = (id: string) => {
     setExpandedTimelineIds((current) => {
       const next = new Set(current);
@@ -5158,6 +4602,7 @@ function ReadingLog({
   };
 
   return createPortal(
+    <>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -5168,26 +4613,48 @@ function ReadingLog({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reading-log-title"
+            tabIndex={-1}
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
-            className="mx-auto max-h-[74vh] w-full max-w-[540px] overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
+            className="mx-auto flex max-h-[calc(100dvh_-_32px)] w-full max-w-[760px] flex-col overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-apple-border px-5 py-4">
+            <div className="flex shrink-0 items-center justify-between border-b border-apple-border px-5 py-4">
               <div>
-                <div className="text-lg font-black text-apple-text">你的牌迹</div>
-                <div className="text-xs text-apple-text-muted">每次占卜都会自动保存，方便回来复看。</div>
+                <h2 id="reading-log-title" className="text-lg font-semibold text-apple-text">你的牌迹 · {readings.length} 条</h2>
+                <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">已有记录全部保留，会员到期后也能回来复看。</p>
+                <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">当前容量 {readingLimit} 条 · 可先导出，再主动移除旧牌迹。</p>
               </div>
-              <button onClick={onClose} className="rounded-full bg-apple-surface-hover p-2 text-apple-text-muted">
+              <button type="button" onClick={onClose} aria-label="关闭牌迹" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-apple-surface-hover text-apple-text-muted">
                 <X size={18} />
               </button>
             </div>
-            <div className="max-h-[58vh] overflow-y-auto p-4 no-scrollbar">
-              <div className="mb-3 overflow-hidden rounded-[28px] border border-[#F4CF83]/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
+            <div ref={readingScrollRef} className="min-h-0 flex-1 overflow-y-auto p-4 no-scrollbar">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={handleExport} className="rail-button-secondary"><Download size={16} aria-hidden="true" />导出存档</button>
+                {exportStatus && <p role="status" className="text-[13px] leading-6 text-apple-text-muted">{exportStatus}</p>}
+              </div>
+              <div className="mb-4 space-y-3">
+                <label className="block text-sm font-medium" htmlFor="reading-search">搜索牌迹</label>
+                <input id="reading-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="问题、牌名或解读中的一句话" className="rail-field w-full" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label htmlFor="reading-range" className="block text-sm">时间范围</label><select id="reading-range" value={range} onChange={event => setRange(event.target.value as RecordRange)} className="rail-field mt-1 w-full"><option value="all">全部时间</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
+                  <div><label htmlFor="reading-source" className="block text-sm">解读来源</label><select id="reading-source" value={source} onChange={event => setSource(event.target.value as ReadingSource)} className="rail-field mt-1 w-full"><option value="all">全部来源</option><option value="ai">AI 解读</option><option value="fallback">本地参考</option><option value="unknown">来源未标注</option></select></div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" className="rail-muted">找到 {filteredReadings.length} 条 · 共 {readings.length} 条牌迹</p>{hasFilters && <button type="button" onClick={clearFilters} className="min-h-11 rounded-xl px-3 text-sm text-apple-text hover:bg-apple-surface-hover">清空筛选</button>}</div>
+                {initialReadingId && !readings.some(reading => reading.id === initialReadingId) && <p role="status" className="rail-muted">这条牌迹已移除，你可以继续查找其他记录。</p>}
+              </div>
+              <details className="mb-4 rounded-2xl border border-apple-border bg-apple-surface p-4">
+                <summary className="cursor-pointer py-1 text-base font-medium">查看 7 日轨迹报告 · {weekCount} 次牌迹</summary>
+                <div className="pt-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
                       7 日轨迹报告
                     </div>
                     <div className="mt-1 text-xl font-black leading-snug text-apple-text">{archiveReport.title}</div>
@@ -5208,19 +4675,19 @@ function ReadingLog({
                 <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {archiveReport.signals.slice(0, plusActive ? 4 : 2).map((signal) => (
                     <div key={signal.label} className="rounded-[18px] border border-apple-border bg-apple-surface/64 p-3">
-                      <div className="text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]">{signal.label}</div>
+                      <div className="text-xs font-black text-[#B97B28] dark:text-[#F4CF83]">{signal.label}</div>
                       <div className="mt-1 line-clamp-1 text-xs font-black text-apple-text">{signal.value}</div>
-                      <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{signal.desc}</div>
+                      <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-apple-text-muted">{signal.desc}</div>
                     </div>
                   ))}
                 </div>
 
                 {archiveReport.evidence.length > 0 && (
                   <div className="mt-3 rounded-[20px] bg-apple-surface/60 p-3">
-                    <div className="mb-2 text-[11px] font-black text-apple-text">本周证据</div>
+                    <div className="mb-2 text-xs font-black text-apple-text">本周证据</div>
                     <div className="grid gap-1.5">
                       {archiveReport.evidence.slice(0, plusActive ? 3 : 1).map((item) => (
-                        <div key={item} className="text-[11px] leading-relaxed text-apple-text-muted">{item}</div>
+                        <div key={item} className="text-xs leading-relaxed text-apple-text-muted">{item}</div>
                       ))}
                     </div>
                   </div>
@@ -5230,7 +4697,7 @@ function ReadingLog({
                   {archiveReport.keywords.map((keyword) => (
                     <span
                       key={keyword}
-                      className="rounded-full border border-[#F4CF83]/22 bg-apple-surface/70 px-2.5 py-1 text-[11px] font-bold text-[#B97B28] dark:text-[#F4CF83]"
+                      className="rounded-full border border-[#F4CF83]/22 bg-apple-surface/70 px-2.5 py-1 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
                     >
                       {keyword}
                     </span>
@@ -5248,13 +4715,13 @@ function ReadingLog({
                         const canCollapse = shouldCollapseReadingText(item.summary, 118);
                         return (
                           <div key={item.id} className="grid grid-cols-[44px_minmax(0,1fr)] gap-2">
-                            <div className="pt-0.5 text-[10px] font-bold text-apple-text-muted">{item.date}</div>
+                            <div className="pt-0.5 text-xs font-bold text-apple-text-muted">{item.date}</div>
                             <div className="min-w-0 border-l border-[#F4CF83]/24 pl-3">
                               <div className="text-xs font-black leading-snug text-apple-text">{item.title}</div>
-                              <div className="mt-0.5 text-[11px] font-bold leading-snug text-[#B97B28] dark:text-[#F4CF83]">{item.card}</div>
+                              <div className="mt-0.5 text-xs font-bold leading-snug text-[#B97B28] dark:text-[#F4CF83]">{item.card}</div>
                               <div
                                 className={clsx(
-                                  'mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-apple-text-muted',
+                                  'mt-1 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted',
                                   canCollapse && !expanded && 'line-clamp-3',
                                 )}
                               >
@@ -5263,7 +4730,7 @@ function ReadingLog({
                               {canCollapse && (
                                 <button
                                   onClick={() => toggleTimeline(item.id)}
-                                  className="mt-1 rounded-full px-0 text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]"
+                                  className="mt-1 rounded-full px-0 text-xs font-black text-[#B97B28] dark:text-[#F4CF83]"
                                 >
                                   {expanded ? '收起' : '展开完整解读'}
                                 </button>
@@ -5298,10 +4765,11 @@ function ReadingLog({
                     onClick={onUpgrade}
                     className="mt-3 w-full rounded-full border border-[#F4CF83]/24 bg-apple-surface px-3 py-2 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
                   >
-                    解锁完整 7 日轨迹和 200 条牌迹
+                    解锁完整 7 日轨迹，扩展至 200 条新增容量
                   </button>
                 )}
-              </div>
+                </div>
+              </details>
 
               {readings.length === 0 ? (
                 <div className="rounded-[26px] border border-dashed border-apple-border p-8 text-center">
@@ -5311,36 +4779,47 @@ function ReadingLog({
                     抽一张今日牌，星轨会帮你把问题、牌面和解读都留住。
                   </p>
                 </div>
+              ) : filteredReadings.length === 0 ? (
+                <div className="rail-empty"><p className="text-base font-medium">没有匹配的牌迹</p><p className="rail-muted mt-2">试试更短的关键词，或查看全部时间与来源。</p><button type="button" onClick={clearFilters} className="rail-button-secondary mt-4">查看全部牌迹</button></div>
               ) : (
                 <div className="space-y-3">
-                  {readings.slice(0, 20).map((reading) => {
+                  {filteredReadings.slice(0, visibleReadingCount).map((reading) => {
                     const displaySummary = getDisplaySummary(reading);
                     const shareHook = getReadingShareHook({ ...reading, summary: displaySummary });
+                    const expanded = expandedReadingIds.has(reading.id);
+                    const canCollapse = shouldCollapseReadingText(displaySummary, 180);
                     return (
-                      <div key={reading.id} className="rounded-[26px] border border-apple-border bg-apple-surface-hover p-3">
+                      <div key={reading.id} id={`archive-reading-${reading.id}`} className={clsx('rounded-2xl border bg-apple-surface-hover p-3', initialReadingId === reading.id ? 'border-apple-gold' : 'border-apple-border')}>
                         <div className="flex gap-3">
                           {reading.cardImage && (
                             <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-full border border-[#F4CF83]/28 bg-[#F4CF83]/14 px-2 py-0.5 text-[10px] font-black text-[#B97B28] dark:text-[#F4CF83]">
+                              <span className="rounded-full border border-[#F4CF83]/28 bg-[#F4CF83]/14 px-2 py-0.5 text-xs font-black text-[#B97B28] dark:text-[#F4CF83]">
                                 {shareHook.state}
                               </span>
                               <span className="line-clamp-1 text-xs font-black text-apple-text">{shareHook.headline}</span>
                             </div>
-                            <div className="mt-1.5 text-sm font-bold leading-snug text-apple-text">{reading.question}</div>
+                            <h3 className="mt-1.5 text-base font-medium leading-7 text-apple-text">{reading.question}</h3>
                             <div className="mt-1 text-xs leading-snug text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
-                            <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted">
+                            <p className={clsx('rail-reader mt-3 text-apple-text-muted', canCollapse && !expanded && 'line-clamp-4')}>
                               {displaySummary}
                             </p>
+                            {canCollapse && (
+                              <button type="button" onClick={() => toggleReading(reading.id)} aria-expanded={expanded} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] font-medium text-apple-text hover:bg-apple-surface">
+                                {expanded ? '收起解读' : '展开完整解读'}
+                              </button>
+                            )}
+                            <button type="button" onClick={() => onSelectReading(reading.id)} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] font-medium text-apple-text hover:bg-apple-surface">追问这条牌迹</button>
+                            <button type="button" onClick={() => { setExportStatus(''); setPendingDeleteId(reading.id); }} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] text-apple-text-muted hover:bg-apple-surface"><Trash2 size={14} aria-hidden="true" className="mr-1 inline" />删除这条牌迹</button>
                             <div className="mt-2 flex items-center justify-between gap-2">
-                              <div className="text-[10px] text-apple-text-muted">
-                                {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                              <div className="text-xs text-apple-text-muted">
+                                {formatRecordDate(reading.date)} · {getReadingSource(reading) === 'fallback' ? '本地参考' : getReadingSource(reading) === 'ai' ? 'AI 解读' : '来源未标注'}
                               </div>
                               <button
                                 onClick={() => onShare({ ...reading, summary: displaySummary })}
-                                className="rounded-full border border-apple-border bg-apple-surface px-2.5 py-1 text-[10px] font-bold text-apple-text-muted"
+                                className="rounded-full border border-apple-border bg-apple-surface px-2.5 py-1 text-xs font-bold text-apple-text-muted"
                               >
                                 生成分享图
                               </button>
@@ -5350,13 +4829,37 @@ function ReadingLog({
                       </div>
                     );
                   })}
+                  {filteredReadings.length > visibleReadingCount && (
+                    <button type="button" onClick={() => setVisibleReadingCount((count) => count + 20)} className="rail-button-secondary w-full">
+                      查看更多牌迹 · 还有 {filteredReadings.length - visibleReadingCount} 条
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>,
+    </AnimatePresence>
+    <dialog
+      ref={deleteDialogRef}
+      onCancel={(event) => { event.preventDefault(); setPendingDeleteId(null); }}
+      onClick={(event) => { if (event.target === event.currentTarget) setPendingDeleteId(null); }}
+      aria-labelledby="delete-reading-title"
+      aria-describedby="delete-reading-description"
+      className="m-auto max-h-[calc(100dvh_-_48px)] w-[calc(100%_-_32px)] max-w-md overflow-y-auto rounded-2xl border border-apple-border bg-apple-surface p-6 text-apple-text backdrop:bg-black/55"
+    >
+      <h2 id="delete-reading-title" className="text-lg font-semibold">删除这条牌迹？</h2>
+      {pendingDeleteReading && <p className="mt-3 break-words text-base leading-7">「{pendingDeleteReading.question}」</p>}
+      <p id="delete-reading-description" className="mt-3 text-[13px] leading-6 text-apple-text-muted">只移除这条牌迹档案，已经保存的对话仍会保留。移除后减少一条已保存记录。建议先导出存档，方便以后找回。</p>
+      <button type="button" onClick={handleExport} className="rail-button-secondary mt-4 w-full"><Download size={16} aria-hidden="true" />先导出存档</button>
+      {exportStatus && <p role="status" className="mt-2 text-[13px] leading-6 text-apple-text-muted">{exportStatus}</p>}
+      <div className="mt-4 flex gap-3">
+        <button type="button" ref={cancelDeleteRef} autoFocus onClick={() => setPendingDeleteId(null)} className="rail-button-secondary flex-1">取消</button>
+        <button type="button" onClick={handleConfirmDelete} disabled={!pendingDeleteReading} className="rail-button flex-1">确认删除牌迹</button>
+      </div>
+    </dialog>
+    </>,
     document.body,
   );
 }

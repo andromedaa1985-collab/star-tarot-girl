@@ -1,5 +1,6 @@
+import PageHeader from '../components/ui/PageHeader';
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 
 type AnalyticsSummary = {
@@ -65,49 +66,29 @@ export default function Analytics() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto overscroll-contain px-5 pb-32 pt-5 text-apple-text no-scrollbar">
-      <div className="mx-auto w-full max-w-3xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-black tracking-[0.2em] text-apple-gold">
-              <BarChart3 size={16} />
-              BETA DATA
-            </div>
-            <h1 className="mt-2 text-2xl font-black">内测数据</h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-apple-text-muted">
-              这里只统计匿名事件，不收集聊天内容。重点看每日运势有没有被反复使用，以及今日深解有没有被点击。
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={loadSummary}
-            disabled={isLoading}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-apple-border bg-apple-surface text-apple-text-muted disabled:opacity-50"
-            aria-label="刷新统计"
-            title="刷新统计"
-          >
-            <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-          </button>
-        </div>
-
-        <div className="mt-5 rounded-[26px] border border-apple-border bg-apple-surface p-4">
-          <label className="text-xs font-bold text-apple-text-muted">后台 Token</label>
+    <div className="rail-page">
+      <div className="rail-page-content">
+        <PageHeader eyebrow="内测管理" title="内测数据" description="这里只统计匿名事件，不收集聊天内容。重点看每日运势的使用情况，以及今日深解的点击情况。" backTo="/app/profile" action={<button type="button" onClick={loadSummary} disabled={isLoading} className="rail-button-secondary"><RefreshCw size={17} className={isLoading ? 'animate-spin' : ''} />刷新</button>} />
+        <div className="rail-panel">
+          <label htmlFor="analytics-token" className="text-[15px] font-medium text-apple-text">后台 Token</label>
           <div className="mt-2 flex gap-2">
             <input
+              id="analytics-token"
+              type="password"
               value={token}
               onChange={(event) => setToken(event.target.value)}
               placeholder="本地可留空；线上建议配置 ANALYTICS_ADMIN_TOKEN"
-              className="min-w-0 flex-1 rounded-2xl border border-apple-border bg-apple-bg px-3 py-2 text-sm text-apple-text outline-none focus:border-apple-gold/50"
+              className="rail-field min-w-0 flex-1"
             />
             <button
               type="button"
               onClick={loadSummary}
-              className="rounded-2xl bg-apple-gold px-4 py-2 text-sm font-black text-[#11131a]"
+              className="rail-button"
             >
               查看
             </button>
           </div>
-          {error && <div className="mt-3 rounded-2xl bg-[#b94a28]/10 p-3 text-xs leading-relaxed text-[#b94a28]">{error}</div>}
+          {error && <div role="alert" className="mt-3 rounded-2xl bg-[#b94a28]/10 p-3 text-[13px] leading-[1.8] text-[#b94a28]">{error}</div>}
         </div>
 
         {summary && (
@@ -119,8 +100,8 @@ export default function Analytics() {
               <MetricCard label="深解点击" value={summary.funnel.deepPlanClicks} />
             </div>
 
-            <section className="mt-5 rounded-[30px] border border-apple-border bg-apple-surface p-5">
-              <div className="flex items-center gap-2 text-sm font-black">
+            <section className="rail-panel mt-6">
+              <div className="rail-section-title flex items-center gap-2">
                 <Sparkles size={17} className="text-apple-gold" />
                 今日深解漏斗
               </div>
@@ -133,16 +114,16 @@ export default function Analytics() {
               </div>
             </section>
 
-            <section className="mt-5 rounded-[30px] border border-apple-border bg-apple-surface p-5">
-              <div className="flex items-center gap-2 text-sm font-black">
+            <section className="rail-panel mt-6">
+              <div className="rail-section-title flex items-center gap-2">
                 <ShieldCheck size={17} className="text-apple-gold" />
                 最近 14 天
               </div>
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[620px] text-left text-xs">
+                <table aria-label="最近 14 天匿名使用数据" className="w-full min-w-[720px] text-left text-[13px] tabular-nums">
                   <thead className="text-apple-text-muted">
                     <tr>
-                      <th className="py-2">日期</th>
+                      <th className="py-3 font-medium">日期</th>
                       <th>用户</th>
                       <th>打开</th>
                       <th>日运</th>
@@ -155,7 +136,7 @@ export default function Analytics() {
                   <tbody>
                     {summary.dailyRows.map((row) => (
                       <tr key={row.day} className="border-t border-apple-border">
-                        <td className="py-2 font-bold">{row.day}</td>
+                        <td className="py-3 font-medium">{row.day}</td>
                         <td>{row.users}</td>
                         <td>{row.sessions}</td>
                         <td>{row.dailyFortuneDraws}</td>
@@ -178,9 +159,9 @@ export default function Analytics() {
 
 function MetricCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-[24px] border border-apple-border bg-apple-surface p-4">
-      <div className="text-xs font-bold text-apple-text-muted">{label}</div>
-      <div className="mt-2 text-2xl font-black text-apple-text">{value}</div>
+    <div className="rail-surface p-5">
+      <div className="text-[13px] font-semibold text-apple-text-muted">{label}</div>
+      <div className="mt-3 text-3xl font-medium tabular-nums text-apple-text">{value}</div>
     </div>
   );
 }
@@ -188,9 +169,9 @@ function MetricCard({ label, value }: { label: string; value: number }) {
 function FunnelRow({ label, value, rate }: { label: string; value: number; rate: number }) {
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-        <span className="font-bold text-apple-text">{label}</span>
-        <span className="text-apple-text-muted">{value} · {rate}%</span>
+      <div className="mb-1 flex items-center justify-between gap-3 text-[13px]">
+        <span className="font-semibold text-apple-text">{label}</span>
+        <span className="text-apple-text-muted tabular-nums">{value} · {rate}%</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-apple-surface-hover">
         <div className="h-full rounded-full bg-apple-gold" style={{ width: `${Math.max(3, Math.min(100, rate))}%` }} />
