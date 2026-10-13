@@ -1,7 +1,6 @@
 """Rebuild locally hosted UI fonts from official Noto SC variable font files."""
 from pathlib import Path
 import argparse
-import shutil
 from fontTools import subset
 from fontTools.ttLib import TTFont
 
@@ -34,4 +33,5 @@ for source, filename, family in [("NotoSansSC.ttf", "railstar-sans.woff2", "Rail
     rules.append(f'@font-face {{ font-family: "{family}"; src: url("/fonts/{filename}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: swap; }}')
     print(filename, (font_root / filename).stat().st_size)
 (project / "src" / "fonts.css").write_text("\n".join(rules) + "\n", encoding="utf-8")
-shutil.copyfile(args.source_dir / "OFL.txt", font_root / "OFL.txt")
+license_text = (args.source_dir / "OFL.txt").read_text(encoding="utf-8")
+(font_root / "OFL.txt").write_text("\n".join(line.rstrip() for line in license_text.splitlines()) + "\n", encoding="utf-8")
