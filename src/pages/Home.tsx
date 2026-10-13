@@ -1598,10 +1598,9 @@ export default function Home() {
     : petExpressionOverride || basePetExpression;
   const activePetAction = getCompanionAction(activePetExpression, activeOutfitId);
   const petStageClass = 'rail-stage-pet';
-  const petDockClass = 'bottom-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+112px)] right-3 h-[104px] w-[104px] sm:right-5 sm:h-[118px] sm:w-[118px]';
   const petIsDocked = visibleMessages.length > 0;
   useEffect(() => {
-    // Stage and dock use different anchors; an old drag offset must not hide the pet.
+    // Ritual and conversation areas use different anchors; reset the old drag offset.
     setPetOffset({ x: 0, y: 0 });
   }, [petIsDocked]);
   const handlePetPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3596,6 +3595,13 @@ export default function Home() {
 
           {visibleMessages.length > 0 && (
             <section className="rail-conversation order-2 flex flex-col gap-3 pt-1">
+              <div data-pet-stage className="flex min-h-28 items-center gap-3 overflow-hidden border-b border-apple-border px-2 py-2">
+                {companionPet('relative h-24 w-24 shrink-0')}
+                <div className="min-w-0">
+                  <p className="text-[15px] font-medium text-apple-text">星轨在这里</p>
+                  <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">读完以后，也可以继续问我。</p>
+                </div>
+              </div>
               {visibleMessages.map((message, index) => (
                 <motion.div
                   key={message.id}
@@ -3689,7 +3695,6 @@ export default function Home() {
         </div>
       </div>
 
-      {visibleMessages.length > 0 && companionPet(clsx('absolute z-40', petDockClass), true)}
       {petMenu}
 
       <div className="rail-composer-position">
