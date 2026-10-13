@@ -7,6 +7,7 @@ import { useAppContext } from '../store';
 import { hasFeatureAccess, type PremiumFeature } from '../lib/membership';
 import { normalizeUserAddress } from '../lib/aiPrompting';
 import { useDialogFocus } from '../lib/useDialogFocus';
+import { WorkspaceStorageNotice } from './WorkspaceStorageNotice';
 
 const SimulatorIcon = ({ size = 20 }: { size?: number }) => (
   <svg
@@ -68,7 +69,7 @@ export default function Layout() {
           <p className="mt-6 px-3 text-xs leading-6 text-apple-text-muted">一张牌，一段心事。<br />把今天过清楚一点。</p>
         </div>
       </aside>
-      <main inert={addressPromptOpen} className="rail-main" id="app-main"><Outlet /></main>
+      <main inert={addressPromptOpen} className="rail-main" id="app-main"><WorkspaceStorageNotice /><Outlet /></main>
       <div inert={addressPromptOpen}><BottomDock /></div>
       <PreferredAddressPrompt />
     </div>

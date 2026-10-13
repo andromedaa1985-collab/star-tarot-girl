@@ -16,6 +16,8 @@ import { saveAutoRecoveryPoint } from '../lib/appBackup';
 import { normalizeGeneratedStorageValue, type GenerationKind } from '../lib/generationTrace';
 import { trackAnalyticsEvent } from '../lib/analyticsClient';
 import { fetchCurrentEntitlements } from '../lib/entitlementClient';
+import { getStoredAccountSession } from '../lib/accountClient';
+import { canPersistWorkspace, writeWorkspaceStorage } from '../lib/workspacePersistence';
 
 // --- Constants & Data ---
 export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2500, 4000];
@@ -44,6 +46,9 @@ export interface Message {
   role: 'user' | 'ai';
   text: string;
   timestamp: number;
+  replyToMessageId?: string;
+  sourceQuestion?: string;
+  readingId?: string;
   cardImage?: string;
   cardImages?: string[];
   generationId?: string;
@@ -141,6 +146,7 @@ export interface AppSettings {
   hapticsEnabled: boolean;
   darkMode: boolean;
   bgmEnabled: boolean;
+  notificationPreferences?: { daily: boolean; energy: boolean; updates: boolean };
 }
 
 interface AppState {
@@ -226,6 +232,10 @@ function readStoredJson<T>(key: string, fallback: T): T {
 }
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
+  const workspaceOwner = React.useRef(getStoredAccountSession()?.user.id || null);
+  const persistWorkspaceValue = (key: string, value: string) => {
+    void writeWorkspaceStorage(workspaceOwner.current, key, value).catch(() => undefined);
+  };
   const [bondExp, setBondExp] = useState(() => readStoredJson('bondExp', 0));
   const [bondLevel, setBondLevel] = useState(() => readStoredJson('bondLevel', 1));
   const [energy, setEnergy] = useState(() => readStoredJson('energy', 5));
@@ -324,8 +334,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    // Trial/order return owns the next entitlement snapshot. An older initial
+    // GET must not arrive afterwards and overwrite its newly granted rights.
+    if (params.get('trial') === '1' || (params.get('payment') && params.get('order'))) return;
     fetchCurrentEntitlements()
       .then((snapshot) => {
+        if (!canPersistWorkspace(workspaceOwner.current)) return;
         setMembership(snapshot.membership);
         setEnergy(snapshot.energy);
       })
@@ -339,7 +354,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [appEvents]);
 
   React.useEffect(() => {
-    localStorage.setItem('theme', theme);
+    persistWorkspaceValue('theme', theme);
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
@@ -348,136 +363,136 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [theme]);
 
   React.useEffect(() => {
-    localStorage.setItem('bondExp', JSON.stringify(bondExp));
+    persistWorkspaceValue('bondExp', JSON.stringify(bondExp));
   }, [bondExp]);
 
   React.useEffect(() => {
-    localStorage.setItem('bondLevel', JSON.stringify(bondLevel));
+    persistWorkspaceValue('bondLevel', JSON.stringify(bondLevel));
   }, [bondLevel]);
 
   React.useEffect(() => {
-    localStorage.setItem('energy', JSON.stringify(energy));
+    persistWorkspaceValue('energy', JSON.stringify(energy));
   }, [energy]);
 
   React.useEffect(() => {
-    localStorage.setItem('fragments', JSON.stringify(fragments));
+    persistWorkspaceValue('fragments', JSON.stringify(fragments));
   }, [fragments]);
 
   React.useEffect(() => {
-    localStorage.setItem('messages', JSON.stringify(messages));
+    persistWorkspaceValue('messages', JSON.stringify(messages));
   }, [messages]);
 
   React.useEffect(() => {
-    localStorage.setItem('cardImage', JSON.stringify(cardImage));
+    persistWorkspaceValue('cardImage', JSON.stringify(cardImage));
   }, [cardImage]);
 
   React.useEffect(() => {
-    localStorage.setItem('communityPosts', JSON.stringify(communityPosts));
+    persistWorkspaceValue('communityPosts', JSON.stringify(communityPosts));
   }, [communityPosts]);
 
   React.useEffect(() => {
-    localStorage.setItem('settings', JSON.stringify(settings));
+    persistWorkspaceValue('settings', JSON.stringify(settings));
   }, [settings]);
 
   React.useEffect(() => {
-    localStorage.setItem('userName', JSON.stringify(userName));
+    persistWorkspaceValue('userName', JSON.stringify(userName));
   }, [userName]);
 
   React.useEffect(() => {
-    localStorage.setItem('preferredAddress', JSON.stringify(preferredAddress));
+    persistWorkspaceValue('preferredAddress', JSON.stringify(preferredAddress));
   }, [preferredAddress]);
 
   React.useEffect(() => {
-    localStorage.setItem('preferredAddressPromptDismissed', JSON.stringify(preferredAddressPromptDismissed));
+    persistWorkspaceValue('preferredAddressPromptDismissed', JSON.stringify(preferredAddressPromptDismissed));
   }, [preferredAddressPromptDismissed]);
 
   React.useEffect(() => {
-    localStorage.setItem('userAvatar', JSON.stringify(userAvatar));
+    persistWorkspaceValue('userAvatar', JSON.stringify(userAvatar));
   }, [userAvatar]);
 
   React.useEffect(() => {
-    localStorage.setItem('companionOutfit', JSON.stringify(companionOutfit));
+    persistWorkspaceValue('companionOutfit', JSON.stringify(companionOutfit));
   }, [companionOutfit]);
 
   React.useEffect(() => {
-    localStorage.setItem('baziResult', JSON.stringify(baziResult));
+    persistWorkspaceValue('baziResult', JSON.stringify(baziResult));
   }, [baziResult]);
 
   React.useEffect(() => {
-    localStorage.setItem('baziFormData', JSON.stringify(baziFormData));
+    persistWorkspaceValue('baziFormData', JSON.stringify(baziFormData));
   }, [baziFormData]);
 
   React.useEffect(() => {
-    localStorage.setItem('baziMessages', JSON.stringify(baziMessages));
+    persistWorkspaceValue('baziMessages', JSON.stringify(baziMessages));
   }, [baziMessages]);
 
   React.useEffect(() => {
-    localStorage.setItem('profiles', JSON.stringify(profiles));
+    persistWorkspaceValue('profiles', JSON.stringify(profiles));
   }, [profiles]);
 
   React.useEffect(() => {
-    localStorage.setItem('activeProfileId', JSON.stringify(activeProfileId));
+    persistWorkspaceValue('activeProfileId', JSON.stringify(activeProfileId));
   }, [activeProfileId]);
 
   React.useEffect(() => {
-    localStorage.setItem('simulatorState', JSON.stringify(simulatorState));
+    persistWorkspaceValue('simulatorState', JSON.stringify(simulatorState));
   }, [simulatorState]);
 
   React.useEffect(() => {
-    localStorage.setItem('tarotReadings', JSON.stringify(tarotReadings));
+    persistWorkspaceValue('tarotReadings', JSON.stringify(tarotReadings));
   }, [tarotReadings]);
 
   React.useEffect(() => {
-    localStorage.setItem('simulationHistory', JSON.stringify(simulationHistory));
+    persistWorkspaceValue('simulationHistory', JSON.stringify(simulationHistory));
   }, [simulationHistory]);
 
   React.useEffect(() => {
-    localStorage.setItem('diaryEntries', JSON.stringify(diaryEntries));
+    persistWorkspaceValue('diaryEntries', JSON.stringify(diaryEntries));
   }, [diaryEntries]);
 
   React.useEffect(() => {
-    localStorage.setItem('reviewHistory', JSON.stringify(reviewHistory));
+    persistWorkspaceValue('reviewHistory', JSON.stringify(reviewHistory));
   }, [reviewHistory]);
 
   React.useEffect(() => {
-    localStorage.setItem('guardianMessages', JSON.stringify(guardianMessages));
+    persistWorkspaceValue('guardianMessages', JSON.stringify(guardianMessages));
   }, [guardianMessages]);
 
   React.useEffect(() => {
-    localStorage.setItem('dailyLetter', JSON.stringify(dailyLetter));
+    persistWorkspaceValue('dailyLetter', JSON.stringify(dailyLetter));
   }, [dailyLetter]);
 
   React.useEffect(() => {
-    localStorage.setItem('dailyLetterDate', JSON.stringify(dailyLetterDate));
+    persistWorkspaceValue('dailyLetterDate', JSON.stringify(dailyLetterDate));
   }, [dailyLetterDate]);
 
   React.useEffect(() => {
-    localStorage.setItem('dailyRewardDate', JSON.stringify(dailyRewardDate));
+    persistWorkspaceValue('dailyRewardDate', JSON.stringify(dailyRewardDate));
   }, [dailyRewardDate]);
 
   React.useEffect(() => {
-    localStorage.setItem('checkInStreak', JSON.stringify(checkInStreak));
+    persistWorkspaceValue('checkInStreak', JSON.stringify(checkInStreak));
   }, [checkInStreak]);
 
   React.useEffect(() => {
-    localStorage.setItem('lastCheckInDate', JSON.stringify(lastCheckInDate));
+    persistWorkspaceValue('lastCheckInDate', JSON.stringify(lastCheckInDate));
   }, [lastCheckInDate]);
 
   React.useEffect(() => {
-    localStorage.setItem('membership', JSON.stringify(membership));
+    persistWorkspaceValue('membership', JSON.stringify(membership));
   }, [membership]);
 
   React.useEffect(() => {
-    localStorage.setItem('engagement', JSON.stringify(engagement));
+    persistWorkspaceValue('engagement', JSON.stringify(engagement));
   }, [engagement]);
 
   React.useEffect(() => {
-    localStorage.setItem('appEvents', JSON.stringify(appEvents));
+    persistWorkspaceValue('appEvents', JSON.stringify(appEvents));
   }, [appEvents]);
 
   React.useEffect(() => {
     const handle = window.setTimeout(() => {
-      saveAutoRecoveryPoint('auto').catch(() => undefined);
+      if (canPersistWorkspace(workspaceOwner.current)) saveAutoRecoveryPoint('auto').catch(() => undefined);
     }, 2600);
 
     return () => window.clearTimeout(handle);

@@ -16,6 +16,8 @@ import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
 import { useDialogFocus } from '../lib/useDialogFocus';
+import { getStoredAccountSession } from '../lib/accountClient';
+import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -161,6 +163,7 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
 }
 
 export default function Diary() {
+  const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   useTrustedTime();
   const navigate = useNavigate();
   const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
@@ -198,7 +201,7 @@ export default function Diary() {
     navigate('/app/profile?plus=1&plan=plus_monthly&from=diary_review');
   };
 
-  const askTarotFromReview = (content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) => {
+  const askTarotFromReview = async (content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) => {
     const archive = buildDiaryReviewArchive(content, meta, entries);
     const prompt = [
       `请沿着我的「${archive.title}」继续看。`,
@@ -209,7 +212,7 @@ export default function Diary() {
     ].filter(Boolean).join('\n');
 
     try {
-      localStorage.setItem('draft:home:input', JSON.stringify(prompt));
+      if (!await writeWorkspaceStorage(workspaceOwner.current, 'draft:home:input', JSON.stringify(prompt))) return;
     } catch {
       // Draft handoff is optional. Navigation still works if storage is unavailable.
     }

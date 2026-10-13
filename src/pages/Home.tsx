@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Copy,
   Crown,
+  Download,
   Gift,
   Globe,
   History,
@@ -31,7 +32,6 @@ import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import {
   LEVEL_THRESHOLDS,
-  LEVEL_TITLES,
   type CompanionMessage,
   type DiaryEntry,
   type Message,
@@ -45,7 +45,6 @@ import {
   getDailyCheckInEnergy,
   getDailyFortuneDeepCredits,
   getDailyMissionEnergy,
-  getMembershipLabel,
   getReadingLimit,
   hasDailyFortuneDeepAccess,
   isPlusActive,
@@ -65,6 +64,9 @@ import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnaps
 import { drawTarotCardIndices, drawTarotPositions, type TarotPosition } from '../lib/tarotRandom';
 import { preloadImages } from '../lib/preloadImages';
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
+import { useDialogFocus } from '../lib/useDialogFocus';
+import { downloadAppBackup } from '../lib/appBackup';
+import { appendTarotReading, canAddTarotReading, getRegenerationSource, removeTarotReading, replaceTarotAnswer, type RegenerationSource } from '../lib/tarotConversation';
 import CompanionSprite, {
   CompanionActionBadge,
   CompanionExpressionBadge,
@@ -271,6 +273,15 @@ const drawCards = (
 
 const formatCards = (cards: DrawnCard[]) =>
   cards.map((card) => `${card.name}（${card.position}）`).join('，');
+
+const restoreReadingCards = (reading: TarotReading): DrawnCard[] => {
+  const images = reading.cardImages?.length ? reading.cardImages : [reading.cardImage || ''];
+  return [...reading.cards.matchAll(/([^，,]+)[（(](正位|逆位)[）)]/g)].map((match, index) => ({
+    name: match[1].trim(),
+    position: match[2] as TarotPosition,
+    image: images[index] || reading.cardImage || '/default-card.png',
+  }));
+};
 
 const getDrawCount = (question: string) => {
   if (question.includes('圣三角')) return 3;
@@ -1497,6 +1508,8 @@ export default function Home() {
   const [dailyDeepImpressionIds, setDailyDeepImpressionIds] = useState<Set<string>>(() => new Set());
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
   const [petExpressionOverride, setPetExpressionOverride] = useState<CompanionExpression | null>(null);
+  const [historyQuotaNotice, setHistoryQuotaNotice] = useState(false);
+  const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -1538,9 +1551,9 @@ export default function Home() {
   const dailyDeepCredits = getDailyFortuneDeepCredits(membership);
   const dailyDeepAccess = hasDailyFortuneDeepAccess(membership);
   const readingLimit = getReadingLimit(membership);
+  const followUpReading = tarotReadings.find((reading) => reading.id === followUpReadingId);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
-  const membershipLabel = getMembershipLabel(membership);
   const hasGuardianLetterToday = dailyLetterDate === new Date().toLocaleDateString('zh-CN');
   const nextBestAction = getNextBestAction({
     plusActive,
@@ -1552,8 +1565,6 @@ export default function Home() {
     activeDays: engagement.activeDays,
   });
 
-  const nextLevelExp = LEVEL_THRESHOLDS[bondLevel] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
-  const progressPercent = Math.min(100, Math.round((bondExp / nextLevelExp) * 100));
   const visibleMessages = messages.filter((message) => message.id !== 'init');
   const hasDrawnCard = cardImage && cardImage !== '/default-card.png' && cardImage !== 'default-card.png';
   const memoryRecall = useMemo(
@@ -1933,7 +1944,7 @@ export default function Home() {
 
   const isDailyFortuneResult = (message: Message, index: number, list: Message[]) => {
     if (message.role !== 'ai' || dailyDeepExpandedIds.has(message.id)) return false;
-    const previousQuestion = getPreviousUserQuestion(list, index);
+    const previousQuestion = message.sourceQuestion || getPreviousUserQuestion(list, index);
     return isDailyFortuneQuestion(previousQuestion);
   };
 
@@ -1953,7 +1964,7 @@ export default function Home() {
     navigate(`/app/profile?plus=1&plan=${planId}`);
   };
 
-  const handleDailyDeepDive = async (sourceMessage: Message, sourceIndex: number) => {
+  const handleDailyDeepDive = async (sourceMessage: Message, sourceIndex: number, replaceMessageId?: string) => {
     if (isThinking) return;
     if (!dailyDeepAccess) {
       setShowDailyDeepPaywall(true);
@@ -1963,7 +1974,7 @@ export default function Home() {
     const accountSession = requireAccountForPaidFeature('/app');
     if (!accountSession) return;
 
-    const sourceQuestion = getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
+    const sourceQuestion = sourceMessage.sourceQuestion || getPreviousUserQuestion(visibleMessages, sourceIndex) || '今日运势';
     const linkedReading =
       tarotReadings.find((reading) => reading.generationId && reading.generationId === sourceMessage.generationId) ||
       tarotReadings.find((reading) => isDailyFortuneQuestion(reading.question) && reading.cardImage === sourceMessage.cardImage) ||
@@ -1981,8 +1992,8 @@ export default function Home() {
     };
 
     setIsThinking(true);
-    setAutoScrollOnNextMessage(true);
-    setMessages((prev) => [...prev, userMessage]);
+    setAutoScrollOnNextMessage(!replaceMessageId);
+    if (!replaceMessageId) setMessages((prev) => [...prev, userMessage]);
 
     let answer = fallbackDailyFortuneDeepAnswer(sourceQuestion, readingContext);
     let usedFallbackAnswer = false;
@@ -2064,10 +2075,18 @@ export default function Home() {
       timestamp: Date.now(),
       cardImage: sourceMessage.cardImage || linkedReading?.cardImage,
       cardImages: sourceMessage.cardImages || linkedReading?.cardImages,
+      sourceQuestion: userMessage.text,
+      replyToMessageId: userMessage.id,
+      readingId: linkedReading?.id,
       ...answerTrace,
     };
 
-    setMessages((prev) => [...prev, aiMessage]);
+    setMessages((prev) => replaceMessageId
+      ? replaceTarotAnswer(prev, replaceMessageId, {
+        ...aiMessage,
+        replyToMessageId: prev.find((message) => message.id === replaceMessageId)?.replyToMessageId,
+      })
+      : [...prev, aiMessage]);
     setDailyDeepExpandedIds((current) => {
       const next = new Set(current);
       next.add(sourceMessage.id);
@@ -2077,11 +2096,11 @@ export default function Home() {
     setIsThinking(false);
   };
 
-  const handleSend = async (textOverride?: string, options: { mode?: SendMode } = {}) => {
+  const handleSend = async (textOverride?: string, options: { mode?: SendMode; regeneration?: RegenerationSource } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
     const accountSession = getStoredAccountSession();
-    if ((options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
+    if (!options.regeneration && (options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
       const source = getLatestDailyFortuneDeepSource();
       if (source) {
         clearInputDraft('');
@@ -2112,20 +2131,28 @@ export default function Home() {
       return;
     }
 
-    const currentReading = tarotReadings[0];
+    const currentReading = options.regeneration ? options.regeneration.reading : followUpReading || tarotReadings[0];
     const hasCurrentReading = Boolean(currentReading || hasDrawnCard);
-    const mode = options.mode ?? 'auto';
+    const mode = options.mode ?? (followUpReading ? 'current' : 'auto');
     const shouldChatOnly = mode === 'auto' && isCasualChatQuestion(question);
-    const shouldDraw =
-      mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading));
-    const isDailyFortune = shouldDraw && isDailyFortuneQuestion(question);
+    const shouldDraw = !options.regeneration && (
+      mode === 'draw' || (mode === 'auto' && !shouldChatOnly && shouldCreateNewReading(question, hasCurrentReading))
+    );
+    if (shouldDraw && !canAddTarotReading(tarotReadings, readingLimit)) {
+      setHistoryQuotaNotice(true);
+      if (!plusActive) openUpgradePrompt('history');
+      return;
+    }
+    setHistoryQuotaNotice(false);
+    const shouldReadDraw = shouldDraw || Boolean(options.regeneration?.originalDraw);
+    const isDailyFortune = shouldReadDraw && isDailyFortuneQuestion(question);
     const cards = shouldDraw
       ? drawCards(
         getDrawCount(question),
         getRecentTarotPositions(tarotReadings),
         getRecentTarotCardIndices(tarotReadings),
       )
-      : [];
+      : options.regeneration?.originalDraw && currentReading ? restoreReadingCards(currentReading) : [];
     const currentImages = currentReading?.cardImages?.length
       ? currentReading.cardImages
       : currentReading?.cardImage
@@ -2133,9 +2160,9 @@ export default function Home() {
         : hasDrawnCard
           ? [cardImage]
           : [];
-    const cardsText = shouldDraw ? formatCards(cards) : currentReading?.cards ?? '当前牌面';
-    const image = shouldDraw ? cards[0]?.image || '/default-card.png' : currentImages[0] || cardImage || '/default-card.png';
-    const images = shouldDraw ? cards.map((card) => card.image) : currentImages;
+    const cardsText = shouldReadDraw ? formatCards(cards) : currentReading?.cards ?? '当前牌面';
+    const image = shouldReadDraw ? cards[0]?.image || '/default-card.png' : currentImages[0] || cardImage || '/default-card.png';
+    const images = shouldReadDraw ? cards.map((card) => card.image) : currentImages;
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
@@ -2144,21 +2171,22 @@ export default function Home() {
     };
     let drawingStartedAt = Date.now();
 
-    clearInputDraft('');
+    if (!options.regeneration) clearInputDraft('');
+    if (shouldDraw) setFollowUpReadingId(null);
     setIsThinking(true);
     setIsDrawingCards(false);
     setDrawingCards(shouldDraw ? cards : []);
     setComposerFocused(false);
-    setAutoScrollOnNextMessage(true);
+    setAutoScrollOnNextMessage(!options.regeneration);
     if (shouldDraw) setCardImage(image);
-    setMessages((prev) => [...prev, userMessage]);
+    if (!options.regeneration) setMessages((prev) => [...prev, userMessage]);
     if (shouldDraw) {
       await preloadImages(images);
       drawingStartedAt = Date.now();
       setIsDrawingCards(true);
     }
 
-    let answer = shouldDraw
+    let answer = shouldReadDraw
       ? fallbackAnswer(question, cards)
       : fallbackCurrentReadingAnswer(question, currentReading);
     let usedFallbackAnswer = false;
@@ -2188,7 +2216,7 @@ export default function Home() {
                 userAddressInstruction,
                 tarotContextPolicy.memoryText,
                 tarotContextPolicy.profileText,
-                shouldDraw
+                shouldReadDraw
                   ? buildPrompt(question, cards, isInternetMode)
                   : buildCurrentReadingPrompt(question, currentReading, image, isInternetMode),
               ].filter(Boolean).join('\n\n'),
@@ -2229,7 +2257,7 @@ export default function Home() {
       usedFallbackAnswer = true;
     }
     answer = cleanTarotAnswer(answer);
-    if (!usedFallbackAnswer && shouldDraw && isDailyFortune && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
+    if (!usedFallbackAnswer && shouldReadDraw && isDailyFortune && !TAROT_COMPLETE_ENDING_RE.test(answer)) {
       answer = completeTruncatedTarotAnswer(answer, true);
     }
     if (usedFallbackAnswer) answer = withFallbackNotice(answer, SERVICE_FALLBACK.tarot);
@@ -2243,7 +2271,7 @@ export default function Home() {
       await new Promise((resolve) => window.setTimeout(resolve, DRAW_ANIMATION_MIN_MS - drawingElapsed));
     }
 
-    const answerTrace = createGenerationTrace(shouldDraw ? 'tarot' : 'tarot_followup', {
+    const answerTrace = createGenerationTrace(shouldReadDraw ? 'tarot' : 'tarot_followup', {
       model: DEEPSEEK_TAROT_FAST_MODEL,
       usedFallback: usedFallbackAnswer,
     });
@@ -2253,16 +2281,22 @@ export default function Home() {
       role: 'ai' as const,
       text: answer,
       timestamp: Date.now(),
+      sourceQuestion: question,
+      replyToMessageId: options.regeneration ? options.regeneration.message.replyToMessageId : userMessage.id,
+      readingId: shouldDraw ? undefined : currentReading?.id,
       ...answerTrace,
-      ...(shouldDraw ? { cardImage: image, cardImages: images } : {}),
+      ...(shouldReadDraw ? { cardImage: image, cardImages: images } : {}),
     };
 
-    setMessages((prev) => [...prev, aiMessage]);
+    const newReadingId = shouldDraw ? crypto.randomUUID() : undefined;
+    if (newReadingId) aiMessage.readingId = newReadingId;
+    setMessages((prev) => options.regeneration
+      ? replaceTarotAnswer(prev, options.regeneration.message.id, aiMessage)
+      : [...prev, aiMessage]);
     if (shouldDraw) {
-      setTarotReadings((prev) => {
-        const nextReadings = [
+      setTarotReadings((prev) => appendTarotReading(prev,
           {
-            id: crypto.randomUUID(),
+            id: newReadingId!,
             date: new Date().toISOString(),
             question,
             cards: cardsText,
@@ -2270,14 +2304,7 @@ export default function Home() {
             cardImage: image,
             cardImages: images,
             ...answerTrace,
-          },
-          ...prev,
-        ];
-        if (!plusActive && nextReadings.length > readingLimit) {
-          window.setTimeout(() => openUpgradePrompt('history'), 450);
-        }
-        return nextReadings.slice(0, readingLimit);
-      });
+          }, readingLimit));
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
         spread: cards.length,
         plus: plusActive,
@@ -2291,6 +2318,17 @@ export default function Home() {
         }));
       }
       addExp(Math.floor(Math.random() * 8) + 8);
+    } else if (options.regeneration) {
+      if (options.regeneration.originalDraw && currentReading) {
+        setTarotReadings((prev) => prev.map((reading) => reading.id === currentReading.id
+          ? { ...reading, summary: answer.trim(), ...answerTrace }
+          : reading));
+      }
+      setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
+        kind: 'regenerate',
+        plus: plusActive,
+        energySpent: plusActive ? 0 : (accountSession?.token || consumedGuestEnergy ? 1 : 0),
+      }));
     } else {
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
         kind: 'followup',
@@ -2305,9 +2343,34 @@ export default function Home() {
     setDrawingCards([]);
   };
 
-  const handleRegenerate = () => {
-    const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-    if (lastUserMessage) handleSend(lastUserMessage.text);
+  const handleRegenerate = (messageId: string) => {
+    if (isThinking) return;
+    const source = getRegenerationSource(messages, tarotReadings, messageId);
+    if (!source) return;
+    if (source.message.model === DEEPSEEK_TAROT_DEEP_MODEL && source.reading) {
+      const originalIndex = visibleMessages.findIndex((message) => message.generationId === source.reading?.generationId);
+      const originalMessage = visibleMessages[originalIndex] || {
+        id: source.reading.id,
+        role: 'ai' as const,
+        text: source.reading.summary,
+        timestamp: Date.parse(source.reading.date),
+        cardImage: source.reading.cardImage,
+        cardImages: source.reading.cardImages,
+        generationId: source.reading.generationId,
+        sourceQuestion: source.reading.question,
+      };
+      void handleDailyDeepDive(originalMessage, originalIndex, messageId);
+      return;
+    }
+    void handleSend(source.question, { mode: 'current', regeneration: source });
+  };
+
+  const handleContinueReading = (messageId: string) => {
+    const source = getRegenerationSource(messages, tarotReadings, messageId);
+    setFollowUpReadingId(source?.reading?.id || null);
+    setShowComposerTools(false);
+    setShowPetMenu(false);
+    inputRef.current?.focus();
   };
 
   const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -3135,87 +3198,28 @@ export default function Home() {
         <div
           className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-3.5"
         >
-          <header className="hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-              <div className="h-11 w-11 shrink-0 overflow-hidden rounded-[18px] bg-[#efe0c7] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-white/[0.08]">
-                <CompanionSprite
-                  outfit={activeOutfitId}
-                  expression={activePetExpression}
-                  action={activePetAction}
-                  label="星轨塔罗少女 Q 版头像"
-                  className="p-0.5"
-                />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9a6a28] dark:text-[#f4cf83]">
-                  星轨塔罗
-                </p>
-                <h1 className="truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]">
-                  LV.{bondLevel} {LEVEL_TITLES[bondLevel - 1]}
-                </h1>
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <div className="h-1.5 w-24 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
-                    <motion.div
-                      className="h-full rounded-full bg-gradient-to-r from-[#c88a34] to-[#6f84e8]"
-                      initial={false}
-                      animate={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  <span className="text-xs font-medium text-apple-text-muted">{progressPercent}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-1.5">
-              <button
-                onClick={() => openUpgradePrompt('energy')}
-                className="flex h-9 items-center gap-1 rounded-[16px] bg-[#f1dfbc] px-3 text-[#8e5d19] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-95 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83]"
-                title={membershipLabel}
-              >
-                <Sparkles size={15} />
-                <span className="text-[13px] font-semibold">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
-              </button>
-              <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="hidden h-9 w-9 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 min-[430px]:flex dark:bg-white/[0.07] dark:text-white/55"
-                aria-label="切换白天和夜间"
-                title="切换白天和夜间"
-              >
-                {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button
-                onClick={() => setShowWardrobe(true)}
-                className="flex h-9 w-9 items-center justify-center rounded-[16px] bg-[#f6eddf] text-[#7f715f] shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-transform active:scale-95 dark:bg-white/[0.07] dark:text-white/55"
-                aria-label="打开衣柜"
-                title="衣柜"
-              >
-                <Shirt size={17} />
-              </button>
-            </div>
-          </header>
-
           <motion.section
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 180, damping: 24 }}
             className={clsx(
-              'rail-surface rail-today relative overflow-hidden',
+              'rail-surface rail-today relative flex flex-col overflow-hidden',
               visibleMessages.length > 0 ? 'rounded-[24px] p-3' : 'rounded-[34px] p-4',
             )}
           >
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.38),transparent_44%),linear-gradient(180deg,transparent,rgba(124,90,45,0.08))] dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%),linear-gradient(180deg,transparent,rgba(244,207,131,0.05))]" />
-            <div className="pointer-events-none absolute inset-x-5 top-[86px] h-px bg-gradient-to-r from-transparent via-[#a47a42]/18 to-transparent dark:via-white/10" />
             <DrawCardAnimation
               active={isDrawingCards}
               image={cardImage}
               cards={drawingCards}
               compact={visibleMessages.length > 0}
             />
-            <div className="relative z-10 flex min-w-0 items-center justify-between gap-2">
+            <div className="relative z-10 order-2 mt-4 flex min-w-0 items-center justify-between gap-2 border-t border-apple-border pt-3">
               <button
                 onClick={() => setShowDailyPanel((value) => !value)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[18px] bg-[#f3e8d8]/82 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-transform active:scale-[0.98] dark:bg-white/[0.07]"
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-xl px-2 text-left text-apple-text-muted hover:bg-apple-surface-hover"
                 title={showDailyPanel ? '收起今日任务' : '展开今日任务'}
+                aria-expanded={showDailyPanel}
               >
                 <CalendarCheck size={15} className="shrink-0 text-[#b97b28] dark:text-[#f4cf83]" />
                 <span className="truncate text-[13px] font-semibold text-[#4c3b29] dark:text-white/78">
@@ -3230,17 +3234,17 @@ export default function Home() {
                 onClick={handleDailyCheckIn}
                 disabled={hasCheckedInToday}
                 className={clsx(
-                  'h-9 shrink-0 rounded-[18px] px-3.5 text-[13px] font-semibold transition-all',
+                  'min-h-11 shrink-0 rounded-xl px-3.5 text-[13px] font-medium transition-colors',
                   hasCheckedInToday
                     ? 'bg-[#f6eddf] text-[#877967] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:bg-white/[0.07] dark:text-white/52'
-                    : 'bg-[#17130f] text-[#f4cf83] shadow-[0_14px_34px_rgba(53,34,13,0.18)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]',
+                    : 'bg-apple-surface-hover text-apple-text hover:bg-apple-border/60',
                 )}
               >
-                {hasCheckedInToday ? '已领取' : '今日可领'}
+                {hasCheckedInToday ? '已签到' : '签到领能量'}
               </button>
             </div>
 
-            <div className={clsx('relative z-10 mt-2', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[0px]')}>
+            <div className={clsx('relative z-10 order-1', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[0px]')}>
               {visibleMessages.length > 0 && (
                 <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                   <div className="relative h-14 w-12">
@@ -3284,14 +3288,14 @@ export default function Home() {
               )}
               {visibleMessages.length === 0 && (
                 <div className="rail-ritual">
-                  <p className="rail-eyebrow mt-6 text-center">给今天留一点时间</p>
+                  <p className="rail-eyebrow mt-3 text-center">今日塔罗 · 给自己一点时间</p>
                   <h2 className="font-serif text-center text-2xl font-medium leading-relaxed text-apple-text">一张牌，听听自己的心事</h2>
                   <div data-pet-stage className="rail-ritual-art">
                     <div className="rail-card-pile">
                       {cardStackImages.length > 0 ? cardStackImages.map((image, index) => (
                         <img key={image} src={image} alt="抽到的塔罗牌" className="rail-ritual-card" style={{ transform: 'rotate(' + (-8 + index * 7) + 'deg)', left: index * 14 }} />
                       )) : (
-                        <button type="button" className="rail-tarot-back" onClick={() => handleSend('今日运势')} disabled={isThinking} aria-label="从牌堆抽取今日牌">
+                        <button type="button" className="rail-tarot-back" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking} aria-label="从牌堆抽取今日牌">
                           <span className="rail-card-star"><Sparkles size={30} aria-hidden="true" /></span>
                           <span className="text-xs font-medium">RAILSTAR</span>
                           <span className="text-xs opacity-65">今日一张牌</span>
@@ -3302,12 +3306,12 @@ export default function Home() {
                   </div>
                   <p className="rail-ritual-note">{companionBubbleText}</p>
                   <div className="mt-6 flex items-center gap-3">
-                    <button type="button" className="rail-button flex-1" onClick={() => handleSend('今日运势')} disabled={isThinking}>
-                      <Sparkles size={17} aria-hidden="true" />抽一张今日牌
+                    <button type="button" className="rail-button flex-1" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking}>
+                      <Sparkles size={17} aria-hidden="true" />开始今日塔罗
                     </button>
                     <button type="button" className="rail-button-secondary" onClick={() => setShowReadingLog(true)} aria-label="打开牌迹"><BookOpen size={18} aria-hidden="true" />牌迹</button>
                   </div>
-                  <p className="mt-3 text-center text-xs text-apple-text-muted">不替你决定，只陪你把今天看清楚。</p>
+                  <p className="mt-3 text-center text-[13px] leading-6 text-apple-text-muted">抽牌 → 阅读 → 追问。牌面与解读会自动留在牌迹里。</p>
                 </div>
               )}
 
@@ -3495,13 +3499,14 @@ export default function Home() {
 
           {visibleMessages.length === 0 && !showDailyPanel && (
           <section className="order-2 space-y-2">
+            <p className="px-1 text-[13px] leading-6 text-apple-text-muted">也可以从一件具体的事开始</p>
             <div className="grid grid-cols-2 gap-2">
-              {QUICK_PROMPTS.map((item) => (
+              {QUICK_PROMPTS.filter((item) => item.prompt !== '今日运势').map((item) => (
                 <button
                   key={item.label}
                   onClick={() => handleSend(item.prompt, { mode: 'draw' })}
                   disabled={isThinking}
-                  className="flex h-8 min-w-0 items-center justify-center rounded-[16px] border border-[#eadcc8]/64 bg-[#fff8ee]/58 px-2 text-[13px] font-medium text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] transition-colors hover:text-[#241c14] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-white/52 dark:hover:text-white"
+                  className="flex min-h-11 min-w-0 items-center justify-center rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-apple-text disabled:opacity-50"
                 >
                   <span className="truncate">{item.label}</span>
                 </button>
@@ -3510,25 +3515,26 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setShowSpreadTools((value) => !value)}
-                className="flex h-8 items-center justify-center gap-1.5 rounded-[16px] bg-[#2347d9]/10 px-3 text-[13px] font-semibold text-[#3558d4] dark:bg-[#7c9cff]/12 dark:text-[#b8c7ff]"
+                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
+                aria-expanded={showSpreadTools}
               >
                 <Sparkles size={14} />
-                牌阵
+                选择牌阵
               </button>
               <button
                 onClick={() => setShowReadingLog(true)}
-                className="flex h-8 items-center justify-center gap-1.5 rounded-[16px] bg-[#d59a3a]/13 px-3 text-[13px] font-semibold text-[#9b641e] dark:text-[#f4cf83]"
+                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
               >
                 <History size={14} />
-                牌迹
+                查看牌迹
               </button>
               {showSpreadTools &&
                 SPREADS.map((spread) => (
                   <button
                     key={spread.name}
-                    onClick={() => handleSend(spread.prompt)}
+                    onClick={() => handleSend(spread.prompt, { mode: 'draw' })}
                     disabled={isThinking}
-                    className="h-8 min-w-0 truncate rounded-[16px] border border-[#eadcc8]/60 bg-[#fff8ee]/46 px-2 text-xs font-medium text-[#736554] shadow-[inset_0_1px_0_rgba(255,255,255,0.48)] disabled:opacity-50 dark:border-white/[0.06] dark:bg-white/[0.045] dark:text-white/48"
+                    className="min-h-11 min-w-0 truncate rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted disabled:opacity-50"
                   >
                     {spread.name}
                   </button>
@@ -3593,6 +3599,19 @@ export default function Home() {
             )}
           </AnimatePresence>
 
+          {historyQuotaNotice && (
+            <section role="status" className="order-2 rounded-2xl border border-apple-border bg-apple-surface p-4">
+              <p className="text-base font-medium text-apple-text">已有 {tarotReadings.length} 条牌迹，全部为你保留</p>
+              <p className="mt-2 text-[13px] leading-6 text-apple-text-muted">
+                当前可新增保存的容量为 {readingLimit} 条，已达到额度。这次没有抽取新牌，也没有消耗能量；你可以继续追问已有牌面，或先查看、导出已有记录。
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setShowReadingLog(true)} className="rail-button-secondary">查看已有牌迹</button>
+                <button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary">导出存档</button>
+              </div>
+            </section>
+          )}
+
           {visibleMessages.length > 0 && (
             <section className="rail-conversation order-2 flex flex-col gap-3 pt-1">
               <div data-pet-stage className="flex min-h-28 items-center gap-3 overflow-hidden border-b border-apple-border px-2 py-2">
@@ -3602,7 +3621,10 @@ export default function Home() {
                   <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">读完以后，也可以继续问我。</p>
                 </div>
               </div>
-              {visibleMessages.map((message, index) => (
+              {visibleMessages.map((message, index) => {
+                const source = message.role === 'ai' ? getRegenerationSource(messages, tarotReadings, message.id) : null;
+                const canRegenerate = Boolean(source && (message.model !== DEEPSEEK_TAROT_DEEP_MODEL || source.reading));
+                return (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -3620,6 +3642,11 @@ export default function Home() {
                         : 'rail-ai-bubble',
                     )}
                   >
+                    {message.role === 'ai' && (
+                      <p className="mb-3 text-[13px] font-medium leading-6 text-apple-text-muted">
+                        {message.usedFallback ? '本地参考解读 · 连接恢复后可重试' : source?.originalDraw ? '这张牌的解读' : '沿着你的问题，继续聊'}
+                      </p>
+                    )}
                     {message.role === 'ai' &&
                       (() => {
                         const messageCardImages = (
@@ -3664,22 +3691,35 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                    {message.role === 'ai' ? cleanTarotAnswer(message.text) : message.text}
+                    {message.role === 'ai' ? (
+                      <div className="rail-reader space-y-5">
+                        {cleanTarotAnswer(message.text).split(/\n\s*\n/).filter(Boolean).map((paragraph, paragraphIndex) => (
+                          <p key={paragraphIndex} className="whitespace-pre-wrap">{paragraph}</p>
+                        ))}
+                      </div>
+                    ) : message.text}
                   </div>
-                  <div className={clsx('flex items-center gap-2 px-2', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  <div className={clsx('flex flex-wrap items-center gap-1 px-1', message.role === 'user' ? 'justify-end' : 'justify-start')}>
                     {message.role === 'ai' && (
                       <>
-                      <button onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="flex size-10 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover" title="复制">
+                      <button type="button" onClick={() => handleContinueReading(message.id)} disabled={isThinking || !source} title={source ? '继续追问这条解读' : '对应牌迹已移除；已存对话仍可阅读'} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text hover:bg-apple-surface-hover disabled:opacity-40">
+                        <Send size={14} aria-hidden="true" />继续追问
+                      </button>
+                      <button type="button" onClick={() => navigate('/app/diary')} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] text-apple-text-muted hover:bg-apple-surface-hover">
+                        <BookOpen size={14} aria-hidden="true" />写下感受
+                      </button>
+                      <button type="button" onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover" title="复制" aria-label="复制这条解读">
                         <Copy size={16} />
                       </button>
-                      <button onClick={handleRegenerate} disabled={isThinking} className="flex size-10 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover disabled:opacity-30" title="重新生成">
+                      <button type="button" onClick={() => handleRegenerate(message.id)} disabled={isThinking || !canRegenerate} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover disabled:opacity-30" title={canRegenerate ? '重新生成这条解读，保留原牌面' : '对应牌迹已移除；已存对话仍可阅读'} aria-label="重新生成这条解读">
                         <RefreshCw size={16} />
                       </button>
                       </>
                     )}
                     <button
                       onClick={() => handleDeleteMessage(message.id)}
-                      className="flex size-10 items-center justify-center rounded-xl text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-[#b94a28]"
+                      disabled={isThinking}
+                      className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-[#b94a28] disabled:opacity-30"
                       title="删除这一条"
                       aria-label="删除这一条消息"
                     >
@@ -3688,7 +3728,8 @@ export default function Home() {
                   </div>
                   {renderDailyDeepCta(message, index, visibleMessages)}
                 </motion.div>
-              ))}
+              );
+              })}
               <div ref={endRef} className="h-8 shrink-0" />
             </section>
           )}
@@ -3698,6 +3739,12 @@ export default function Home() {
       {petMenu}
 
       <div className="rail-composer-position">
+        {followUpReading && (
+          <div className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 rounded-xl border border-apple-border bg-apple-surface px-3 py-2">
+            <p className="min-w-0 flex-1 truncate text-[13px] leading-6 text-apple-text-muted">正在追问：{followUpReading.question} · 保留原牌面</p>
+            <button type="button" onClick={() => setFollowUpReadingId(null)} aria-label="取消追问这条牌迹" className="flex size-11 shrink-0 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover"><X size={16} /></button>
+          </div>
+        )}
         {composerSuggestions}
         {composer}
       </div>
@@ -3772,11 +3819,25 @@ export default function Home() {
         weeklyReportText={weeklyReviewText}
         weekCount={weekReadings.length}
         plusActive={plusActive}
-        onUpgrade={() => openUpgradePrompt('weekly')}
+        readingLimit={readingLimit}
+        onUpgrade={() => {
+          setShowReadingLog(false);
+          openUpgradePrompt('weekly');
+        }}
         onShare={handleShareReadingCard}
         onContinue={(prompt) => {
           setShowReadingLog(false);
           handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
+        }}
+        onSelectReading={(readingId) => {
+          setShowReadingLog(false);
+          setFollowUpReadingId(readingId);
+          window.setTimeout(() => inputRef.current?.focus(), 80);
+        }}
+        onDeleteReading={(readingId) => {
+          setTarotReadings((readings) => removeTarotReading(readings, readingId));
+          setFollowUpReadingId((currentId) => currentId === readingId ? null : currentId);
+          setHistoryQuotaNotice(false);
         }}
       />
 
@@ -4164,9 +4225,9 @@ function UpgradePromptModal({
       cta: '继续这条线',
     },
     history: {
-      title: '旧牌迹快被新的覆盖了',
-      desc: '免费版只保留最近 30 次。Plus 会扩展到 200 次，把反复出现的问题和代表牌留下来。',
-      cta: '留下我的牌迹',
+      title: '已有牌迹会一直保留',
+      desc: '免费版可新增保存至 30 条，Plus 扩展至 200 条。达到额度后暂停新增，已有牌迹不会被覆盖；会员到期也不会删除旧记录。',
+      cta: '扩展新增牌迹额度',
     },
     weekly: {
       title: '你已经有材料做复盘了',
@@ -4181,9 +4242,9 @@ function UpgradePromptModal({
       cta: '继续这条线索',
     },
     history: {
-      title: '把你的牌迹留下来',
-      desc: '免费版适合体验，Plus 适合长期记录。它会保留更多牌迹，并把反复出现的问题整理成可复盘的线索。',
-      cta: '留下我的长期档案',
+      title: '给后续记录留出空间',
+      desc: 'Plus 增加新增牌迹的容量，并把反复出现的问题整理成复盘线索。你已经保存的记录始终可以回来查看。',
+      cta: '查看 Plus 权益',
     },
     weekly: {
       title: '你已经有材料做 7 日复盘了',
@@ -4405,9 +4466,12 @@ function ReadingLog({
   weeklyReportText,
   weekCount,
   plusActive,
+  readingLimit,
   onUpgrade,
   onShare,
   onContinue,
+  onSelectReading,
+  onDeleteReading,
 }: {
   open: boolean;
   onClose: () => void;
@@ -4420,12 +4484,53 @@ function ReadingLog({
   weeklyReportText: string;
   weekCount: number;
   plusActive: boolean;
+  readingLimit: number;
   onUpgrade: () => void;
   onShare: (reading: TarotReading) => void;
   onContinue: (prompt: string) => void;
+  onSelectReading: (readingId: string) => void;
+  onDeleteReading: (readingId: string) => void;
 }) {
   const [expandedTimelineIds, setExpandedTimelineIds] = useState<Set<string>>(() => new Set());
   const [expandedReadingIds, setExpandedReadingIds] = useState<Set<string>>(() => new Set());
+  const [visibleReadingCount, setVisibleReadingCount] = useState(20);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState('');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const pendingDeleteReading = readings.find((reading) => reading.id === pendingDeleteId);
+  useDialogFocus(dialogRef, open && !pendingDeleteId, onClose);
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (open && pendingDeleteReading && dialog && !dialog.open) {
+      dialog.showModal();
+      cancelDeleteRef.current?.focus();
+    }
+    if ((!open || !pendingDeleteReading) && dialog?.open) dialog.close();
+    if (!open || pendingDeleteId && !pendingDeleteReading) setPendingDeleteId(null);
+  }, [open, pendingDeleteId, pendingDeleteReading]);
+  useEffect(() => {
+    setVisibleReadingCount((count) => Math.min(count, Math.max(20, readings.length)));
+  }, [readings.length]);
+  const handleExport = () => {
+    try {
+      downloadAppBackup();
+      setExportStatus('已发起存档下载，请确认备份文件已保存。');
+    } catch {
+      setExportStatus('导出未完成，请再试一次。');
+    }
+  };
+  const handleConfirmDelete = () => {
+    if (!pendingDeleteReading) return;
+    onDeleteReading(pendingDeleteReading.id);
+    setExpandedReadingIds((current) => {
+      const next = new Set(current);
+      next.delete(pendingDeleteReading.id);
+      return next;
+    });
+    setPendingDeleteId(null);
+  };
   if (typeof document === 'undefined') return null;
   const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages, activeProfile, baziResult);
   const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
@@ -4448,6 +4553,7 @@ function ReadingLog({
   };
 
   return createPortal(
+    <>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -4458,6 +4564,11 @@ function ReadingLog({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reading-log-title"
+            tabIndex={-1}
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
@@ -4466,14 +4577,19 @@ function ReadingLog({
           >
             <div className="flex items-center justify-between border-b border-apple-border px-5 py-4">
               <div>
-                <div className="text-lg font-black text-apple-text">你的牌迹</div>
-                <div className="text-xs text-apple-text-muted">每次占卜都会自动保存，方便回来复看。</div>
+                <h2 id="reading-log-title" className="text-lg font-semibold text-apple-text">你的牌迹 · {readings.length} 条</h2>
+                <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">已有记录全部保留，会员到期后也能回来复看。</p>
+                <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">当前容量 {readingLimit} 条 · 可先导出，再主动移除旧牌迹。</p>
               </div>
-              <button onClick={onClose} className="rounded-full bg-apple-surface-hover p-2 text-apple-text-muted">
+              <button type="button" onClick={onClose} aria-label="关闭牌迹" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-apple-surface-hover text-apple-text-muted">
                 <X size={18} />
               </button>
             </div>
             <div className="max-h-[58vh] overflow-y-auto p-4 no-scrollbar">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={handleExport} className="rail-button-secondary"><Download size={16} aria-hidden="true" />导出存档</button>
+                {exportStatus && <p role="status" className="text-[13px] leading-6 text-apple-text-muted">{exportStatus}</p>}
+              </div>
               <div className="mb-3 overflow-hidden rounded-[28px] border border-[#F4CF83]/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -4588,7 +4704,7 @@ function ReadingLog({
                     onClick={onUpgrade}
                     className="mt-3 w-full rounded-full border border-[#F4CF83]/24 bg-apple-surface px-3 py-2 text-xs font-bold text-[#B97B28] dark:text-[#F4CF83]"
                   >
-                    解锁完整 7 日轨迹和 200 条牌迹
+                    解锁完整 7 日轨迹，扩展至 200 条新增容量
                   </button>
                 )}
               </div>
@@ -4603,9 +4719,11 @@ function ReadingLog({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {readings.slice(0, 20).map((reading) => {
+                  {readings.slice(0, visibleReadingCount).map((reading) => {
                     const displaySummary = getDisplaySummary(reading);
                     const shareHook = getReadingShareHook({ ...reading, summary: displaySummary });
+                    const expanded = expandedReadingIds.has(reading.id);
+                    const canCollapse = shouldCollapseReadingText(displaySummary, 180);
                     return (
                       <div key={reading.id} className="rounded-[26px] border border-apple-border bg-apple-surface-hover p-3">
                         <div className="flex gap-3">
@@ -4619,11 +4737,18 @@ function ReadingLog({
                               </span>
                               <span className="line-clamp-1 text-xs font-black text-apple-text">{shareHook.headline}</span>
                             </div>
-                            <div className="mt-1.5 text-sm font-bold leading-snug text-apple-text">{reading.question}</div>
+                            <h3 className="mt-1.5 text-base font-medium leading-7 text-apple-text">{reading.question}</h3>
                             <div className="mt-1 text-xs leading-snug text-[#B97B28] dark:text-[#F4CF83]">{reading.cards}</div>
-                            <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-apple-text-muted">
+                            <p className={clsx('rail-reader mt-3 text-apple-text-muted', canCollapse && !expanded && 'line-clamp-4')}>
                               {displaySummary}
                             </p>
+                            {canCollapse && (
+                              <button type="button" onClick={() => toggleReading(reading.id)} aria-expanded={expanded} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] font-medium text-apple-text hover:bg-apple-surface">
+                                {expanded ? '收起解读' : '展开完整解读'}
+                              </button>
+                            )}
+                            <button type="button" onClick={() => onSelectReading(reading.id)} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] font-medium text-apple-text hover:bg-apple-surface">追问这条牌迹</button>
+                            <button type="button" onClick={() => { setExportStatus(''); setPendingDeleteId(reading.id); }} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] text-apple-text-muted hover:bg-apple-surface"><Trash2 size={14} aria-hidden="true" className="mr-1 inline" />删除这条牌迹</button>
                             <div className="mt-2 flex items-center justify-between gap-2">
                               <div className="text-xs text-apple-text-muted">
                                 {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
@@ -4640,13 +4765,37 @@ function ReadingLog({
                       </div>
                     );
                   })}
+                  {readings.length > visibleReadingCount && (
+                    <button type="button" onClick={() => setVisibleReadingCount((count) => count + 20)} className="rail-button-secondary w-full">
+                      查看更早的牌迹 · 还有 {readings.length - visibleReadingCount} 条
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>,
+    </AnimatePresence>
+    <dialog
+      ref={deleteDialogRef}
+      onCancel={(event) => { event.preventDefault(); setPendingDeleteId(null); }}
+      onClick={(event) => { if (event.target === event.currentTarget) setPendingDeleteId(null); }}
+      aria-labelledby="delete-reading-title"
+      aria-describedby="delete-reading-description"
+      className="m-auto max-h-[calc(100dvh_-_48px)] w-[calc(100%_-_32px)] max-w-md overflow-y-auto rounded-2xl border border-apple-border bg-apple-surface p-6 text-apple-text backdrop:bg-black/55"
+    >
+      <h2 id="delete-reading-title" className="text-lg font-semibold">删除这条牌迹？</h2>
+      {pendingDeleteReading && <p className="mt-3 break-words text-base leading-7">「{pendingDeleteReading.question}」</p>}
+      <p id="delete-reading-description" className="mt-3 text-[13px] leading-6 text-apple-text-muted">只移除这条牌迹档案，已经保存的对话仍会保留。移除后减少一条已保存记录。建议先导出存档，方便以后找回。</p>
+      <button type="button" onClick={handleExport} className="rail-button-secondary mt-4 w-full"><Download size={16} aria-hidden="true" />先导出存档</button>
+      {exportStatus && <p role="status" className="mt-2 text-[13px] leading-6 text-apple-text-muted">{exportStatus}</p>}
+      <div className="mt-4 flex gap-3">
+        <button type="button" ref={cancelDeleteRef} autoFocus onClick={() => setPendingDeleteId(null)} className="rail-button-secondary flex-1">取消</button>
+        <button type="button" onClick={handleConfirmDelete} disabled={!pendingDeleteReading} className="rail-button flex-1">确认删除牌迹</button>
+      </div>
+    </dialog>
+    </>,
     document.body,
   );
 }

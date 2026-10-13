@@ -9,6 +9,7 @@ export interface MembershipState {
   activatedAt: string | null;
   source: MembershipSource | null;
   unlocks: PremiumFeature[];
+  featureExpiresAt: Partial<Record<PremiumFeature, string>>;
   dailyFortuneDeepCredits: number;
 }
 
@@ -30,6 +31,7 @@ export const defaultMembership: MembershipState = {
   activatedAt: null,
   source: null,
   unlocks: [],
+  featureExpiresAt: {},
   dailyFortuneDeepCredits: 0,
 };
 
@@ -79,6 +81,7 @@ export function normalizeMembership(value: unknown): MembershipState {
         ? input.source
         : null,
     unlocks,
+    featureExpiresAt: normalizeFeatureExpiries(input.featureExpiresAt),
     dailyFortuneDeepCredits,
   };
 }
@@ -98,11 +101,13 @@ export function canStartPlusTrial(membership: MembershipState, now = new Date())
   return !membership.trialUsed && !hasLocalPlusTrialLedger() && !isPlusActive(membership, now);
 }
 
-export function hasFeatureAccess(membership: MembershipState, feature: PremiumFeature) {
+export function hasFeatureAccess(membership: MembershipState, feature: PremiumFeature, now = new Date()) {
   if (membership.plan === 'tester') return true;
   const unlocks = normalizeUnlocks(membership.unlocks);
   if (unlocks.includes(feature)) return true;
-  return isPlusActive(membership) && PLUS_INCLUDED_FEATURES.includes(feature);
+  const featureExpiry = membership.featureExpiresAt?.[feature];
+  if (featureExpiry && Date.parse(featureExpiry) > now.getTime()) return true;
+  return isPlusActive(membership, now) && PLUS_INCLUDED_FEATURES.includes(feature);
 }
 
 export function getPlusDaysLeft(membership: MembershipState, now = new Date()) {
@@ -164,6 +169,7 @@ export function startPlusTrial(membership: MembershipState, now = new Date()): M
     activatedAt: now.toISOString(),
     source: 'trial',
     unlocks: normalizeUnlocks(membership.unlocks),
+    featureExpiresAt: normalizeFeatureExpiries(membership.featureExpiresAt),
     dailyFortuneDeepCredits: getDailyFortuneDeepCredits(membership),
   };
 }
@@ -179,6 +185,7 @@ export function activatePlusDays(membership: MembershipState, days = PLUS_MONTHL
     activatedAt: membership.activatedAt || now.toISOString(),
     source: 'payment',
     unlocks: normalizeUnlocks(membership.unlocks),
+    featureExpiresAt: normalizeFeatureExpiries(membership.featureExpiresAt),
     dailyFortuneDeepCredits: getDailyFortuneDeepCredits(membership),
   };
 }
@@ -191,6 +198,7 @@ export function activateTesterAccess(now = new Date()): MembershipState {
     activatedAt: now.toISOString(),
     source: 'tester',
     unlocks: ['bazi', 'simulator', 'guardian', 'tarot_deep_report', 'relationship_report', 'relationship_weekly'],
+    featureExpiresAt: {},
     dailyFortuneDeepCredits: 999999,
   };
 }
@@ -204,6 +212,21 @@ export function addFeatureUnlock(membership: MembershipState, feature: PremiumFe
   };
 }
 
+export function activateFeatureDays(
+  membership: MembershipState,
+  features: PremiumFeature[],
+  days = PLUS_MONTHLY_DAYS,
+  now = new Date(),
+): MembershipState {
+  const featureExpiresAt = normalizeFeatureExpiries(membership.featureExpiresAt);
+  for (const feature of normalizeUnlocks(features)) {
+    const currentExpiry = Date.parse(featureExpiresAt[feature] || '');
+    const startAt = Math.max(now.getTime(), Number.isFinite(currentExpiry) ? currentExpiry : 0);
+    featureExpiresAt[feature] = new Date(startAt + days * DAY_MS).toISOString();
+  }
+  return { ...membership, featureExpiresAt };
+}
+
 export function getMembershipLabel(membership: MembershipState) {
   if (membership.plan === 'tester') return '全部功能已解锁';
   if (!isPlusActive(membership)) return '免费版';
@@ -214,4 +237,16 @@ export function getMembershipLabel(membership: MembershipState) {
 
 function normalizeUnlocks(value: unknown): PremiumFeature[] {
   return Array.isArray(value) ? value.filter((item): item is PremiumFeature => PREMIUM_FEATURES.includes(item)) : [];
+}
+
+function normalizeFeatureExpiries(value: unknown): Partial<Record<PremiumFeature, string>> {
+  if (!value || typeof value !== 'object') return {};
+  const result: Partial<Record<PremiumFeature, string>> = {};
+  for (const feature of PREMIUM_FEATURES) {
+    const expiry = (value as Record<string, unknown>)[feature];
+    if (typeof expiry === 'string' && Number.isFinite(Date.parse(expiry))) {
+      result[feature] = new Date(expiry).toISOString();
+    }
+  }
+  return result;
 }

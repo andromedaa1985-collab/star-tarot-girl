@@ -5,6 +5,7 @@ import { AppProvider } from './store';
 import Layout from './components/Layout';
 import { FeatureGate } from './components/FeatureGate';
 import { AccountAutoSync } from './components/AccountAutoSync';
+import { AccountSessionChangeGuard } from './components/AccountSessionChangeGuard';
 import { getStoredAccountSession } from './lib/accountClient';
 import { hasSeenLandingIntro } from './lib/landingIntro';
 
@@ -52,6 +53,7 @@ function PageLoading() {
 function App() {
   return (
     <AppErrorBoundary>
+      <AccountSessionChangeGuard>
       <AppProvider>
         <MotionConfig reducedMotion="user">
           <BrowserRouter>
@@ -81,6 +83,7 @@ function App() {
           </BrowserRouter>
         </MotionConfig>
       </AppProvider>
+      </AccountSessionChangeGuard>
     </AppErrorBoundary>
   );
 }

@@ -1,8 +1,8 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, Loader2, Mail, Moon, Sparkles, Sun, UserRound } from 'lucide-react';
-import { clearAccountSession, getStoredAccountSession, loginAccount, registerAccount, type AccountSession } from '../lib/accountClient';
-import { activateAccountWorkspace, clearActiveLocalWorkspace, saveAccountWorkspace } from '../lib/accountWorkspace';
+import { beginAccountTransitionSafely, getStoredAccountSession, loginAccount, registerAccount, type AccountSession } from '../lib/accountClient';
+import { activateAccountWorkspace, logoutAccountWorkspace } from '../lib/accountWorkspace';
 import { cn } from '../lib/utils';
 import { useAppContext } from '../store';
 
@@ -31,27 +31,40 @@ export default function Auth() {
     setBusy(true);
     setNotice(null);
     const previousSession = getStoredAccountSession();
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const nextSession = mode === 'login' ? await loginAccount({ email, password }) : await registerAccount({ email, password, displayName });
       const activation = await activateAccountWorkspace(nextSession, previousSession);
-      setSession(nextSession);
+      setSession(getStoredAccountSession());
       setPassword('');
       setNotice({ type: 'success', message: getActivationMessage(mode, activation.source) });
-      window.setTimeout(() => { window.location.href = nextPath; }, 520);
+      window.location.replace(nextPath);
+      reloading = true;
     } catch (error: any) {
       setNotice({ type: 'error', message: error?.message || '账户请求失败，请稍后再试。' });
     } finally {
-      setBusy(false);
+      if (!reloading) {
+        await releaseSync?.();
+        setBusy(false);
+      }
     }
   };
 
-  const handleSwitchAccount = () => {
-    if (session) saveAccountWorkspace(session.user.id);
-    clearAccountSession();
-    clearActiveLocalWorkspace();
-    setSession(null);
-    setPassword('');
-    setNotice(null);
+  const handleSwitchAccount = async () => {
+    if (busy) return;
+    let releaseSync: (() => Promise<void>) | undefined;
+    try {
+      releaseSync = await beginAccountTransitionSafely();
+      setBusy(true);
+      await logoutAccountWorkspace();
+      window.location.replace(`/auth?next=${encodeURIComponent(nextPath)}`);
+    } catch (error: any) {
+      await releaseSync?.();
+      setBusy(false);
+      setNotice({ type: 'error', message: error?.message || '切换失败，当前账户和记录已保留。' });
+    }
   };
 
   const switchMode = (nextMode: AuthMode) => { setMode(nextMode); setNotice(null); };
@@ -82,8 +95,8 @@ export default function Auth() {
                 <p className="rail-body mt-6 text-pretty text-apple-text-muted">进入应用后，可在设置中同步或恢复云端存档，接着记录你的今天。</p>
                 {notice && <NoticeMessage notice={notice} />}
                 <div className="mt-7 grid gap-3">
-                  <button type="button" onClick={() => { window.location.href = nextPath; }} className="rail-button w-full">进入应用<ArrowRight size={18} aria-hidden="true" /></button>
-                  <button type="button" onClick={handleSwitchAccount} className="rail-button-secondary w-full">切换账户</button>
+                  <button type="button" disabled={busy} onClick={() => { window.location.href = nextPath; }} className="rail-button w-full">进入应用<ArrowRight size={18} aria-hidden="true" /></button>
+                  <button type="button" disabled={busy} onClick={handleSwitchAccount} className="rail-button-secondary w-full">切换账户</button>
                 </div>
               </div>
             ) : (

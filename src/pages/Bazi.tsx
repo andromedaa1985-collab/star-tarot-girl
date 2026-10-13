@@ -16,6 +16,10 @@ import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback'
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
+import { validateBaziProfile, type BaziProfileField } from '../lib/baziProfileValidation';
+import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
+import { getStoredAccountSession } from '../lib/accountClient';
+import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -542,6 +546,7 @@ export default function Bazi() {
   const [chatInput, setChatInput, clearChatDraft] = usePersistentDraft('draft:bazi:chat', '');
   const [isChatting, setIsChatting] = useState(false);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+  const [showFormValidation, setShowFormValidation] = useState(false);
   const [useRecentFortuneContext, setUseRecentFortuneContext] = useState(true);
   const [recentFortuneStatus, setRecentFortuneStatus] = useState<string | null>(null);
   const [matchAId, setMatchAId] = useState('');
@@ -565,6 +570,8 @@ export default function Bazi() {
     }
   });
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const workspaceOwnerRef = useRef(getStoredAccountSession()?.user.id || null);
+  const chatRequestRef = useRef(false);
   const processedInviteRef = useRef<string | null>(null);
 
   const prevActiveProfileIdRef = useRef<string | null>(activeProfileId);
@@ -577,11 +584,11 @@ export default function Bazi() {
   }, [profiles]);
 
   React.useEffect(() => {
-    localStorage.setItem('relationshipTaskDone', JSON.stringify(relationshipTaskDone));
+    void writeWorkspaceStorage(workspaceOwnerRef.current, 'relationshipTaskDone', JSON.stringify(relationshipTaskDone)).catch(() => undefined);
   }, [relationshipTaskDone]);
 
   React.useEffect(() => {
-    localStorage.setItem('relationshipWeekStartedAt', JSON.stringify(relationshipWeekStartedAt));
+    void writeWorkspaceStorage(workspaceOwnerRef.current, 'relationshipWeekStartedAt', JSON.stringify(relationshipWeekStartedAt)).catch(() => undefined);
   }, [relationshipWeekStartedAt]);
 
   React.useEffect(() => {
@@ -609,10 +616,9 @@ export default function Bazi() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || '邀请链接已失效。');
 
-        const incomingProfile = data.profile as Omit<UserProfile, 'id'>;
-        if (!incomingProfile?.name || !incomingProfile?.birthDate || !incomingProfile?.birthTime) {
-          throw new Error('邀请档案不完整，请让对方重新生成一次。');
-        }
+        const incomingValidation = validateBaziProfile(data.profile || {}, getAppDateKey(getTrustedNow()));
+        if (!incomingValidation.isValid) throw new Error(`邀请档案资料无效：${incomingValidation.message}`);
+        const incomingProfile: Omit<UserProfile, 'id'> = incomingValidation.value;
         if (cancelled) return;
 
         const existing = profiles.find(profile =>
@@ -752,28 +758,25 @@ export default function Bazi() {
     document.getElementById('bazi-profile-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const isBaziFormComplete = Boolean(
-    baziFormData.name &&
-    baziFormData.birthDate &&
-    baziFormData.birthTime &&
-    baziFormData.birthLocation &&
-    baziFormData.currentLocation,
-  );
+  const maxBirthDate = getAppDateKey(getTrustedNow());
+  const formValidation = validateBaziProfile(baziFormData, maxBirthDate);
+  const fieldError = (field: BaziProfileField) =>
+    showFormValidation || Boolean(baziFormData[field]) ? formValidation.errors[field] : undefined;
+  const updateFormField = (field: BaziProfileField | 'gender', value: string) => {
+    setBaziFormData({ ...baziFormData, [field]: value });
+    setFormNotice(null);
+  };
 
   const upsertProfileFromForm = (silent = false) => {
-    if (!isBaziFormComplete) {
-      setFormNotice("资料还没填完整。姓名、生日、时间、出生地和现居地都要有。");
+    const validation = validateBaziProfile(baziFormData, getAppDateKey(getTrustedNow()));
+    setShowFormValidation(true);
+    if (!validation.isValid) {
+      setFormNotice(validation.message);
       return null;
     }
 
-    const payload = {
-      name: baziFormData.name.trim(),
-      gender: baziFormData.gender,
-      birthDate: baziFormData.birthDate,
-      birthTime: baziFormData.birthTime,
-      birthLocation: baziFormData.birthLocation.trim(),
-      currentLocation: baziFormData.currentLocation.trim(),
-    };
+    const payload = validation.value;
+    setBaziFormData(payload);
     const currentProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) : null;
     const existingProfile = currentProfile || profiles.find(p => p.name === payload.name && p.birthDate === payload.birthDate);
 
@@ -828,8 +831,11 @@ export default function Bazi() {
   }, [baziMessages]);
 
   const handleCalculate = async () => {
-    if (!isBaziFormComplete) {
-      setFormNotice("资料还没填完整。姓名、生日、时间、出生地和现居地都要有。");
+    if (isCalculating) return;
+    const validation = validateBaziProfile(baziFormData, getAppDateKey(getTrustedNow()));
+    setShowFormValidation(true);
+    if (!validation.isValid) {
+      setFormNotice(validation.message);
       return;
     }
     if (!baziUnlocked) {
@@ -842,7 +848,7 @@ export default function Bazi() {
     }
     setFormNotice(null);
 
-    upsertProfileFromForm(true);
+    if (!upsertProfileFromForm(true)) return;
 
     setIsCalculating(true);
     setBaziResult(null);
@@ -852,8 +858,8 @@ export default function Bazi() {
     }
 
     try {
-      const [yearStr, monthStr, dayStr] = baziFormData.birthDate.split('-');
-      const [hourStr, minuteStr] = baziFormData.birthTime.split(':');
+      const [yearStr, monthStr, dayStr] = validation.value.birthDate.split('-');
+      const [hourStr, minuteStr] = validation.value.birthTime.split(':');
 
       const solar = Solar.fromYmdHms(
         parseInt(yearStr),
@@ -894,12 +900,12 @@ export default function Bazi() {
 日柱神煞：${shenshaData['日柱'].join('、') || '无'}
 时柱神煞：${shenshaData['时柱'].join('、') || '无'}`;
 
-      const prompt = `用户姓名：${baziFormData.name}
-性别：${baziFormData.gender === 'male' ? '男' : '女'}
-出生日期（公历）：${baziFormData.birthDate}
-出生时间：${baziFormData.birthTime}
-出生地：${baziFormData.birthLocation}
-现居地：${baziFormData.currentLocation}
+      const prompt = `用户姓名：${validation.value.name}
+性别：${validation.value.gender === 'male' ? '男' : '女'}
+出生日期（公历）：${validation.value.birthDate}
+出生时间：${validation.value.birthTime}
+出生地：${validation.value.birthLocation}
+现居地：${validation.value.currentLocation}
 
 【重要：我已经为你计算了该用户的八字、加权五行、加权十神和神煞。五行与十神包含天干、地支藏干、月令权重，不是简单八字等分；请务必严格基于此数据进行推演，绝不能自己瞎算！】
 精确八字与神煞：
@@ -1049,13 +1055,14 @@ ${exactBaziStr}
   };
 
   const handleSendMessage = async () => {
-    if (!chatInput.trim() || !baziResult) return;
+    if (isChatting || chatRequestRef.current || !chatInput.trim() || !baziResult) return;
     if (!baziUnlocked) {
       setFormNotice('完整八字档案需要先解锁。解锁后可以继续查看排盘，并向大师追问近期运势。');
       openBaziPayment();
       return;
     }
 
+    chatRequestRef.current = true;
     const newUserMsg = {
       id: createRecordId('bazi'),
       role: 'user' as const,
@@ -1145,6 +1152,7 @@ ${recentFortuneContext}
         }),
       }]);
     } finally {
+      chatRequestRef.current = false;
       setIsChatting(false);
     }
   };
@@ -1571,7 +1579,7 @@ ${recentFortuneContext}
             className="rail-panel w-full min-w-0 overflow-hidden"
           >
             <h2 className="rail-section-title">生辰资料</h2>
-            <p id="bazi-form-hint" className="rail-muted mt-2 mb-6">填写以下资料即可保存档案，出生日期使用公历。</p>
+            <p id="bazi-form-hint" className="rail-muted mt-2 mb-6">姓名、出生日期、时间和两处地点都需要填写。出生日期使用公历，不能晚于今天。</p>
             <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2">
               {profiles.length > 0 && (
                 <div className="md:col-span-2">
@@ -1594,6 +1602,8 @@ ${recentFortuneContext}
                     ))}
                     <button
                       onClick={() => {
+                        setShowFormValidation(false);
+                        setFormNotice(null);
                         setActiveProfileId(null);
                         setBaziResult(null);
                         setBaziMessages([]);
@@ -1616,13 +1626,14 @@ ${recentFortuneContext}
 
               <div>
                 <label htmlFor="bazi-name" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><User size={16} aria-hidden="true" />姓名/称呼</label>
-                <input id="bazi-name" required aria-describedby="bazi-form-hint"
+                <input id="bazi-name" required aria-invalid={Boolean(fieldError('name'))} aria-describedby={`bazi-form-hint${fieldError('name') ? ' bazi-name-error' : ''}`}
                   type="text"
                   value={baziFormData.name}
-                  onChange={e => setBaziFormData({...baziFormData, name: e.target.value})}
+                  onChange={e => updateFormField('name', e.target.value)}
                   placeholder="输入你的名字"
                   className="rail-field min-w-0"
                 />
+                <ProfileFieldError id="bazi-name-error" message={fieldError('name')} />
               </div>
 
               <div>
@@ -1630,7 +1641,7 @@ ${recentFortuneContext}
                 <div className="flex min-w-0 gap-3" role="group" aria-labelledby="bazi-gender-label">
                   <button
                     aria-pressed={baziFormData.gender === 'male'}
-                    onClick={() => setBaziFormData({...baziFormData, gender: 'male'})}
+                    onClick={() => updateFormField('gender', 'male')}
                     className={cn(
                       "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
                       baziFormData.gender === 'male'
@@ -1642,7 +1653,7 @@ ${recentFortuneContext}
                   </button>
                   <button
                     aria-pressed={baziFormData.gender === 'female'}
-                    onClick={() => setBaziFormData({...baziFormData, gender: 'female'})}
+                    onClick={() => updateFormField('gender', 'female')}
                     className={cn(
                       "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
                       baziFormData.gender === 'female'
@@ -1657,44 +1668,51 @@ ${recentFortuneContext}
 
               <div>
                 <label htmlFor="bazi-birthDate" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Calendar size={16} aria-hidden="true" />出生日期 (公历)</label>
-                <input id="bazi-birthDate" required aria-describedby="bazi-form-hint"
+                <input id="bazi-birthDate" required aria-invalid={Boolean(fieldError('birthDate'))} aria-describedby={`bazi-form-hint${fieldError('birthDate') ? ' bazi-birthDate-error' : ''}`}
                   type="date"
+                  max={maxBirthDate}
                   value={baziFormData.birthDate}
-                  onChange={e => setBaziFormData({...baziFormData, birthDate: e.target.value})}
+                  onChange={e => updateFormField('birthDate', e.target.value)}
+                  onBlur={e => updateFormField('birthDate', e.currentTarget.value)}
                   className="rail-field min-w-0"
                 />
+                <ProfileFieldError id="bazi-birthDate-error" message={fieldError('birthDate')} />
               </div>
 
               <div>
                 <label htmlFor="bazi-birthTime" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Clock size={16} aria-hidden="true" />出生时间</label>
-                <input id="bazi-birthTime" required aria-describedby="bazi-form-hint"
+                <input id="bazi-birthTime" required aria-invalid={Boolean(fieldError('birthTime'))} aria-describedby={`bazi-form-hint${fieldError('birthTime') ? ' bazi-birthTime-error' : ''}`}
                   type="time"
                   value={baziFormData.birthTime}
-                  onChange={e => setBaziFormData({...baziFormData, birthTime: e.target.value})}
+                  onChange={e => updateFormField('birthTime', e.target.value)}
+                  onBlur={e => updateFormField('birthTime', e.currentTarget.value)}
                   className="rail-field min-w-0"
                 />
+                <ProfileFieldError id="bazi-birthTime-error" message={fieldError('birthTime')} />
               </div>
 
               <div>
                 <label htmlFor="bazi-birthLocation" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><MapPin size={16} aria-hidden="true" />出生地</label>
-                <input id="bazi-birthLocation" required aria-describedby="bazi-form-hint"
+                <input id="bazi-birthLocation" required aria-invalid={Boolean(fieldError('birthLocation'))} aria-describedby={`bazi-form-hint${fieldError('birthLocation') ? ' bazi-birthLocation-error' : ''}`}
                   type="text"
                   value={baziFormData.birthLocation}
-                  onChange={e => setBaziFormData({...baziFormData, birthLocation: e.target.value})}
+                  onChange={e => updateFormField('birthLocation', e.target.value)}
                   placeholder="如：北京市朝阳区"
                   className="rail-field min-w-0"
                 />
+                <ProfileFieldError id="bazi-birthLocation-error" message={fieldError('birthLocation')} />
               </div>
 
               <div>
                 <label htmlFor="bazi-currentLocation" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><MapPin size={16} aria-hidden="true" />现居地</label>
-                <input id="bazi-currentLocation" required aria-describedby="bazi-form-hint"
+                <input id="bazi-currentLocation" required aria-invalid={Boolean(fieldError('currentLocation'))} aria-describedby={`bazi-form-hint${fieldError('currentLocation') ? ' bazi-currentLocation-error' : ''}`}
                   type="text"
                   value={baziFormData.currentLocation}
-                  onChange={e => setBaziFormData({...baziFormData, currentLocation: e.target.value})}
+                  onChange={e => updateFormField('currentLocation', e.target.value)}
                   placeholder="如：上海市浦东新区"
                   className="rail-field min-w-0"
                 />
+                <ProfileFieldError id="bazi-currentLocation-error" message={fieldError('currentLocation')} />
               </div>
 
               {formNotice && (
@@ -1706,7 +1724,6 @@ ${recentFortuneContext}
               <button
                 type="button"
                 onClick={handleSaveProfileOnly}
-                disabled={!isBaziFormComplete}
                 className="rail-button-secondary w-full md:col-span-2"
               >
                 <Library size={18} />
@@ -1736,7 +1753,7 @@ ${recentFortuneContext}
               ) : (
                 <button
                   onClick={handleCalculate}
-                  disabled={!isBaziFormComplete}
+                  disabled={isCalculating}
                   className="rail-button w-full md:col-span-2"
                 >
                   <Sparkles size={18} />
@@ -2080,7 +2097,11 @@ ${recentFortuneContext}
                   type="text"
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSendMessage()}
+                  onKeyDown={e => {
+                    if (!shouldSubmitOnEnter(e.nativeEvent)) return;
+                    e.preventDefault();
+                    void handleSendMessage();
+                  }}
                   placeholder="比如：我最近事业运怎么样？"
                   className="rail-field min-w-0 flex-1"
                 />
@@ -2099,6 +2120,10 @@ ${recentFortuneContext}
       </div>
     </div>
   );
+}
+
+function ProfileFieldError({ id, message }: { id: string; message?: string }) {
+  return message ? <p id={id} className="mt-2 text-[13px] leading-5 text-amber-700 dark:text-amber-300">{message}</p> : null;
 }
 
 function AnalysisCard({ icon, title, content }: { icon: React.ReactNode, title: string, content: string }) {

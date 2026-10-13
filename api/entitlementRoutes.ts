@@ -6,6 +6,7 @@ import { getPaymentOrder } from "./paymentRoutes.js";
 import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing.js";
 import {
   activatePlusDays,
+  activateFeatureDays,
   activateTesterAccess,
   addDailyFortuneDeepCredits,
   addFeatureUnlock,
@@ -26,6 +27,7 @@ type EntitlementRecord = {
   energy: number;
   grantedOrderIds: string[];
   redeemedCodeHashes: string[];
+  relationshipEntitlementsVersion?: 1;
   createdAt: string;
   updatedAt: string;
 };
@@ -185,12 +187,38 @@ export async function prepareChatEntitlementCharge(req: express.Request) {
 }
 
 async function readEntitlementRecord(userId: string) {
-  const record = await readStoreJson<EntitlementRecord>(
+  const stored = await readStoreJson<EntitlementRecord>(
     ENTITLEMENT_STORE_NAME,
     entitlementKey(userId),
     ENTITLEMENT_LOCAL_DIR,
   );
-  return normalizeEntitlementRecord(userId, record);
+  const record = normalizeEntitlementRecord(userId, stored);
+  if (record.relationshipEntitlementsVersion === 1) return record;
+
+  // Older couple purchases only granted ordinary Plus. Reconstruct their
+  // relationship expiry from verified paid orders without granting Plus or
+  // energy twice. Reads stay read-only: a slow historical lookup must not write
+  // an old snapshot over a concurrently completed payment. Normal mutations
+  // will persist these derived fields along with their own entitlement change.
+  const orders = await Promise.all(record.grantedOrderIds.map((id) => getPaymentOrder(id)));
+  const paidAtValues: string[] = [];
+  let complete = true;
+  for (const order of orders) {
+    if (!order || order.status !== 'paid' || (order.userId && order.userId !== userId)) {
+      complete = false;
+      continue;
+    }
+    if (order.planId !== 'couple_plus_monthly') continue;
+    if (!order.paidAt || !Number.isFinite(Date.parse(order.paidAt))) {
+      complete = false;
+      continue;
+    }
+    paidAtValues.push(order.paidAt);
+  }
+
+  record.membership = restoreLegacyCoupleFeatureAccess(record.membership, paidAtValues);
+  if (complete) record.relationshipEntitlementsVersion = 1;
+  return record;
 }
 
 async function saveEntitlementRecord(record: EntitlementRecord) {
@@ -206,6 +234,7 @@ function normalizeEntitlementRecord(userId: string, record: EntitlementRecord | 
     energy: normalizeEnergy(record?.energy),
     grantedOrderIds: Array.isArray(record?.grantedOrderIds) ? record.grantedOrderIds.filter(Boolean) : [],
     redeemedCodeHashes: Array.isArray(record?.redeemedCodeHashes) ? record.redeemedCodeHashes.filter(Boolean) : [],
+    relationshipEntitlementsVersion: record?.relationshipEntitlementsVersion === 1 ? 1 : undefined,
     createdAt: typeof record?.createdAt === "string" ? record.createdAt : now,
     updatedAt: typeof record?.updatedAt === "string" ? record.updatedAt : now,
   };
@@ -225,7 +254,7 @@ function getPlan(planId?: string) {
   return PAYMENT_PLANS.find((item) => item.id === planId) || PAYMENT_PLANS[0];
 }
 
-function applyPlanEntitlement(record: EntitlementRecord, plan: PaymentPlan) {
+export function applyPlanEntitlement(record: EntitlementRecord, plan: PaymentPlan, now = new Date()) {
   const entitlement = plan.entitlement as Record<string, any>;
   const energyBonus = normalizeEnergy(entitlement.energyBonus || 0);
 
@@ -252,7 +281,11 @@ function applyPlanEntitlement(record: EntitlementRecord, plan: PaymentPlan) {
   }
 
   if (entitlement.type === "membership") {
-    record.membership = activatePlusDays(record.membership, Number(entitlement.days) || undefined);
+    const days = Number(entitlement.days) || undefined;
+    record.membership = activatePlusDays(record.membership, days, now);
+    if (Array.isArray(entitlement.features)) {
+      record.membership = activateFeatureDays(record.membership, entitlement.features, days, now);
+    }
     if (entitlement.plan === "plus") {
       const floor = normalizeEnergy(entitlement.energyFloor || 0);
       record.energy = Math.max(record.energy, floor);
@@ -260,7 +293,27 @@ function applyPlanEntitlement(record: EntitlementRecord, plan: PaymentPlan) {
     return;
   }
 
-  record.membership = activatePlusDays(record.membership);
+  record.membership = activatePlusDays(record.membership, undefined, now);
+}
+
+export function restoreLegacyCoupleFeatureAccess(membership: MembershipState, paidAtValues: string[]): MembershipState {
+  const entitlement = getPlan('couple_plus_monthly').entitlement;
+  const features = Array.isArray(entitlement.features) ? entitlement.features as PremiumFeature[] : [];
+  let recovered = normalizeMembership(defaultMembership);
+  const times = paidAtValues.map(Date.parse).filter(Number.isFinite).sort((a, b) => a - b);
+  for (const timestamp of times) {
+    recovered = activateFeatureDays(recovered, features, Number(entitlement.days) || undefined, new Date(timestamp));
+  }
+
+  const featureExpiresAt = { ...membership.featureExpiresAt };
+  for (const feature of features) {
+    const recoveredExpiry = recovered.featureExpiresAt[feature];
+    const existingExpiry = featureExpiresAt[feature];
+    if (recoveredExpiry && (!existingExpiry || Date.parse(recoveredExpiry) > Date.parse(existingExpiry))) {
+      featureExpiresAt[feature] = recoveredExpiry;
+    }
+  }
+  return { ...membership, featureExpiresAt };
 }
 
 function addReportUnlock(membership: MembershipState, report: unknown) {

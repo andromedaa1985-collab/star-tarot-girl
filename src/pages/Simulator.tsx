@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   AlertTriangle,
@@ -15,6 +15,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getStoredAccountSession } from '../lib/accountClient';
+import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
 import { clsx } from 'clsx';
@@ -313,6 +315,7 @@ function buildSimulationArchive({
 }
 
 export default function Simulator() {
+  const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   const navigate = useNavigate();
   const { baziFormData, simulatorState, setSimulatorState, simulationHistory, setSimulationHistory, profiles, activeProfileId, setAppEvents, userName, preferredAddress } = useAppContext();
   const [isSimulating, setIsSimulating] = useState(false);
@@ -360,7 +363,7 @@ export default function Simulator() {
     setFormError(null);
   };
 
-  const askTarotFromSimulation = (source?: {
+  const askTarotFromSimulation = async (source?: {
     date?: string;
     dilemma: string;
     choiceA: string;
@@ -387,7 +390,7 @@ export default function Simulator() {
     ].join('\n');
 
     try {
-      localStorage.setItem('draft:home:input', JSON.stringify(prompt));
+      if (!await writeWorkspaceStorage(workspaceOwner.current, 'draft:home:input', JSON.stringify(prompt))) return;
     } catch {
       // Draft handoff is optional. Navigation still works if storage is unavailable.
     }

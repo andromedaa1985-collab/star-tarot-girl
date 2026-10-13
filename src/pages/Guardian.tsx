@@ -19,6 +19,7 @@ import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
 import { useDialogFocus } from '../lib/useDialogFocus';
+import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -56,6 +57,7 @@ export default function Guardian() {
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatRequestRef = useRef(false);
   const letterDialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(letterDialogRef, showLetter, () => setShowLetter(false));
 
@@ -194,8 +196,9 @@ export default function Guardian() {
   };
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (isTyping || chatRequestRef.current || !input.trim()) return;
 
+    chatRequestRef.current = true;
     const userText = input.trim();
     const newUserMsg = {
       id: createRecordId('guardian'),
@@ -294,6 +297,7 @@ export default function Guardian() {
         }),
       }]);
     } finally {
+      chatRequestRef.current = false;
       setIsTyping(false);
     }
   };
@@ -419,7 +423,11 @@ export default function Guardian() {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSend()}
+            onKeyDown={(e) => {
+              if (!shouldSubmitOnEnter(e.nativeEvent)) return;
+              e.preventDefault();
+              void handleSend();
+            }}
             placeholder="向守护灵倾诉..."
             className="rail-field pr-16"
           />

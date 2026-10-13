@@ -86,7 +86,7 @@ export default function Collection() {
             <p className="rail-muted mb-2">已经发现的记忆</p>
             <p className="text-3xl font-medium tabular-nums">{fragments.length}<span className="ml-2 text-base text-apple-text-muted">/ {FRAGMENTS_POOL.length}</span></p>
           </div>
-          {isComplete ? <button type="button" onClick={() => setShowGallery(true)} className="rail-button-secondary"><ImageIcon size={17} />唤醒画廊</button> : <p className="rail-muted max-w-[30ch]">在深度占卜中发现更多记忆，集齐后解锁星轨画廊。</p>}
+          {isComplete ? <button type="button" onClick={() => setShowGallery(true)} className="rail-button-secondary"><ImageIcon size={17} />唤醒画廊</button> : <p className="rail-muted max-w-[30ch]">新碎片掉落尚未开放。已有收藏继续保留，集齐后可查看星轨画廊。</p>}
         </section>
 
         <div className="space-y-8">

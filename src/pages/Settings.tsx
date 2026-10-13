@@ -3,19 +3,19 @@ import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, ChevronLeft, Cloud, Database, Download, KeyRound, Mail, RotateCcw, Trash2, Shield, Bell, HelpCircle, LogOut, Compass, Upload, UserRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clearAppStorage, createAppBackup, downloadAppBackup, getAutoRecoveryMeta, getBackupSummary, importAppBackup, parseBackupFile, restoreAutoRecoveryPoint } from '../lib/appBackup';
+import { clearAppStorage, downloadAppBackup, getAutoRecoveryMeta, getAutoRecoveryPoint, getBackupSummary, parseBackupFile } from '../lib/appBackup';
 import {
-  clearAccountSession,
+  beginAccountTransitionSafely,
   downloadCloudArchive,
   getStoredAccountSession,
   loginAccount,
+  isAccountTransitioning,
+  isCurrentAccountSession,
   refreshAccountSession,
   registerAccount,
-  storeAccountSession,
-  uploadCloudArchive,
   type AccountSession,
 } from '../lib/accountClient';
-import { activateAccountWorkspace, clearActiveLocalWorkspace, saveAccountWorkspace } from '../lib/accountWorkspace';
+import { activateAccountWorkspace, logoutAccountWorkspace, restoreActiveWorkspaceBackup, uploadAccountWorkspaceSnapshot } from '../lib/accountWorkspace';
 
 type BackupNotice = {
   type: 'success' | 'error' | 'info';
@@ -56,12 +56,17 @@ export default function Settings() {
     const session = getStoredAccountSession();
     if (!session) return;
 
+    let disposed = false;
     refreshAccountSession(session)
-      .then(setAccountSession)
+      .then((nextSession) => {
+        if (!disposed && !isAccountTransitioning() && isCurrentAccountSession(session)) setAccountSession(nextSession);
+      })
       .catch(() => {
-        clearAccountSession();
-        setAccountSession(null);
+        if (!disposed && !isAccountTransitioning() && isCurrentAccountSession(session)) {
+          setAccountNotice({ type: 'error', message: '暂时无法刷新账户状态，当前账户和本机记录已保留。请稍后重试。' });
+        }
       });
+    return () => { disposed = true; };
   }, []);
 
   const handleClearData = () => {
@@ -96,19 +101,25 @@ export default function Settings() {
     const confirmed = window.confirm('导入会合并备份里的日记、牌阵、档案和记录；同名设置会以备份为准。继续导入吗？');
     if (!confirmed) return;
 
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const backup = await parseBackupFile(file);
-      const result = importAppBackup(backup);
+      const result = await restoreActiveWorkspaceBackup(backup);
       setBackupNotice({
         type: 'success',
         message: `已导入 ${result.importedKeys} 类存档，其中 ${result.mergedKeys} 类记录已自动合并。页面即将刷新。`,
       });
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setBackupNotice({
         type: 'error',
         message: error?.message || '导入失败，请确认选择的是星轨存档文件。',
       });
+    } finally {
+      if (!reloading) await releaseSync?.();
     }
   };
 
@@ -116,54 +127,71 @@ export default function Settings() {
     const confirmed = window.confirm('恢复最近自动恢复点会合并其中的记录，并以恢复点里的设置为准。继续恢复吗？');
     if (!confirmed) return;
 
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
-      const result = await restoreAutoRecoveryPoint();
+      releaseSync = await beginAccountTransitionSafely();
+      const backup = await getAutoRecoveryPoint();
+      if (!backup) throw new Error('还没有可恢复的自动恢复点。');
+      const result = await restoreActiveWorkspaceBackup(backup);
       setBackupNotice({
         type: 'success',
         message: `已恢复最近恢复点，合并 ${result.mergedKeys} 类记录。页面即将刷新。`,
       });
       setAutoRecoveryMeta(getAutoRecoveryMeta());
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setBackupNotice({
         type: 'error',
         message: error?.message || '恢复失败，当前没有可用的自动恢复点。',
       });
+    } finally {
+      if (!reloading) await releaseSync?.();
     }
   };
 
   const handleAccountSubmit = async () => {
+    if (accountBusy) return;
     setAccountBusy(true);
     setAccountNotice(null);
     const previousSession = getStoredAccountSession();
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const session = accountMode === 'login'
         ? await loginAccount({ email: accountEmail, password: accountPassword })
         : await registerAccount({ email: accountEmail, password: accountPassword, displayName: accountDisplayName });
       await activateAccountWorkspace(session, previousSession);
-      setAccountSession(session);
+      setAccountSession(getStoredAccountSession());
       setAccountPassword('');
       setAccountNotice({
         type: 'success',
-        message: accountMode === 'login' ? '登录成功，可以同步或恢复云端存档。' : '账户已创建，可以把当前本机存档同步到云端。',
+        message: accountMode === 'login' ? '登录成功，正在载入账户存档。' : '账户已创建，正在载入账户存档。',
       });
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setAccountNotice({
         type: 'error',
         message: getAccountErrorMessage(error),
       });
     } finally {
-      setAccountBusy(false);
+      if (!reloading) {
+        await releaseSync?.();
+        setAccountBusy(false);
+      }
     }
   };
 
   const handleCloudSync = async () => {
-    if (!accountSession) return;
+    if (!accountSession || accountBusy || isAccountTransitioning()) return;
     setAccountBusy(true);
     setAccountNotice(null);
     try {
-      const nextSession = await uploadCloudArchive(accountSession, createAppBackup());
-      setAccountSession(nextSession);
+      const nextSession = await uploadAccountWorkspaceSnapshot(accountSession);
+      if (isCurrentAccountSession(accountSession) && !isAccountTransitioning()) setAccountSession(nextSession);
       setAccountNotice({
         type: 'success',
         message: `已同步到云端，共 ${nextSession.user.archiveRecordCount} 条核心记录。`,
@@ -179,15 +207,17 @@ export default function Settings() {
   };
 
   const handleCloudRestore = async () => {
-    if (!accountSession) return;
+    if (!accountSession || accountBusy) return;
     const confirmed = window.confirm('从云端恢复会合并云端记录，并以云端设置为准。继续恢复吗？');
     if (!confirmed) return;
 
     setAccountBusy(true);
     setAccountNotice(null);
+    let releaseSync: (() => Promise<void>) | undefined;
+    let reloading = false;
     try {
+      releaseSync = await beginAccountTransitionSafely();
       const data = await downloadCloudArchive(accountSession);
-      importAppBackup(data.archive);
       const nextSession = {
         ...accountSession,
         user: {
@@ -196,38 +226,42 @@ export default function Settings() {
           archiveRecordCount: data.archiveRecordCount,
         },
       };
-      storeAccountSession(nextSession);
+      await restoreActiveWorkspaceBackup(data.archive, nextSession);
       setAccountSession(nextSession);
       setAccountNotice({
         type: 'success',
         message: '云端存档已恢复，页面即将刷新。',
       });
-      window.setTimeout(() => window.location.reload(), 1200);
+      window.location.reload();
+      reloading = true;
     } catch (error: any) {
       setAccountNotice({
         type: 'error',
         message: getAccountErrorMessage(error, '恢复失败，请确认这个账户已有云端存档。'),
       });
     } finally {
-      setAccountBusy(false);
+      if (!reloading) {
+        await releaseSync?.();
+        setAccountBusy(false);
+      }
     }
   };
 
-  const handleAccountLogout = () => {
-    if (accountSession) {
-      saveAccountWorkspace(accountSession.user.id);
+  const handleAccountLogout = async () => {
+    if (accountBusy) return;
+    let releaseSync: (() => Promise<void>) | undefined;
+    try {
+      releaseSync = await beginAccountTransitionSafely();
+      setAccountBusy(true);
+      await logoutAccountWorkspace();
+      setShowLogoutConfirm(false);
+      window.location.replace(`/auth?next=${encodeURIComponent('/app')}`);
+    } catch (error: any) {
+      await releaseSync?.();
+      setAccountBusy(false);
+      setShowLogoutConfirm(false);
+      setAccountNotice({ type: 'error', message: getAccountErrorMessage(error, '退出失败，当前账户和记录已保留。') });
     }
-    clearAccountSession();
-    clearActiveLocalWorkspace();
-    setAccountSession(null);
-    setAccountPassword('');
-    setAccountNotice({
-      type: 'info',
-      message: '已退出当前账户，并为这个账户保留本机工作区。',
-    });
-    window.setTimeout(() => {
-      window.location.href = `/auth?next=${encodeURIComponent('/app')}`;
-    }, 360);
   };
 
   return (
@@ -253,7 +287,7 @@ export default function Settings() {
                 <div className="min-w-0 flex-1">
                   <div className="text-base font-semibold text-apple-text">云端账户</div>
                   <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">
-                    登录后可以把本机存档同步到云端，换设备时再恢复。当前阶段先支持邮箱和密码。
+                    登录后会自动同步本机存档，也可以手动同步或从云端恢复。切换账户时会暂停同步，并重新载入该账户的记录。
                   </p>
                 </div>
               </div>
@@ -453,12 +487,12 @@ export default function Settings() {
           </div>
           <SettingRow icon={<HelpCircle size={18} />} title="帮助中心" onClick={() => navigate('/app/settings/help')} />
           <SettingRow icon={<Compass size={18} />} title="查看应用详情页" onClick={() => navigate('/')} />
-          <SettingRow 
+          {accountSession && <SettingRow
             icon={<LogOut size={18} />} 
             title="退出登录" 
             hasBorder={false} 
             onClick={() => setShowLogoutConfirm(true)} 
-          />
+          />}
         </div>
       </motion.div>
 
@@ -500,10 +534,8 @@ export default function Settings() {
                   取消
                 </button>
                 <button 
-                  onClick={() => {
-                    setShowLogoutConfirm(false);
-                    navigate('/');
-                  }}
+                  onClick={handleAccountLogout}
+                  disabled={accountBusy}
                   className="rail-button flex-1"
                 >
                   确认退出

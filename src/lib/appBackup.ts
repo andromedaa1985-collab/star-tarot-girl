@@ -6,6 +6,8 @@ import {
   type MembershipState,
 } from './membership';
 import { normalizeGeneratedStorageValue } from './generationTrace';
+import { getStoredAccountSession, isAccountTransitioning, ownsAccountTransition } from './accountClient';
+import { tryWithAccountWorkspaceLock } from './accountTransition';
 
 const BACKUP_FORMAT = 'astro-rail-local-archive';
 const BACKUP_VERSION = 1;
@@ -114,6 +116,7 @@ export interface AutoRecoveryMeta {
   reason: string;
   recordCount: number;
   sizeBytes: number;
+  ownerId?: string | null;
 }
 
 interface ClearAppStorageOptions {
@@ -257,13 +260,17 @@ function runRecoveryStore<T>(
     const transaction = db.transaction(AUTO_RECOVERY_STORE, mode);
     const store = transaction.objectStore(AUTO_RECOVERY_STORE);
     const request = runner(store);
-
-    request.onsuccess = () => resolve(request.result);
+    let result: T;
+    request.onsuccess = () => { result = request.result; };
     request.onerror = () => reject(request.error || new Error('自动恢复点操作失败。'));
-    transaction.oncomplete = () => db.close();
+    transaction.oncomplete = () => { db.close(); resolve(result); };
     transaction.onerror = () => {
       db.close();
       reject(transaction.error || new Error('自动恢复点操作失败。'));
+    };
+    transaction.onabort = () => {
+      db.close();
+      reject(transaction.error || new Error('自动恢复点保存已中止。'));
     };
   }));
 }
@@ -271,7 +278,10 @@ function runRecoveryStore<T>(
 function readAutoRecoveryMeta(): AutoRecoveryMeta | null {
   try {
     const raw = localStorage.getItem(AUTO_RECOVERY_META_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const meta = raw ? JSON.parse(raw) : null;
+    if (meta && !('ownerId' in meta) && getStoredAccountSession()) return null;
+    if (meta && 'ownerId' in meta && meta.ownerId !== (getStoredAccountSession()?.user.id || null)) return null;
+    return meta;
   } catch {
     return null;
   }
@@ -319,28 +329,38 @@ export function getAutoRecoveryMeta() {
 }
 
 export async function saveAutoRecoveryPoint(reason = 'auto'): Promise<AutoRecoveryMeta | null> {
-  const backup = createAppBackup();
-  const recordCount = getBackupRecordCount(backup);
-
-  if (recordCount <= 0) return null;
-
-  const serialized = JSON.stringify(backup);
-  const meta: AutoRecoveryMeta = {
-    createdAt: backup.createdAt,
-    reason,
-    recordCount,
-    sizeBytes: new Blob([serialized]).size,
+  const ownerId = getStoredAccountSession()?.user.id || null;
+  const save = async () => {
+    if (isAccountTransitioning() || (getStoredAccountSession()?.user.id || null) !== ownerId) return null;
+    const backup = createAppBackup();
+    const recordCount = getBackupRecordCount(backup);
+    if (recordCount <= 0) return null;
+    const meta: AutoRecoveryMeta = {
+      createdAt: backup.createdAt, reason, recordCount,
+      sizeBytes: new Blob([JSON.stringify(backup)]).size, ownerId,
+    };
+    // The shared lock spans the asynchronous IndexedDB write and metadata.
+    await runRecoveryStore('readwrite', (store) => store.put({ backup, ownerId }, AUTO_RECOVERY_ID));
+    if (isAccountTransitioning() || (getStoredAccountSession()?.user.id || null) !== ownerId) return null;
+    localStorage.setItem(AUTO_RECOVERY_META_KEY, JSON.stringify(meta));
+    return meta;
   };
-
-  await runRecoveryStore('readwrite', (store) => store.put(backup, AUTO_RECOVERY_ID));
-  localStorage.setItem(AUTO_RECOVERY_META_KEY, JSON.stringify(meta));
-  return meta;
+  return typeof navigator !== 'undefined' && navigator.locks
+    ? await tryWithAccountWorkspaceLock('shared', save) ?? null
+    : await save();
 }
 
 export async function getAutoRecoveryPoint(): Promise<AppBackup | null> {
   try {
-    const backup = await runRecoveryStore<AppBackup | undefined>('readonly', (store) => store.get(AUTO_RECOVERY_ID));
-    return backup || null;
+    const ownerId = getStoredAccountSession()?.user.id || null;
+    if (isAccountTransitioning() && !ownsAccountTransition()) return null;
+    const point = await runRecoveryStore<AppBackup | { backup: AppBackup; ownerId: string | null } | undefined>('readonly', (store) => store.get(AUTO_RECOVERY_ID));
+    if ((getStoredAccountSession()?.user.id || null) !== ownerId) return null;
+    if (!point) return null;
+    if ('backup' in point) return point.ownerId === ownerId ? point.backup : null;
+    // Legacy points have no owner tag. Only guest points can be read without
+    // guessing which authenticated account they belong to.
+    return ownerId === null ? point : null;
   } catch {
     return null;
   }
