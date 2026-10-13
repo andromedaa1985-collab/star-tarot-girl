@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags, Pencil, Search } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, DiaryEntry, ReviewEntry } from '../store';
 import clsx from 'clsx';
 import { buildDiaryThemeTrends, recordAppEvent } from '../lib/engagement';
@@ -18,6 +18,8 @@ import PageHeader from '../components/ui/PageHeader';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { getStoredAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
+import { filterDiaryEntries, getDiarySourceSignature, isDiaryReviewCurrent, parseDiaryTags, updateDiaryEntry } from '../lib/diaryRecords';
+import { getBaziResultStatus } from '../lib/baziProfiles';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -79,14 +81,7 @@ function getEntriesInRange(entries: DiaryEntry[], startDate: string, endDate: st
   });
 }
 
-function sameIdSet(a: string[], b: string[]) {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((id, index) => id === sortedB[index]);
-}
-
-type DiaryReviewMeta = Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> & Partial<Pick<ReviewEntry, 'date' | 'entryIds'>>;
+type DiaryReviewMeta = Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> & Partial<Pick<ReviewEntry, 'date' | 'entryIds' | 'sourceSignature'>>;
 
 const DIARY_KEYWORD_HINTS = ['工作', '关系', '恋爱', '家人', '焦虑', '压力', '选择', '金钱', '学习', '失眠', '疲惫', '机会', '边界', '自我'];
 
@@ -115,6 +110,8 @@ function getReviewEntries(review: DiaryReviewMeta, entries: DiaryEntry[]) {
 }
 
 function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, entries: DiaryEntry[]) {
+  // Do not silently reconstruct an old AI archive from subsequently edited diary text.
+  entries = meta && isDiaryReviewCurrent(meta, entries) ? entries : [];
   const cleanContent = cleanReviewContent(content);
   const lines = cleanContent.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const sourceText = `${cleanContent} ${entries.map((entry) => `${entry.content} ${(entry.tags || []).join(' ')}`).join(' ')}`;
@@ -166,16 +163,30 @@ export default function Diary() {
   const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   useTrustedTime();
   const navigate = useNavigate();
-  const { diaryEntries, setDiaryEntries, baziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { diaryEntries, setDiaryEntries, baziResult: storedBaziResult, profiles, activeProfileId, reviewHistory, setReviewHistory, setAppEvents, membership, userName, preferredAddress } = useAppContext();
   const [isAdding, setIsAdding] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const reviewRequestRef = useRef(false);
+  const [reviewFailed, setReviewFailed] = useState(false);
   const [reviewResult, setReviewResult] = useState<string | null>(null);
-  const [reviewResultMeta, setReviewResultMeta] = useState<Pick<ReviewEntry, 'rangeLabel' | 'startDate' | 'endDate' | 'entryCount'> | null>(null);
+  const [reviewResultMeta, setReviewResultMeta] = useState<DiaryReviewMeta | null>(null);
   const [reviewRange, setReviewRange] = useState<ReviewRangeKey>('today');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<DiaryEntry | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editMood, setEditMood] = useState<DiaryEntry['mood']>('neutral');
+  const [editTags, setEditTags] = useState('');
+  const [query, setQuery] = useState('');
+  const [moodFilter, setMoodFilter] = useState<DiaryEntry['mood'] | 'all'>('all');
+  const [tagFilter, setTagFilter] = useState('');
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [entryNotice, setEntryNotice] = useState('');
+  const entrySaveRef = useRef(false);
   const entryDialogRef = useRef<HTMLDivElement>(null);
   const historyDialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(entryDialogRef, isAdding, () => setIsAdding(false));
+  const closeEntryDialog = () => { setIsAdding(false); setEditingEntry(null); };
+  useDialogFocus(entryDialogRef, isAdding, closeEntryDialog);
   useDialogFocus(historyDialogRef, showHistoryModal, () => setShowHistoryModal(false));
 
   // New entry state
@@ -183,7 +194,33 @@ export default function Diary() {
   const [newMood, setNewMood, clearMoodDraft] = usePersistentDraft<DiaryEntry['mood']>('draft:diary:mood', 'neutral');
   const [newTags, setNewTags, clearTagsDraft] = usePersistentDraft('draft:diary:tags', '');
 
+  const entryContent = editingEntry ? editContent : newContent;
+  const entryMood = editingEntry ? editMood : newMood;
+  const entryTags = editingEntry ? editTags : newTags;
+  const filteredEntries = filterDiaryEntries(diaryEntries, { query, mood: moodFilter, tag: tagFilter });
+  const availableTags = [...new Set<string>(diaryEntries.flatMap((entry: DiaryEntry) => entry.tags || []))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const hasFilters = Boolean(query.trim() || moodFilter !== 'all' || tagFilter);
+  const clearFilters = () => { setQuery(''); setMoodFilter('all'); setTagFilter(''); setVisibleCount(20); };
+  const openNewEntry = () => { entrySaveRef.current = false; setEditingEntry(null); setIsAdding(true); setEntryNotice(''); };
+  const openEditEntry = (entry: DiaryEntry) => {
+    entrySaveRef.current = false;
+    setEditingEntry(entry); setEditContent(entry.content); setEditMood(entry.mood); setEditTags((entry.tags || []).join(' '));
+    setIsAdding(true); setEntryNotice('');
+  };
+  useEffect(() => { setVisibleCount(20); }, [query, moodFilter, tagFilter]);
+  useEffect(() => {
+    const entryId = searchParams.get('entry');
+    if (!entryId) return;
+    const entry = diaryEntries.find(item => item.id === entryId);
+    if (entry) openEditEntry(entry);
+    else setEntryNotice('这篇日记已不存在，其他记录仍可继续查看。');
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('entry');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, diaryEntries]);
+
   const activeProfile = profiles.find(p => p.id === activeProfileId);
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const trustedNow = getTrustedNow();
   const todayPrompt = DAILY_DIARY_PROMPTS[Math.floor(parseDateKey(getAppDateKey(trustedNow)).getTime() / DAY_MS) % DAILY_DIARY_PROMPTS.length];
   const thisWeekCount = diaryEntries.filter(entry => trustedNow.getTime() - parseDateKey(entry.date).getTime() < 7 * DAY_MS).length;
@@ -228,19 +265,36 @@ export default function Diary() {
   };
 
   const handleSaveEntry = () => {
-    if (!newContent.trim()) return;
+    if (!entryContent.trim() || entrySaveRef.current) return;
+    entrySaveRef.current = true;
+
+    if (editingEntry) {
+      if (!diaryEntries.some(entry => entry.id === editingEntry.id)) {
+        setEntryNotice('这篇日记已不存在，修改没有另存为新日记。');
+        closeEntryDialog();
+        return;
+      }
+      setDiaryEntries(prev => updateDiaryEntry(prev, editingEntry.id, {
+        content: editContent, mood: editMood, tags: parseDiaryTags(editTags),
+      }, getTrustedNow().toISOString()));
+      setEntryNotice('修改已保存，原日期保持不变；新建日记草稿也已保留。');
+      closeEntryDialog();
+      return;
+    }
 
     const entry: DiaryEntry = {
       id: createRecordId('diary'),
       date: getAppDateKey(getTrustedNow()),
       mood: newMood,
       content: newContent.trim(),
-      tags: newTags.split(/[,，\s]+/).filter(t => t.trim() !== ''),
+      tags: parseDiaryTags(newTags),
     };
 
     setDiaryEntries(prev => [entry, ...prev]);
     setAppEvents((events) => recordAppEvent(events, 'diary_save', { mood: newMood, tags: entry.tags.length }));
-    setIsAdding(false);
+    closeEntryDialog();
+    clearFilters();
+    setEntryNotice('日记已保存。');
     clearContentDraft('');
     clearMoodDraft('neutral');
     clearTagsDraft('');
@@ -253,12 +307,14 @@ export default function Diary() {
   };
 
   const handleReview = async () => {
+    if (isReviewing || reviewRequestRef.current) return;
     if (isPremiumReviewRange && !plusActive) {
       openPlusForReview();
       return;
     }
 
     if (scopedDiaryEntries.length === 0) {
+      setReviewFailed(false);
       setReviewResult(`${reviewWindow.label}还没有日记可复盘。先写一篇，星轨才能看见这段时间真正发生了什么。`);
       setReviewResultMeta({
         rangeLabel: reviewWindow.label,
@@ -270,23 +326,29 @@ export default function Diary() {
     }
 
     const scopedEntryIds = scopedDiaryEntries.map((entry) => entry.id);
+    const sourceSignature = getDiarySourceSignature(scopedDiaryEntries);
     const existingReview = reviewHistory.find((review) =>
       review.startDate === reviewWindow.startDate &&
       review.endDate === reviewWindow.endDate &&
-      sameIdSet(review.entryIds || [], scopedEntryIds)
+      isDiaryReviewCurrent(review, scopedDiaryEntries)
     );
 
     if (existingReview) {
+      setReviewFailed(false);
       setReviewResult(existingReview.content);
       setReviewResultMeta({
         rangeLabel: existingReview.rangeLabel || reviewWindow.label,
         startDate: existingReview.startDate || reviewWindow.startDate,
         endDate: existingReview.endDate || reviewWindow.endDate,
         entryCount: existingReview.entryCount || scopedDiaryEntries.length,
+        entryIds: existingReview.entryIds,
+        sourceSignature: existingReview.sourceSignature,
       });
       return;
     }
 
+    reviewRequestRef.current = true;
+    setReviewFailed(false);
     setIsReviewing(true);
     setReviewResult(null);
     setReviewResultMeta({
@@ -294,6 +356,8 @@ export default function Diary() {
       startDate: reviewWindow.startDate,
       endDate: reviewWindow.endDate,
       entryCount: scopedDiaryEntries.length,
+      entryIds: scopedEntryIds,
+      sourceSignature,
     });
 
     try {
@@ -338,8 +402,9 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
           })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        aiText = data.choices[0].message.content;
+        if (!res.ok || data.error) throw new Error(data.error?.message || 'Review generation failed');
+        aiText = data.choices?.[0]?.message?.content;
+        if (typeof aiText !== 'string' || !cleanAiText(aiText)) throw new Error('Empty review response');
       } catch (err) {
         console.error("DeepSeek Error:", err);
         throw err;
@@ -358,6 +423,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         endDate: reviewWindow.endDate,
         entryCount: scopedDiaryEntries.length,
         entryIds: scopedEntryIds,
+        sourceSignature,
         ...createGenerationTrace('diary_review', {
           model: DEEPSEEK_TEXT_MODEL,
           usedFallback: false,
@@ -369,15 +435,18 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
     } catch (error: any) {
       console.error("Review Error:", error);
       setReviewResult(SERVICE_FALLBACK.diaryReview);
+      setReviewFailed(true);
     } finally {
+      reviewRequestRef.current = false;
       setIsReviewing(false);
     }
   };
 
   return (
     <div className="rail-page">
-      <PageHeader eyebrow="心情与记录" title="命运日记" description="把今天写下来，让每一次情绪与选择都有迹可循。" action={<button onClick={() => setIsAdding(true)} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
+      <PageHeader eyebrow="心情与记录" title="命运日记" description="把今天写下来，让每一次情绪与选择都有迹可循。" action={<button onClick={openNewEntry} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
       <div className="rail-page-content space-y-6">
+        {entryNotice && <p role="status" className="rounded-xl border border-apple-border bg-apple-surface p-3 text-[14px] text-apple-text-muted">{entryNotice}</p>}
         <section className="relative overflow-hidden rounded-[20px] border border-apple-gold/22 bg-apple-gold/[0.07] p-4">
 
           <div className="relative z-10 flex items-start justify-between gap-3">
@@ -389,16 +458,14 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               <p className="rail-body mt-2">{todayPrompt}</p>
             </div>
             <button
-              onClick={() => {
-                setIsAdding(true);
-              }}
+              onClick={openNewEntry}
               className="rail-button-secondary shrink-0 px-4"
             >
               去写
             </button>
           </div>
           <div className="relative z-10 mt-4 grid grid-cols-2 gap-2">
-            <DiaryStat label="本周记录" value={`${thisWeekCount} 篇`} />
+            <DiaryStat label="近 7 日记录" value={`${thisWeekCount} 篇`} />
             <DiaryStat label="最近心情" value={latestMoodLabel} />
           </div>
         </section>
@@ -522,13 +589,13 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <DiaryReviewArchiveCard
+              {reviewFailed ? <div role="status" className="rail-panel"><p className="rail-body">{reviewResult}</p><button onClick={handleReview} disabled={isReviewing} className="rail-button-secondary mt-3">重试复盘</button></div> : <DiaryReviewArchiveCard
                 content={reviewResult}
                 meta={reviewResultMeta}
-                entries={scopedDiaryEntries}
+                entries={getReviewEntries(reviewResultMeta || {}, diaryEntries)}
                 onClose={() => setReviewResult(null)}
-                onContinue={() => askTarotFromReview(reviewResult, reviewResultMeta, scopedDiaryEntries)}
-              />
+                onContinue={() => askTarotFromReview(reviewResult, reviewResultMeta, getReviewEntries(reviewResultMeta || {}, diaryEntries))}
+              />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -539,14 +606,40 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <Calendar size={18} className="text-apple-text-muted" />
             过往记录
           </h2>
+          <div className="rail-panel space-y-3">
+            <label htmlFor="diary-search" className="flex items-center gap-2 text-[15px] font-medium"><Search size={16} aria-hidden="true" />找一篇日记</label>
+            <input id="diary-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索正文、日期或标签" className="rail-field" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="diary-mood-filter" className="mb-1 block text-[13px] text-apple-text-muted">心情</label>
+                <select id="diary-mood-filter" value={moodFilter} onChange={event => setMoodFilter(event.target.value as DiaryEntry['mood'] | 'all')} className="rail-field">
+                  <option value="all">全部心情</option>
+                  {MOODS.map(mood => <option key={mood.value} value={mood.value}>{mood.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="diary-tag-filter" className="mb-1 block text-[13px] text-apple-text-muted">标签</label>
+                <select id="diary-tag-filter" value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rail-field">
+                  <option value="">全部标签</option>
+                  {availableTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-[13px] text-apple-text-muted">
+              <span role="status">找到 {filteredEntries.length} 篇 · 共 {diaryEntries.length} 篇</span>
+              {hasFilters && <button onClick={clearFilters} className="min-h-10 px-2 font-medium text-apple-accent">清空筛选</button>}
+            </div>
+          </div>
 
           {diaryEntries.length === 0 ? (
             <div className="rail-empty">
               <Book size={32} className="mx-auto text-apple-text-muted mb-3" />
               <p className="text-[15px] text-apple-text-muted">还没有记录过日记，开始写下第一篇吧</p>
             </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="rail-empty"><p className="text-[15px] text-apple-text-muted">没有符合当前条件的日记，试试其他关键词或清空筛选。</p></div>
           ) : (
-            diaryEntries.map(entry => {
+            filteredEntries.slice(0, visibleCount).map(entry => {
               const moodObj = MOODS.find(m => m.value === entry.mood) || MOODS[2];
               return (
                 <motion.div
@@ -555,21 +648,25 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   animate={{ opacity: 1, y: 0 }}
                   className="rail-panel relative group"
                 >
+                  <div className="absolute right-3 top-3 flex gap-1">
+                  <button onClick={() => openEditEntry(entry)} aria-label={`编辑 ${entry.date} 的日记`} className="flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text"><Pencil size={16} /></button>
                   <button
                     aria-label={`删除 ${entry.date} 的日记`}
                     onClick={() => handleDelete(entry.id)}
-                    className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-red-600 transition-colors"
+                    className="flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-red-600 transition-colors"
                   >
                     <X size={16} />
                   </button>
+                  </div>
 
-                  <div className="flex items-center gap-4 mb-4">
+                  <div className="flex items-center gap-3 mb-4 pr-20">
                     <div className={clsx("w-12 h-12 rounded-full flex items-center justify-center border-2", moodObj.bg, moodObj.color, moodObj.border)}>
                       {moodObj.icon}
                     </div>
                     <div>
                       <div className="text-[15px] font-medium tabular-nums text-apple-text">{entry.date}</div>
                       <div className={clsx("text-[13px] font-medium mt-0.5", moodObj.color)}>{moodObj.label}</div>
+                      {entry.updatedAt && <div className="mt-1 text-[12px] text-apple-text-muted">已编辑</div>}
                     </div>
                   </div>
 
@@ -590,6 +687,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               );
             })
           )}
+          {filteredEntries.length > visibleCount && <button className="rail-button-secondary w-full" onClick={() => setVisibleCount(count => count + 20)}>再显示 20 篇（还有 {filteredEntries.length - visibleCount} 篇）</button>}
         </div>
       </div>
 
@@ -601,7 +699,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/60"
-              onClick={() => setIsAdding(false)}
+              onClick={closeEntryDialog}
             />
             <motion.div
               initial={{ opacity: 0, y: "100%" }}
@@ -613,31 +711,32 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-[24px] border border-apple-border bg-apple-surface p-6 no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:rounded-[24px]"
             >
               <div className="flex justify-between items-center mb-6">
-                <h2 id="diary-entry-title" className="rail-section-title">写日记</h2>
-                <button aria-label="关闭写日记" onClick={() => setIsAdding(false)} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
+                <h2 id="diary-entry-title" className="rail-section-title">{editingEntry ? '编辑日记' : '写日记'}</h2>
+                <button aria-label={editingEntry ? '取消编辑日记' : '关闭写日记'} onClick={closeEntryDialog} className="p-2 rounded-full bg-apple-surface-hover text-apple-text-muted hover:bg-apple-surface-hover transition-colors">
                   <X size={20} />
                 </button>
               </div>
 
               <div className="space-y-6">
+                {editingEntry && <p className="text-[13px] leading-relaxed text-apple-text-muted">正在编辑 {editingEntry.date} 的记录。保存会更新这篇日记，原日期保持不变；取消会放弃本次修改。</p>}
                 {/* Mood Selection */}
                 <div>
-                  <p id="diary-mood-label" className="mb-3 text-[15px] font-medium text-apple-text">今天的心情如何？</p>
+                  <p id="diary-mood-label" className="mb-3 text-[15px] font-medium text-apple-text">{editingEntry ? '当时的心情如何？' : '今天的心情如何？'}</p>
                   <div className="flex justify-between gap-1" role="group" aria-labelledby="diary-mood-label">
                     {MOODS.map(mood => (
                       <button
                         key={mood.value}
-                        aria-pressed={newMood === mood.value}
-                        onClick={() => setNewMood(mood.value as any)}
+                        aria-pressed={entryMood === mood.value}
+                        onClick={() => editingEntry ? setEditMood(mood.value as DiaryEntry['mood']) : setNewMood(mood.value as DiaryEntry['mood'])}
                         className={clsx(
                           "flex min-w-0 flex-1 flex-col items-center gap-2 rounded-xl border border-transparent py-2 transition-colors",
-                          newMood === mood.value ? "border-apple-accent bg-apple-gold/10" : "hover:bg-apple-surface-hover"
+                          entryMood === mood.value ? "border-apple-accent bg-apple-gold/10" : "hover:bg-apple-surface-hover"
                         )}
                       >
                         <div className={clsx("w-10 h-10 rounded-full flex items-center justify-center border sm:w-12 sm:h-12", mood.bg, mood.color, mood.border)}>
                           {mood.icon}
                         </div>
-                        <span className={clsx("text-[13px] font-medium", newMood === mood.value ? mood.color : "text-apple-text-muted")}>
+                        <span className={clsx("text-[13px] font-medium", entryMood === mood.value ? mood.color : "text-apple-text-muted")}>
                           {mood.label}
                         </span>
                       </button>
@@ -650,8 +749,8 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   <label htmlFor="diary-content" className="mb-2 block text-[15px] font-medium text-apple-text">发生了什么事？</label>
                   <textarea id="diary-content" required
                     aria-describedby="diary-content-hint"
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
+                    value={entryContent}
+                    onChange={(e) => editingEntry ? setEditContent(e.target.value) : setNewContent(e.target.value)}
                     placeholder={todayPrompt}
                     className="rail-field h-44 resize-y"
                   />
@@ -663,8 +762,8 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   <label htmlFor="diary-tags" className="mb-2 block text-[15px] font-medium text-apple-text">添加标签 <span className="rail-muted">（空格或逗号分隔）</span></label>
                   <input id="diary-tags"
                     type="text"
-                    value={newTags}
-                    onChange={(e) => setNewTags(e.target.value)}
+                    value={entryTags}
+                    onChange={(e) => editingEntry ? setEditTags(e.target.value) : setNewTags(e.target.value)}
                     placeholder="例如：工作 恋爱 焦虑"
                     className="rail-field"
                   />
@@ -672,11 +771,12 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
                 <button
                   onClick={handleSaveEntry}
-                  disabled={!newContent.trim()}
+                  disabled={!entryContent.trim()}
                   className="rail-button w-full"
                 >
-                  保存日记
+                  {editingEntry ? '保存修改' : '保存日记'}
                 </button>
+                {editingEntry && <button onClick={closeEntryDialog} className="rail-button-secondary w-full">取消编辑</button>}
               </div>
             </motion.div>
           </div>
@@ -766,6 +866,7 @@ function DiaryReviewArchiveCard({
   onContinue?: () => void;
 }) {
   const archive = buildDiaryReviewArchive(content, meta, entries);
+  const sourceCurrent = Boolean(meta && isDiaryReviewCurrent(meta, entries));
 
   return (
     <div
@@ -810,6 +911,10 @@ function DiaryReviewArchiveCard({
             </button>
           )}
         </div>
+
+        <p className="mt-3 text-[13px] leading-relaxed text-apple-text-muted">
+          {meta?.entryCount === 0 ? '还没有来源记录，先写一篇日记。' : sourceCurrent ? '依据生成时的记录，与当前日记一致。' : meta?.sourceSignature ? '来源日记已修改或删除。这份复盘保留生成时的版本，可重新复盘查看最新记录。' : '这份复盘保留生成时的版本；旧记录未保存来源版本，请重新复盘查看最新记录。'}
+        </p>
 
         <p className="mt-4 rounded-[20px] border border-apple-border bg-apple-bg p-3 text-[15px] leading-relaxed text-apple-text">
           {archive.summary}

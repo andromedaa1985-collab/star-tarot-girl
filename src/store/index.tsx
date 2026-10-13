@@ -73,6 +73,7 @@ export interface SimulatorState {
   choiceA: string;
   choiceB: string;
   result: any | null;
+  decisionCriteria?: Array<{ id: string; label: string; weight: number; scoreA: number; scoreB: number }>;
 }
 
 export interface TarotReading {
@@ -98,6 +99,8 @@ export interface SimulationHistoryEntry {
   choiceB: string;
   advice: string;
   result: any;
+  analysisKind?: 'comparison' | 'ai';
+  decisionCriteria?: Array<{ id: string; label: string; weight: number; scoreA: number; scoreB: number }>;
   generationId?: string;
   generationKind?: GenerationKind;
   generatedAt?: string;
@@ -112,6 +115,7 @@ export interface DiaryEntry {
   content: string;
   tags: string[];
   aiReview?: string;
+  updatedAt?: string;
 }
 
 export interface ReviewEntry {
@@ -123,6 +127,7 @@ export interface ReviewEntry {
   endDate?: string;
   entryCount?: number;
   entryIds?: string[];
+  sourceSignature?: string;
   generationId?: string;
   generationKind?: GenerationKind;
   generatedAt?: string;
@@ -147,6 +152,8 @@ export interface AppSettings {
   darkMode: boolean;
   bgmEnabled: boolean;
   notificationPreferences?: { daily: boolean; energy: boolean; updates: boolean };
+  guardianLetterStatus?: { date: string; usedFallback: boolean; generatedAt: string };
+  baziEditor?: { profileId: string | null; activeProfileId: string | null };
 }
 
 interface AppState {

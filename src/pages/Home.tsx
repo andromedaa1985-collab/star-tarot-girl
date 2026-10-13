@@ -29,7 +29,12 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { clsx } from 'clsx';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { filterTarotArchive, getReadingSource, type ReadingSource } from '../lib/tarotArchiveSearch';
+import { formatRecordDate, type RecordRange } from '../lib/recordSearch';
+import { getAppDateKey, getTrustedNow } from '../lib/trustedTime';
+import { getBaziResultStatus } from '../lib/baziProfiles';
+import { getGuardianLetterState } from '../lib/guardianLetter';
 import {
   LEVEL_THRESHOLDS,
   type CompanionMessage,
@@ -1443,6 +1448,7 @@ const buildMemoryRecall = (input: {
 };
 
 export default function Home() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const {
     bondExp,
@@ -1459,7 +1465,7 @@ export default function Home() {
     preferredAddress,
     theme,
     setTheme,
-    baziResult,
+    baziResult: storedBaziResult,
     diaryEntries,
     simulationHistory,
     profiles,
@@ -1479,6 +1485,8 @@ export default function Home() {
     engagement,
     setEngagement,
     dailyLetterDate,
+    dailyLetter,
+    settings,
     guardianMessages,
     setAppEvents,
   } = useAppContext();
@@ -1510,6 +1518,18 @@ export default function Home() {
   const [petExpressionOverride, setPetExpressionOverride] = useState<CompanionExpression | null>(null);
   const [historyQuotaNotice, setHistoryQuotaNotice] = useState(false);
   const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(null);
+  const [requestedArchiveId, setRequestedArchiveId] = useState<string | null>(null);
+  const closeReadingLog = () => { setShowReadingLog(false); setRequestedArchiveId(null); };
+
+  useEffect(() => {
+    if (searchParams.get('history') !== '1' && !searchParams.get('reading')) return;
+    setRequestedArchiveId(searchParams.get('reading'));
+    setShowReadingLog(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('history');
+    next.delete('reading');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -1554,7 +1574,7 @@ export default function Home() {
   const followUpReading = tarotReadings.find((reading) => reading.id === followUpReadingId);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
-  const hasGuardianLetterToday = dailyLetterDate === new Date().toLocaleDateString('zh-CN');
+  const hasGuardianLetterToday = getGuardianLetterState(getAppDateKey(getTrustedNow()), dailyLetter, dailyLetterDate, settings.guardianLetterStatus).completed;
   const nextBestAction = getNextBestAction({
     plusActive,
     tarotReadings: tarotReadings.length,
@@ -1572,6 +1592,7 @@ export default function Home() {
     [tarotReadings, diaryEntries, simulationHistory, profiles, activeProfileId],
   );
   const activeProfile = useMemo(() => getActiveProfile(profiles, activeProfileId), [profiles, activeProfileId]);
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const visibleMemoryInsights = memoryRecall.insights.slice(0, plusActive ? 3 : 1);
   const profileTarotContextText = useMemo(
     () => buildProfileTarotContext(activeProfile, baziResult),
@@ -3809,7 +3830,8 @@ export default function Home() {
 
       <ReadingLog
         open={showReadingLog}
-        onClose={() => setShowReadingLog(false)}
+        initialReadingId={requestedArchiveId}
+        onClose={closeReadingLog}
         readings={tarotReadings}
         messages={messages}
         diaryEntries={diaryEntries}
@@ -3821,16 +3843,16 @@ export default function Home() {
         plusActive={plusActive}
         readingLimit={readingLimit}
         onUpgrade={() => {
-          setShowReadingLog(false);
+          closeReadingLog();
           openUpgradePrompt('weekly');
         }}
         onShare={handleShareReadingCard}
         onContinue={(prompt) => {
-          setShowReadingLog(false);
+          closeReadingLog();
           handleSend(prompt, { mode: tarotReadings.length > 0 ? 'current' : 'draw' });
         }}
         onSelectReading={(readingId) => {
-          setShowReadingLog(false);
+          closeReadingLog();
           setFollowUpReadingId(readingId);
           window.setTimeout(() => inputRef.current?.focus(), 80);
         }}
@@ -4456,6 +4478,7 @@ function WardrobeModal({
 
 function ReadingLog({
   open,
+  initialReadingId,
   onClose,
   readings,
   messages,
@@ -4474,6 +4497,7 @@ function ReadingLog({
   onDeleteReading,
 }: {
   open: boolean;
+  initialReadingId?: string | null;
   onClose: () => void;
   readings: TarotReading[];
   messages: Message[];
@@ -4496,7 +4520,11 @@ function ReadingLog({
   const [visibleReadingCount, setVisibleReadingCount] = useState(20);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState('');
+  const [query, setQuery] = useState('');
+  const [range, setRange] = useState<RecordRange>('all');
+  const [source, setSource] = useState<ReadingSource>('all');
   const dialogRef = useRef<HTMLDivElement>(null);
+  const readingScrollRef = useRef<HTMLDivElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
   const pendingDeleteReading = readings.find((reading) => reading.id === pendingDeleteId);
@@ -4513,6 +4541,24 @@ function ReadingLog({
   useEffect(() => {
     setVisibleReadingCount((count) => Math.min(count, Math.max(20, readings.length)));
   }, [readings.length]);
+  useEffect(() => {
+    const index = open && initialReadingId && !query.trim() && range === 'all' && source === 'all' ? readings.findIndex(reading => reading.id === initialReadingId) : -1;
+    setVisibleReadingCount(index < 0 ? 20 : Math.max(20, Math.ceil((index + 1) / 20) * 20));
+  }, [query, range, source]);
+  useEffect(() => {
+    if (!open || !initialReadingId) return;
+    const index = readings.findIndex(reading => reading.id === initialReadingId);
+    if (index < 0) return;
+    setQuery(''); setRange('all'); setSource('all');
+    setVisibleReadingCount(Math.max(20, Math.ceil((index + 1) / 20) * 20));
+    setExpandedReadingIds(current => new Set([...current, initialReadingId]));
+    const frame = window.requestAnimationFrame(() => {
+      const container = readingScrollRef.current;
+      const target = document.getElementById(`archive-reading-${initialReadingId}`);
+      if (container && target) container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - 12;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, initialReadingId]);
   const handleExport = () => {
     try {
       downloadAppBackup();
@@ -4535,6 +4581,9 @@ function ReadingLog({
   const archiveReport = buildTarotArchiveReport(readings, messages, diaryEntries, guardianMessages, activeProfile, baziResult);
   const visibleTimeline = plusActive ? archiveReport.timeline : archiveReport.timeline.slice(0, 2);
   const getDisplaySummary = (reading: TarotReading) => getFullReadingSummary(reading, messages);
+  const filteredReadings = filterTarotArchive(readings, { query, range, source, now: getTrustedNow() }, getDisplaySummary);
+  const hasFilters = Boolean(query.trim()) || range !== 'all' || source !== 'all';
+  const clearFilters = () => { setQuery(''); setRange('all'); setSource('all'); };
   const toggleTimeline = (id: string) => {
     setExpandedTimelineIds((current) => {
       const next = new Set(current);
@@ -4572,10 +4621,10 @@ function ReadingLog({
             initial={{ y: 28, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 28, opacity: 0 }}
-            className="mx-auto max-h-[74vh] w-full max-w-[760px] overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
+            className="mx-auto flex max-h-[calc(100dvh_-_32px)] w-full max-w-[760px] flex-col overflow-hidden rounded-[34px] border border-apple-border bg-apple-surface shadow-[0_22px_70px_rgba(0,0,0,0.34)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-apple-border px-5 py-4">
+            <div className="flex shrink-0 items-center justify-between border-b border-apple-border px-5 py-4">
               <div>
                 <h2 id="reading-log-title" className="text-lg font-semibold text-apple-text">你的牌迹 · {readings.length} 条</h2>
                 <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">已有记录全部保留，会员到期后也能回来复看。</p>
@@ -4585,12 +4634,24 @@ function ReadingLog({
                 <X size={18} />
               </button>
             </div>
-            <div className="max-h-[58vh] overflow-y-auto p-4 no-scrollbar">
+            <div ref={readingScrollRef} className="min-h-0 flex-1 overflow-y-auto p-4 no-scrollbar">
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={handleExport} className="rail-button-secondary"><Download size={16} aria-hidden="true" />导出存档</button>
                 {exportStatus && <p role="status" className="text-[13px] leading-6 text-apple-text-muted">{exportStatus}</p>}
               </div>
-              <div className="mb-3 overflow-hidden rounded-[28px] border border-[#F4CF83]/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
+              <div className="mb-4 space-y-3">
+                <label className="block text-sm font-medium" htmlFor="reading-search">搜索牌迹</label>
+                <input id="reading-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="问题、牌名或解读中的一句话" className="rail-field w-full" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label htmlFor="reading-range" className="block text-sm">时间范围</label><select id="reading-range" value={range} onChange={event => setRange(event.target.value as RecordRange)} className="rail-field mt-1 w-full"><option value="all">全部时间</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></div>
+                  <div><label htmlFor="reading-source" className="block text-sm">解读来源</label><select id="reading-source" value={source} onChange={event => setSource(event.target.value as ReadingSource)} className="rail-field mt-1 w-full"><option value="all">全部来源</option><option value="ai">AI 解读</option><option value="fallback">本地参考</option><option value="unknown">来源未标注</option></select></div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" className="rail-muted">找到 {filteredReadings.length} 条 · 共 {readings.length} 条牌迹</p>{hasFilters && <button type="button" onClick={clearFilters} className="min-h-11 rounded-xl px-3 text-sm text-apple-text hover:bg-apple-surface-hover">清空筛选</button>}</div>
+                {initialReadingId && !readings.some(reading => reading.id === initialReadingId) && <p role="status" className="rail-muted">这条牌迹已移除，你可以继续查找其他记录。</p>}
+              </div>
+              <details className="mb-4 rounded-2xl border border-apple-border bg-apple-surface p-4">
+                <summary className="cursor-pointer py-1 text-base font-medium">查看 7 日轨迹报告 · {weekCount} 次牌迹</summary>
+                <div className="pt-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-bold uppercase tracking-[0.18em] text-[#B97B28] dark:text-[#F4CF83]">
@@ -4707,7 +4768,8 @@ function ReadingLog({
                     解锁完整 7 日轨迹，扩展至 200 条新增容量
                   </button>
                 )}
-              </div>
+                </div>
+              </details>
 
               {readings.length === 0 ? (
                 <div className="rounded-[26px] border border-dashed border-apple-border p-8 text-center">
@@ -4717,15 +4779,17 @@ function ReadingLog({
                     抽一张今日牌，星轨会帮你把问题、牌面和解读都留住。
                   </p>
                 </div>
+              ) : filteredReadings.length === 0 ? (
+                <div className="rail-empty"><p className="text-base font-medium">没有匹配的牌迹</p><p className="rail-muted mt-2">试试更短的关键词，或查看全部时间与来源。</p><button type="button" onClick={clearFilters} className="rail-button-secondary mt-4">查看全部牌迹</button></div>
               ) : (
                 <div className="space-y-3">
-                  {readings.slice(0, visibleReadingCount).map((reading) => {
+                  {filteredReadings.slice(0, visibleReadingCount).map((reading) => {
                     const displaySummary = getDisplaySummary(reading);
                     const shareHook = getReadingShareHook({ ...reading, summary: displaySummary });
                     const expanded = expandedReadingIds.has(reading.id);
                     const canCollapse = shouldCollapseReadingText(displaySummary, 180);
                     return (
-                      <div key={reading.id} className="rounded-[26px] border border-apple-border bg-apple-surface-hover p-3">
+                      <div key={reading.id} id={`archive-reading-${reading.id}`} className={clsx('rounded-2xl border bg-apple-surface-hover p-3', initialReadingId === reading.id ? 'border-apple-gold' : 'border-apple-border')}>
                         <div className="flex gap-3">
                           {reading.cardImage && (
                             <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
@@ -4751,7 +4815,7 @@ function ReadingLog({
                             <button type="button" onClick={() => { setExportStatus(''); setPendingDeleteId(reading.id); }} className="mt-2 min-h-11 rounded-xl px-2 text-[13px] text-apple-text-muted hover:bg-apple-surface"><Trash2 size={14} aria-hidden="true" className="mr-1 inline" />删除这条牌迹</button>
                             <div className="mt-2 flex items-center justify-between gap-2">
                               <div className="text-xs text-apple-text-muted">
-                                {new Date(reading.date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                                {formatRecordDate(reading.date)} · {getReadingSource(reading) === 'fallback' ? '本地参考' : getReadingSource(reading) === 'ai' ? 'AI 解读' : '来源未标注'}
                               </div>
                               <button
                                 onClick={() => onShare({ ...reading, summary: displaySummary })}
@@ -4765,9 +4829,9 @@ function ReadingLog({
                       </div>
                     );
                   })}
-                  {readings.length > visibleReadingCount && (
+                  {filteredReadings.length > visibleReadingCount && (
                     <button type="button" onClick={() => setVisibleReadingCount((count) => count + 20)} className="rail-button-secondary w-full">
-                      查看更早的牌迹 · 还有 {readings.length - visibleReadingCount} 条
+                      查看更多牌迹 · 还有 {filteredReadings.length - visibleReadingCount} 条
                     </button>
                   )}
                 </div>

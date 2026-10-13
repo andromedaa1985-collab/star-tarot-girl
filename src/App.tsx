@@ -64,7 +64,7 @@ function App() {
               <Route path="/app" element={<AppShell />}>
                 <Route index element={<Home />} />
                 <Route path="bazi" element={<Bazi />} />
-                <Route path="simulator" element={<FeatureGate feature="simulator"><Simulator /></FeatureGate>} />
+                <Route path="simulator" element={<Simulator />} />
                 <Route path="diary" element={<Diary />} />
                 <Route path="guardian" element={<FeatureGate feature="guardian"><Guardian /></FeatureGate>} />
                 <Route path="collection" element={<Collection />} />

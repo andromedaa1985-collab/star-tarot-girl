@@ -109,7 +109,10 @@ export function normalizeGeneratedStorageValue(key: string, value: unknown) {
     case 'reviewHistory':
       return normalizeArray(value, 'diary_review');
     case 'simulationHistory':
-      return normalizeArray(value, 'simulator');
+      return Array.isArray(value) ? value.map(item => {
+        if (!isRecord(item) || item.analysisKind === 'comparison') return item;
+        return ensureGenerationTrace(item, 'simulator');
+      }) : value;
     case 'messages':
       return normalizeArray(value, 'tarot_followup', true);
     case 'guardianMessages':

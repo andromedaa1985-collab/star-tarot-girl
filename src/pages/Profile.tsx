@@ -16,6 +16,9 @@ import { getUserSegment } from '../lib/engagement';
 import { normalizeUserAddress } from '../lib/aiPrompting';
 import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
 import { getPlanPeriodLabel, getPlanTerms, getProfilePurchaseAuthPath } from '../lib/purchaseFlow';
+import { getBackupSummary, type BackupSummary } from '../lib/appBackup';
+import { formatArchiveTime, getRecentProfileRecords } from '../lib/profileRecords';
+import { formatRecordDate } from '../lib/recordSearch';
 import { apiFetch } from '../lib/apiClient';
 import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
 import {
@@ -48,7 +51,7 @@ const PLAN_REDIRECTS: Record<string, string> = {
 };
 
 export default function Profile() {
-  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
+  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, setBaziFormData, setBaziMessages, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -71,11 +74,27 @@ export default function Profile() {
   const [editPreferredAddress, setEditPreferredAddress] = useState(preferredAddress);
   const [editAvatar, setEditAvatar] = useState(userAvatar);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backupSummary, setBackupSummary] = useState<BackupSummary | null>(() => {
+    try { return getBackupSummary(); } catch { return null; }
+  });
+  const [archiveNotice, setArchiveNotice] = useState('');
+  const session = getStoredAccountSession();
+  const recentRecords = getRecentProfileRecords(tarotReadings, diaryEntries, simulationHistory);
+
+  const refreshArchiveStatus = () => {
+    try { setBackupSummary(getBackupSummary()); setArchiveNotice('已刷新本机存档状态。云端时间来自上次服务端确认。'); }
+    catch { setBackupSummary(null); setArchiveNotice('暂时无法读取本机存档状态，请到设置检查或导出记录。'); }
+  };
+  useEffect(() => {
+    const refresh = () => { try { setBackupSummary(getBackupSummary()); } catch { setBackupSummary(null); } };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', refresh);
+    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', refresh); };
+  }, []);
   
   const nextLevelExp = LEVEL_THRESHOLDS[bondLevel] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
   const progressPercent = Math.min(100, (bondExp / nextLevelExp) * 100);
   const userQuestionCount = messages.filter(msg => msg.role === 'user').length;
-  const valueScore = Math.min(100, bondLevel * 10 + fragments.length * 5 + diaryEntries.length * 6 + tarotReadings.length * 3 + simulationHistory.length * 4 + checkInStreak * 4);
   const lastCheckInLabel = lastCheckInDate ? lastCheckInDate.replace(/-/g, '.') : '还没开始';
   const plusActive = isPlusActive(membership);
   const testerActive = isTesterActive(membership);
@@ -322,6 +341,36 @@ export default function Profile() {
         <button type="button" onClick={() => { setEditName(userName); setEditPreferredAddress(preferredAddress); setEditAvatar(userAvatar); setIsEditing(true); }} className="rail-button-secondary w-full sm:w-auto"><Edit2 size={16} />编辑资料</button>
       </section>
 
+      <section className="mb-8" aria-labelledby="my-records-heading">
+        <h2 id="my-records-heading" className="rail-section-title mb-4">我的记录</h2>
+        <div className="rail-surface divide-y divide-apple-border overflow-hidden">
+          {[{ label: '牌迹', count: tarotReadings.length, description: '查找问题与牌面，沿原解读追问', href: '/app?history=1' }, { label: '日记', count: diaryEntries.length, description: '查找、编辑与回看心情', href: '/app/diary' }, { label: '沙盘', count: simulationHistory.length, description: '回看选择与比较标准', href: '/app/simulator' }].map(item => (
+            <button key={item.label} type="button" onClick={() => navigate(item.href)} className="flex min-h-20 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-apple-surface-hover">
+              <span className="min-w-0"><span className="block text-base font-medium">{item.label} · {item.count} 条</span><span className="rail-muted mt-1 block">{item.description}</span></span><ChevronRight size={18} aria-hidden="true" className="shrink-0 text-apple-text-muted" />
+            </button>
+          ))}
+        </div>
+        <h3 className="mt-6 mb-3 text-base font-medium">最近留下的记录</h3>
+        {recentRecords.length ? (
+          <ol className="divide-y divide-apple-border">
+            {recentRecords.map(record => <li key={`${record.kind}:${record.id}`}><button type="button" onClick={() => navigate(record.href)} className="flex w-full items-start justify-between gap-3 rounded-xl px-2 py-4 text-left hover:bg-apple-surface-hover"><span className="min-w-0"><span className="rail-muted block">{record.label} · {formatRecordDate(record.date)}</span><span className="mt-1 block line-clamp-2 break-words text-base leading-7">{record.title}</span></span><ChevronRight size={17} aria-hidden="true" className="mt-1 shrink-0 text-apple-text-muted" /></button></li>)}
+          </ol>
+        ) : <div className="rail-empty"><p>还没有留下记录</p><p className="rail-muted mt-2">先抽一张今日牌，或写下一句今天的心情。</p><div className="mt-4 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => navigate('/app')} className="rail-button-secondary">开始今日塔罗</button><button type="button" onClick={() => navigate('/app/diary')} className="rail-button-secondary">写一句心情</button></div></div>}
+      </section>
+
+      <section className="rail-panel mb-8" aria-labelledby="archive-status-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="archive-status-heading" className="rail-section-title">账户与存档</h2><button type="button" onClick={refreshArchiveStatus} className="min-h-11 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">刷新状态</button></div>
+        <dl className="mt-4 space-y-3 text-sm leading-6">
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">当前账户</dt><dd className="min-w-0 break-all">{session?.user.email || '本机游客'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">服务端存档时间</dt><dd>{session ? formatArchiveTime(session.user.archiveUpdatedAt, '尚未确认云端存档') : '登录后可同步'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">最近自动恢复点</dt><dd>{backupSummary ? formatArchiveTime(backupSummary.lastAutoRecoveryAt, '尚未生成') : '读取状态失败'}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">此浏览器最近手动存档操作</dt><dd>{backupSummary ? formatArchiveTime(backupSummary.lastBackupAt, '尚未操作') : '读取状态失败'}</dd></div>
+        </dl>
+        <p className="rail-muted mt-4">云端时间是上次确认的存档时间，不代表当前输入已同步。手动存档操作包括导出或恢复，操作时间不能证明备份文件已经保存。</p>
+        {archiveNotice && <p role="status" className="rail-muted mt-2">{archiveNotice}</p>}
+        <button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary mt-4 w-full sm:w-auto">{session ? '备份与云端同步' : '登录或导出存档'}<ChevronRight size={16} aria-hidden="true" /></button>
+      </section>
+
       {/* Edit Profile Modal */}
       <ProfileDialog open={isEditing} title="编辑个人资料" onClose={() => setIsEditing(false)}>
           <div className="relative p-6">
@@ -547,11 +596,9 @@ export default function Profile() {
             <GrowthMetric icon={<CalendarCheck size={16} />} label="连续陪伴" value={`${checkInStreak} 天`} />
             <GrowthMetric icon={<Sparkles size={16} />} label="提问记录" value={`${userQuestionCount} 次`} />
             <GrowthMetric icon={<Gift size={16} />} label="牌迹沉淀" value={`${tarotReadings.length} 次`} />
-            <GrowthMetric icon={<ShieldCheck size={16} />} label="沙盘推演" value={`${simulationHistory.length} 次`} />
+            <GrowthMetric icon={<ShieldCheck size={16} />} label="沙盘记录" value={`${simulationHistory.length} 条`} />
           </div>
           <div className="mt-6 border-t border-apple-border pt-4">
-            <div className="rail-muted mb-2 flex items-center justify-between gap-3"><span>成长解锁度</span><span className="tabular-nums">{valueScore} / 100</span></div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-apple-surface-hover" role="progressbar" aria-label="成长解锁度" aria-valuenow={valueScore} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-apple-gold rounded-full" style={{ width: `${valueScore}%` }} /></div>
             <p className="rail-muted mt-3">已陪伴 {engagement.activeDays} 天 · 已沉淀 {memorySeedCount} 份线索 · 上次签到 {lastCheckInLabel}</p>
           </div>
         </div>
@@ -560,19 +607,27 @@ export default function Profile() {
       <section className="mb-8" aria-labelledby="archive-heading">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 id="archive-heading" className="rail-section-title">命理档案</h2>
-          <button type="button" onClick={() => navigate('/app/bazi')} className="rail-button-secondary">+ 新建档案</button>
+          <button type="button" onClick={() => navigate('/app/bazi?new=1')} className="rail-button-secondary">+ 新建档案</button>
         </div>
         {profiles.length === 0 ? (
-          <div className="rail-empty"><Compass size={28} className="mx-auto mb-3 text-apple-gold" /><p>还没有添加任何命理档案</p><button type="button" onClick={() => navigate('/app/bazi')} className="rail-button-secondary mt-5">添加第一份档案</button></div>
+          <div className="rail-empty"><Compass size={28} className="mx-auto mb-3 text-apple-gold" /><p>还没有添加任何命理档案</p><button type="button" onClick={() => navigate('/app/bazi?new=1')} className="rail-button-secondary mt-5">添加第一份档案</button></div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {profiles.map((profile) => (
               <div key={profile.id} className={cn('rail-surface p-5 relative', activeProfileId === profile.id && '!border-apple-gold')}>
-                <button type="button" onClick={() => setActiveProfileId(profile.id)} aria-pressed={activeProfileId === profile.id} className="w-full text-left">
+                <button type="button" onClick={() => {
+                  if (activeProfileId === profile.id) return;
+                  const { id: _id, ...input } = profile;
+                  setBaziFormData(input);
+                  setBaziMessages([]);
+                  setActiveProfileId(profile.id);
+                }} aria-pressed={activeProfileId === profile.id} className="w-full text-left">
                   <span className="mb-4 flex items-center justify-between gap-3"><span className="flex size-10 items-center justify-center rounded-full bg-apple-surface-hover text-xl">{profile.gender === 'male' ? '👨' : '👩'}</span>{activeProfileId === profile.id && <span className="rail-muted !text-apple-gold">当前档案</span>}</span>
                   <span className="block text-base font-medium truncate">{profile.name}</span>
-                  <span className="rail-muted mt-1 block tabular-nums">{profile.birthDate}</span>
+                  <span className="rail-muted mt-1 block tabular-nums">{profile.birthDate} · {profile.birthTime}</span>
+                  <span className="rail-muted mt-1 block break-words">出生：{profile.birthLocation} · 现居：{profile.currentLocation}</span>
                 </button>
+                <button type="button" onClick={() => navigate(`/app/bazi?profile=${encodeURIComponent(profile.id)}`)} className="mt-3 min-h-11 rounded-xl px-2 text-sm text-apple-text-muted hover:bg-apple-surface-hover">编辑这份档案</button>
                 <button type="button" aria-label={`删除 ${profile.name} 的档案`} onClick={() => { if (window.confirm(`确定要删除 ${profile.name} 的档案吗？`)) { setProfiles(prev => prev.filter(p => p.id !== profile.id)); if (activeProfileId === profile.id) setActiveProfileId(null); } }} className="absolute right-3 bottom-3 flex size-9 items-center justify-center rounded-lg text-apple-text-muted hover:bg-red-500/10 hover:text-red-600"><X size={15} /></button>
               </div>
             ))}

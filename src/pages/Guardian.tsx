@@ -20,8 +20,16 @@ import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
+import { getAppDateKey, getTrustedNow, getTrustedTimestamp, useTrustedTime } from '../lib/trustedTime';
+import { appendGuardianStarter, getGuardianLetterState, shouldRewardGuardianLetter } from '../lib/guardianLetter';
+import { getBaziResultStatus } from '../lib/baziProfiles';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const GUARDIAN_STARTERS = [
+  { label: '整理烦心事', text: '我现在最烦心的是：' },
+  { label: '找一个小行动', text: '今天我想先照顾自己一件小事：' },
+  { label: '记住好瞬间', text: '今天有一个让我觉得还不错的瞬间：' },
+];
 
 const getTime = (value?: string | number) => {
   const time = value ? new Date(value).getTime() : NaN;
@@ -42,44 +50,67 @@ const moodLabels: Record<string, string> = {
 };
 
 export default function Guardian() {
+  useTrustedTime();
   const {
     userName, preferredAddress, bondLevel, setBondExp,
-    diaryEntries, baziResult,
+    diaryEntries, baziResult: storedBaziResult,
     tarotReadings, simulationHistory, profiles, activeProfileId,
     guardianMessages, setGuardianMessages,
     dailyLetter, setDailyLetter,
     dailyLetterDate, setDailyLetterDate,
-    setAppEvents
+    setAppEvents, settings, setSettings
   } = useAppContext();
 
   const [input, setInput, clearInputDraft] = usePersistentDraft('draft:guardian:input', '');
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
+  const [, setDateKey] = useState(() => getAppDateKey(getTrustedNow()));
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatRequestRef = useRef(false);
+  const letterRequestRef = useRef(false);
+  const letterAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const letterDialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(letterDialogRef, showLetter, () => setShowLetter(false));
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; letterAbortRef.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    const updateDate = () => setDateKey(getAppDateKey(getTrustedNow()));
+    const interval = setInterval(updateDate, 60_000);
+    window.addEventListener('focus', updateDate);
+    document.addEventListener('visibilitychange', updateDate);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', updateDate);
+      document.removeEventListener('visibilitychange', updateDate);
+    };
+  }, []);
 
-  const todayStr = new Date().toLocaleDateString('zh-CN');
-  const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
+  const todayStr = getAppDateKey(getTrustedNow());
+  const letterState = getGuardianLetterState(todayStr, dailyLetter, dailyLetterDate, settings.guardianLetterStatus);
+  const hasLetterToday = letterState.completed;
   const bondTitle = LEVEL_TITLES[bondLevel - 1] || LEVEL_TITLES[0];
   const userAddress = normalizeUserAddress(preferredAddress) || normalizeUserAddress(userName) || '你';
   const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+  const baziResult = getBaziResultStatus(storedBaziResult, activeProfile) === 'current' ? storedBaziResult : null;
   const recentReadings = [...tarotReadings]
-    .filter((reading) => Date.now() - getTime(reading.date) <= MEMORY_WINDOW_MS)
+    .filter((reading) => getTrustedTimestamp() - getTime(reading.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date));
   const recentDiaries = [...diaryEntries]
-    .filter((entry) => Date.now() - getTime(entry.date) <= MEMORY_WINDOW_MS)
+    .filter((entry) => getTrustedTimestamp() - getTime(entry.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date));
   const recentSimulation = [...simulationHistory]
-    .filter((item) => Date.now() - getTime(item.date) <= MEMORY_WINDOW_MS)
+    .filter((item) => getTrustedTimestamp() - getTime(item.date) <= MEMORY_WINDOW_MS)
     .sort((a, b) => getTime(b.date) - getTime(a.date))[0];
   const recentGuardianReplies = [...guardianMessages]
     .filter((message) => (
       message.role === 'ai' &&
-      Date.now() - message.timestamp <= MEMORY_WINDOW_MS &&
+      getTrustedTimestamp() - message.timestamp <= MEMORY_WINDOW_MS &&
       !message.text.includes('我是你的星轨守护灵')
     ))
     .sort((a, b) => b.timestamp - a.timestamp);
@@ -101,7 +132,7 @@ export default function Guardian() {
   // Initial greeting if empty
   useEffect(() => {
     if (guardianMessages.length === 0) {
-      const greeting = `你好，${userAddress}。我是你的星轨守护灵。我能看见你的命理星盘，也能感知你的情绪起伏。无论发生什么，我都在这里。`;
+      const greeting = `你好，${userAddress}。我是你的星轨守护灵，会参考你留下的日记、牌迹和档案，陪你把近况慢慢说清楚。也可以先从今天的一件小事开始。`;
       setGuardianMessages([{
         id: createRecordId('guardian'),
         role: 'ai',
@@ -116,6 +147,14 @@ export default function Guardian() {
   }, []);
 
   const generateDailyLetter = async () => {
+    if (letterRequestRef.current || isGeneratingLetter) return;
+    const requestDate = getAppDateKey(getTrustedNow());
+    const previousState = getGuardianLetterState(requestDate, dailyLetter, dailyLetterDate, settings.guardianLetterStatus);
+    if (!previousState.canGenerate) { setShowLetter(true); return; }
+    letterRequestRef.current = true;
+    const controller = new AbortController();
+    letterAbortRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     setIsGeneratingLetter(true);
     try {
       const recentDiary = recentDiaries[0] || null;
@@ -139,14 +178,16 @@ export default function Guardian() {
 
 【要求】：
 1. 先轻轻点出一条你记得的近况，再回应今天可以怎么照顾自己。
-2. 必须结合ta的八字命理（如五行喜忌、性格）和最近的日记情绪来写。如果线索不足，就温柔地邀请ta留下一个具体问题。
+2. 只引用已提供的命理和日记线索。缺少排盘或日记时，不要编造五行、性格或具体经历；可以邀请ta留下一个具体问题。
 3. 纯文本，不要使用任何Markdown格式。
 4. 字数控制在120字左右，分2段，最后给一个低压力小动作。`;
 
       let aiText = "";
+      let usedFallback = false;
       try {
         const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: DEEPSEEK_TEXT_MODEL,
@@ -171,27 +212,39 @@ export default function Guardian() {
           })
         });
         const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        aiText = data.choices[0].message.content;
+        if (!res.ok || data.error) throw new Error(data.error?.message || 'Letter generation failed');
+        aiText = data.choices?.[0]?.message?.content;
+        if (typeof aiText !== 'string' || !aiText.trim()) throw new Error('Empty letter response');
+        if (!cleanAiText(aiText)) throw new Error('Empty normalized letter response');
       } catch (err) {
         console.error("DeepSeek Error:", err);
         aiText = SERVICE_FALLBACK.guardianLetter;
+        usedFallback = true;
       }
 
+      if (!mountedRef.current) return;
       const cleanedText = cleanAiText(aiText);
       setDailyLetter(cleanedText);
-      setDailyLetterDate(todayStr);
+      setDailyLetterDate(requestDate);
+      setSettings(prev => ({ ...prev, guardianLetterStatus: { date: requestDate, usedFallback, generatedAt: getTrustedNow().toISOString() } }));
       setShowLetter(true);
-      setBondExp(prev => prev + 10); // Big bond boost for reading the letter
-      setAppEvents((events) => recordAppEvent(events, 'guardian_letter'));
+      if (shouldRewardGuardianLetter(previousState, usedFallback)) {
+        setBondExp(prev => prev + 10);
+        setAppEvents((events) => recordAppEvent(events, 'guardian_letter'));
+      }
 
     } catch (error) {
+      if (!mountedRef.current) return;
       console.error("Letter Generation Error:", error);
       setDailyLetter(SERVICE_FALLBACK.guardianLetter);
-      setDailyLetterDate(todayStr);
+      setDailyLetterDate(requestDate);
+      setSettings(prev => ({ ...prev, guardianLetterStatus: { date: requestDate, usedFallback: true, generatedAt: getTrustedNow().toISOString() } }));
       setShowLetter(true);
     } finally {
-      setIsGeneratingLetter(false);
+      clearTimeout(timeout);
+      letterAbortRef.current = null;
+      letterRequestRef.current = false;
+      if (mountedRef.current) setIsGeneratingLetter(false);
     }
   };
 
@@ -321,9 +374,9 @@ export default function Guardian() {
                   {isGeneratingLetter ? <Loader2 size={20} className="animate-spin" /> : <Mail size={20} />}
                 </div>
                 <div className="text-left">
-                  <div className="font-medium text-apple-text">今日守护回访</div>
+                  <div className="font-medium text-apple-text">{letterState.usedFallback ? '重试今日回访' : '今日守护回访'}</div>
                   <div className="text-[13px] text-apple-text-muted">
-                    {guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
+                    {letterState.usedFallback ? '上次为本地兜底，尚未计为完成' : guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
                   </div>
                 </div>
               </div>
@@ -331,7 +384,7 @@ export default function Guardian() {
             </button>
           ) : (
             <button
-              onClick={() => setShowLetter(true)}
+              onClick={generateDailyLetter}
               className="rail-panel w-full flex items-center justify-between gap-3 text-left hover:bg-apple-surface-hover"
             >
               <div className="flex items-center gap-3">
@@ -374,6 +427,14 @@ export default function Guardian() {
             )}
           </div>
         </div>
+        {letterState.usedFallback && <button onClick={() => setShowLetter(true)} className="rail-button-secondary mt-3">查看已保存的兜底回访</button>}
+        <section className="mt-4 rounded-[20px] border border-apple-border bg-apple-surface p-4" aria-labelledby="guardian-starters-title">
+          <h2 id="guardian-starters-title" className="text-[15px] font-semibold">不知道从哪句开始？</h2>
+          <p className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">选一句放进输入框。有内容时会追加在末尾，你可以补充后再发送。</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {GUARDIAN_STARTERS.map(starter => <button key={starter.label} className="rail-button-secondary px-3 text-[13px]" onClick={() => { setInput(current => appendGuardianStarter(current, starter.text)); composerRef.current?.focus(); }}>{starter.label}</button>)}
+          </div>
+        </section>
       </div>
 
       {/* Chat Area */}
@@ -418,18 +479,20 @@ export default function Guardian() {
       {/* Input Area */}
       <div className="absolute inset-x-0 z-20 border-t border-apple-border bg-apple-bg px-5 py-4 sm:px-10" style={{ bottom: 'calc(var(--rail-nav-height) + var(--app-safe-bottom))' }}>
         <div className="mx-auto max-w-[960px] relative">
-          <input
+          <textarea
+            ref={composerRef}
             aria-label="向守护倾诉"
-            type="text"
+            rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              if (e.shiftKey) return;
               if (!shouldSubmitOnEnter(e.nativeEvent)) return;
               e.preventDefault();
               void handleSend();
             }}
             placeholder="向守护灵倾诉..."
-            className="rail-field pr-16"
+            className="rail-field min-h-20 resize-y pr-16"
           />
           <button
             onClick={handleSend}
@@ -440,6 +503,7 @@ export default function Guardian() {
             <Send size={18} className="ml-0.5" />
           </button>
         </div>
+        <p className="mx-auto mt-1 max-w-[960px] text-[12px] text-apple-text-muted">Enter 发送 · Shift + Enter 换行</p>
       </div>
 
       {/* Daily Letter Modal */}
@@ -473,17 +537,19 @@ export default function Guardian() {
               <h2 id="guardian-letter-title" className="font-serif text-2xl text-center text-apple-text mb-5 relative z-10 shrink-0">
                 今日守护回访
               </h2>
+              {letterState.usedFallback && <p role="status" className="relative z-10 mb-3 text-[13px] leading-relaxed text-apple-text-muted">这封是服务失败时的本地兜底，未计为今日完成，也未增加羁绊经验。可以保留阅读，或重试生成。</p>}
 
               <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg p-4 pr-3 text-base leading-8 text-apple-text whitespace-pre-wrap custom-scrollbar">
                 {dailyLetter}
               </div>
 
-              <div className="mt-6 flex justify-center relative z-10 shrink-0 pt-2">
+              <div className="mt-6 flex flex-wrap justify-center gap-3 relative z-10 shrink-0 pt-2">
+                {letterState.usedFallback && <button onClick={generateDailyLetter} disabled={isGeneratingLetter} aria-busy={isGeneratingLetter} className="rail-button">{isGeneratingLetter ? '正在重试…' : '重试今日回访'}</button>}
                 <button
                   onClick={() => setShowLetter(false)}
                   className="rail-button px-10"
                 >
-                  收下回访
+                  {letterState.usedFallback ? '先收下这封' : '收下回访'}
                 </button>
               </div>
             </motion.div>

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check, ChevronDown } from 'lucide-react';
+import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check, ChevronDown, Search, Plus, Pencil } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, type UserProfile } from '../store';
 import { clsx, type ClassValue } from 'clsx';
@@ -20,6 +20,7 @@ import { validateBaziProfile, type BaziProfileField } from '../lib/baziProfileVa
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
 import { getStoredAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
+import { createBaziRequestSnapshot, filterBaziProfiles, getBaziBirthFingerprint, getBaziResultStatus, isBaziRequestCurrent, restoreBaziEditor, saveBaziProfile, type BaziEditorState, type BaziResultOwner } from '../lib/baziProfiles';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -180,7 +181,7 @@ function pickShareProfile(profile: UserProfile) {
   };
 }
 
-interface BaziResult {
+interface BaziResult extends BaziResultOwner {
   generationId?: string;
   generationKind?: string;
   generatedAt?: string;
@@ -534,7 +535,7 @@ export default function Bazi() {
   useTrustedTime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { energy, setEnergy, membership, baziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId, userName, preferredAddress } = useAppContext();
+  const { energy, setEnergy, membership, settings, setSettings, baziResult: storedBaziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId, userName, preferredAddress } = useAppContext();
   const plusActive = isPlusActive(membership);
   const baziUnlocked = hasFeatureAccess(membership, 'bazi');
   const relationshipUnlocked = hasFeatureAccess(membership, 'relationship_report');
@@ -546,6 +547,12 @@ export default function Bazi() {
   const [chatInput, setChatInput, clearChatDraft] = usePersistentDraft('draft:bazi:chat', '');
   const [isChatting, setIsChatting] = useState(false);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+  const [profileQuery, setProfileQuery] = useState('');
+  const initialEditorRef = useRef(restoreBaziEditor(profiles, activeProfileId, baziFormData, settings.baziEditor));
+  const editorOwnerRef = useRef<BaziEditorState>(initialEditorRef.current.editor);
+  const previousActiveProfileRef = useRef(activeProfileId);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(initialEditorRef.current.editor.profileId);
+  const [showProfileForm, setShowProfileForm] = useState(false);
   const [showFormValidation, setShowFormValidation] = useState(false);
   const [useRecentFortuneContext, setUseRecentFortuneContext] = useState(true);
   const [recentFortuneStatus, setRecentFortuneStatus] = useState<string | null>(null);
@@ -573,8 +580,20 @@ export default function Bazi() {
   const workspaceOwnerRef = useRef(getStoredAccountSession()?.user.id || null);
   const chatRequestRef = useRef(false);
   const processedInviteRef = useRef<string | null>(null);
+  const requestRevisionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const currentProfileRef = useRef<UserProfile | null>(null);
+  const activeProfile = profiles.find(profile => profile.id === activeProfileId);
+  currentProfileRef.current = activeProfile && editingProfileId === activeProfile.id ? { id: activeProfile.id, ...baziFormData } : null;
+  const resultStatus = editingProfileId !== activeProfileId ? storedBaziResult ? 'other-profile' : 'empty' : getBaziResultStatus(storedBaziResult, activeProfile, baziFormData);
+  const baziResult: BaziResult | null = resultStatus === 'current' ? storedBaziResult : null;
+  const filteredProfiles = filterBaziProfiles(profiles, profileQuery);
+  const editingProfile = profiles.find(profile => profile.id === editingProfileId);
 
-  const prevActiveProfileIdRef = useRef<string | null>(activeProfileId);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; requestRevisionRef.current += 1; };
+  }, []);
 
   React.useEffect(() => {
     if (profiles.length >= 2) {
@@ -755,19 +774,108 @@ export default function Bazi() {
   };
 
   const scrollToProfileForm = () => {
-    document.getElementById('bazi-profile-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setShowProfileForm(true);
+    requestAnimationFrame(() => document.getElementById('bazi-profile-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
+
+  const rememberEditorOwner = (profileId: string | null, activeId: string | null) => {
+    const editor = { profileId, activeProfileId: activeId };
+    editorOwnerRef.current = editor;
+    setSettings(previous => previous.baziEditor?.profileId === editor.profileId && previous.baziEditor?.activeProfileId === editor.activeProfileId
+      ? previous : { ...previous, baziEditor: editor });
+  };
+
+  const applyRestoredEditor = (restored: ReturnType<typeof restoreBaziEditor>) => {
+    requestRevisionRef.current += 1;
+    setEditingProfileId(restored.editor.profileId);
+    setBaziFormData(restored.form);
+    currentProfileRef.current = restored.editor.profileId ? { ...restored.form, id: restored.editor.profileId } : null;
+    rememberEditorOwner(restored.editor.profileId, restored.editor.activeProfileId);
+    if (restored.reason === 'active-changed') {
+      setBaziMessages([]);
+      setRecentFortuneStatus(null);
+      setFormNotice('已切换到当前档案的资料，请核对后再保存。');
+      setShowProfileForm(true);
+    } else if (restored.reason === 'unconfirmed-draft') {
+      setFormNotice('这份旧草稿的归属尚未确认，已保留为新建草稿。保存会新增档案；要更新已有档案，请先在上方选择对应的人。');
+      setShowProfileForm(true);
+    }
+  };
+
+  React.useLayoutEffect(() => {
+    applyRestoredEditor(initialEditorRef.current);
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (previousActiveProfileRef.current === activeProfileId) return;
+    previousActiveProfileRef.current = activeProfileId;
+    if (editorOwnerRef.current.activeProfileId === activeProfileId) return;
+    applyRestoredEditor(restoreBaziEditor(profiles, activeProfileId, baziFormData, editorOwnerRef.current));
+  }, [activeProfileId, profiles]);
+
+  const selectProfileForEdit = (profile: UserProfile) => {
+    requestRevisionRef.current += 1;
+    currentProfileRef.current = profile;
+    setActiveProfileId(profile.id);
+    setEditingProfileId(profile.id);
+    rememberEditorOwner(profile.id, profile.id);
+    setBaziFormData(pickShareProfile(profile));
+    setShowFormValidation(false);
+    setFormNotice(null);
+    setShowProfileForm(true);
+    if (profile.id !== activeProfileId) setBaziMessages([]);
+  };
+
+  const startNewProfile = () => {
+    requestRevisionRef.current += 1;
+    currentProfileRef.current = null;
+    setActiveProfileId(null);
+    setEditingProfileId(null);
+    rememberEditorOwner(null, null);
+    setBaziFormData({ name: '', gender: 'male', birthDate: '', birthTime: '', birthLocation: '', currentLocation: '' });
+    setBaziMessages([]);
+    setShowFormValidation(false);
+    setFormNotice('正在新建档案，保存后会新增一份，不会覆盖已有档案。');
+    setShowProfileForm(true);
+  };
+
+  React.useEffect(() => {
+    const requestedProfileId = searchParams.get('profile');
+    const requestedNew = searchParams.get('new') === '1';
+    if (!requestedProfileId && !requestedNew) return;
+    if (requestedNew) startNewProfile();
+    else {
+      const requestedProfile = profiles.find(profile => profile.id === requestedProfileId);
+      if (requestedProfile) selectProfileForEdit(requestedProfile);
+      else {
+        setFormNotice('这份档案已不存在。请选择已有档案，或新建一份。');
+        setShowProfileForm(true);
+      }
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('profile');
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, profiles, setSearchParams]);
 
   const maxBirthDate = getAppDateKey(getTrustedNow());
   const formValidation = validateBaziProfile(baziFormData, maxBirthDate);
   const fieldError = (field: BaziProfileField) =>
     showFormValidation || Boolean(baziFormData[field]) ? formValidation.errors[field] : undefined;
   const updateFormField = (field: BaziProfileField | 'gender', value: string) => {
-    setBaziFormData({ ...baziFormData, [field]: value });
+    const next = { ...baziFormData, [field]: value };
+    if (baziFormData[field] !== value) requestRevisionRef.current += 1;
+    currentProfileRef.current = activeProfile && editingProfileId === activeProfile.id ? { ...next, id: activeProfile.id } : null;
+    setBaziFormData(next);
     setFormNotice(null);
   };
 
   const upsertProfileFromForm = (silent = false) => {
+    if (editorOwnerRef.current.activeProfileId !== activeProfileId || editorOwnerRef.current.profileId !== editingProfileId) {
+      applyRestoredEditor(restoreBaziEditor(profiles, activeProfileId, baziFormData, editorOwnerRef.current));
+      setFormNotice('档案选择发生了变化，已重新确认资料归属。请核对后再保存。');
+      return null;
+    }
     const validation = validateBaziProfile(baziFormData, getAppDateKey(getTrustedNow()));
     setShowFormValidation(true);
     if (!validation.isValid) {
@@ -777,52 +885,32 @@ export default function Bazi() {
 
     const payload = validation.value;
     setBaziFormData(payload);
-    const currentProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) : null;
-    const existingProfile = currentProfile || profiles.find(p => p.name === payload.name && p.birthDate === payload.birthDate);
-
-    if (existingProfile) {
-      setProfiles(prev => prev.map(profile => profile.id === existingProfile.id ? { ...profile, ...payload } : profile));
-      setActiveProfileId(existingProfile.id);
-      if (!silent) setFormNotice(`${payload.name} 的档案已更新，可以拿去做关系合盘。`);
-      return existingProfile.id;
+    try {
+      const saved = saveBaziProfile(profiles, payload, editingProfileId, createRecordId('profile'));
+      requestRevisionRef.current += 1;
+      currentProfileRef.current = saved.profile;
+      setProfiles(prev => saveBaziProfile(prev, payload, editingProfileId, saved.profile.id).profiles);
+      setActiveProfileId(saved.profile.id);
+      setEditingProfileId(saved.profile.id);
+      rememberEditorOwner(saved.profile.id, saved.profile.id);
+      if (saved.changed) {
+        setBaziResult(null);
+        setBaziMessages([]);
+        setRecentFortuneStatus(null);
+      }
+      if (!silent) setFormNotice(saved.created
+        ? `${payload.name} 的新档案已保存，已有档案未改动。可以选择两份档案做关系合盘。`
+        : saved.changed ? `${payload.name} 的资料已更新，旧排盘和追问已失效，请重新推演。` : `${payload.name} 的档案已保存，资料没有变化。`);
+      return saved.profile;
+    } catch (error) {
+      setFormNotice(error instanceof Error ? error.message : '档案保存未完成，请重新选择档案。');
+      return null;
     }
-
-    const newProfile = {
-      id: createRecordId('profile'),
-      ...payload,
-    };
-    setProfiles(prev => [...prev, newProfile]);
-    setActiveProfileId(newProfile.id);
-    if (!silent) setFormNotice(`${payload.name} 的档案已保存。再保存一个人的档案，就能看双人关系合盘。`);
-    return newProfile.id;
   };
 
   const handleSaveProfileOnly = () => {
     upsertProfileFromForm(false);
   };
-
-  React.useEffect(() => {
-    if (activeProfileId) {
-      const profile = profiles.find(p => p.id === activeProfileId);
-      if (profile) {
-        setBaziFormData({
-          name: profile.name,
-          gender: profile.gender,
-          birthDate: profile.birthDate,
-          birthTime: profile.birthTime,
-          birthLocation: profile.birthLocation,
-          currentLocation: profile.currentLocation
-        });
-
-        // Only clear result if we actually switched to a different profile
-        if (prevActiveProfileIdRef.current !== null && prevActiveProfileIdRef.current !== activeProfileId) {
-          setBaziResult(null);
-          setBaziMessages([]);
-        }
-      }
-    }
-    prevActiveProfileIdRef.current = activeProfileId;
-  }, [activeProfileId, profiles, setBaziFormData, setBaziResult, setBaziMessages]);
 
   React.useEffect(() => {
     if (chatContainerRef.current) {
@@ -848,7 +936,10 @@ export default function Bazi() {
     }
     setFormNotice(null);
 
-    if (!upsertProfileFromForm(true)) return;
+    const calculationProfile = upsertProfileFromForm(true);
+    if (!calculationProfile) return;
+    const calculationRequest = createBaziRequestSnapshot(calculationProfile, requestRevisionRef.current);
+    const calculationIsCurrent = () => mountedRef.current && isBaziRequestCurrent(calculationRequest, currentProfileRef.current, requestRevisionRef.current);
 
     setIsCalculating(true);
     setBaziResult(null);
@@ -1011,6 +1102,9 @@ ${exactBaziStr}
 
       // Merge exact calculations with LLM interpretations
       const finalResult: BaziResult = {
+        profileId: calculationProfile.id,
+        birthFingerprint: getBaziBirthFingerprint(calculationProfile),
+        profileSnapshot: pickShareProfile(calculationProfile),
         bazi: exactBazi,
         pattern: parsedResult.pattern,
         wuxing: {
@@ -1034,7 +1128,9 @@ ${exactBaziStr}
         }),
       };
 
+      if (!calculationIsCurrent()) return;
       setBaziResult(finalResult);
+      setShowProfileForm(false);
       setBaziMessages([{
         id: createRecordId('bazi'),
         role: 'ai',
@@ -1048,7 +1144,7 @@ ${exactBaziStr}
       if (usedPartialBaziFallback) setFormNotice(SERVICE_FALLBACK.baziPartial);
     } catch (error: any) {
       console.error("Bazi Calculation Error:", error);
-      setFormNotice(getPublicServiceError(error, SERVICE_FALLBACK.baziCalculation));
+      if (calculationIsCurrent()) setFormNotice(getPublicServiceError(error, SERVICE_FALLBACK.baziCalculation));
     } finally {
       setIsCalculating(false);
     }
@@ -1063,6 +1159,10 @@ ${exactBaziStr}
     }
 
     chatRequestRef.current = true;
+    const chatProfile = currentProfileRef.current;
+    if (!chatProfile) { chatRequestRef.current = false; return; }
+    const chatRequest = createBaziRequestSnapshot(chatProfile, requestRevisionRef.current);
+    const chatIsCurrent = () => mountedRef.current && isBaziRequestCurrent(chatRequest, currentProfileRef.current, requestRevisionRef.current);
     const newUserMsg = {
       id: createRecordId('bazi'),
       role: 'user' as const,
@@ -1128,6 +1228,7 @@ ${recentFortuneContext}
       // Clean up any residual markdown
       aiText = aiText.replace(/\*\*/g, '').replace(/#/g, '');
 
+      if (!chatIsCurrent()) return;
       setBaziMessages(prev => [...prev, {
         id: createRecordId('bazi'),
         role: 'ai',
@@ -1141,6 +1242,7 @@ ${recentFortuneContext}
 
     } catch (error) {
       console.error("Chat Error:", error);
+      if (!chatIsCurrent()) return;
       setBaziMessages(prev => [...prev, {
         id: createRecordId('bazi'),
         role: 'ai',
@@ -1161,6 +1263,42 @@ ${recentFortuneContext}
     <div className="rail-page">
       <PageHeader eyebrow="个人档案与关系" title="生辰八字" description="从生辰资料出发，阅读你的性格、节奏与关系线索。" />
       <div className="rail-page-content min-w-0 space-y-6">
+        <section className="rail-panel min-w-0" aria-labelledby="bazi-archives-title">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="bazi-archives-title" className="rail-section-title">我的生辰档案</h2>
+              <p className="rail-muted mt-1">已保存 {profiles.length} 份。选择要编辑的人，或单独新建一份。</p>
+            </div>
+            <button type="button" className="rail-button-secondary" onClick={startNewProfile}><Plus size={16} aria-hidden="true" />新建档案</button>
+          </div>
+          {profiles.length > 0 && <>
+            <label htmlFor="bazi-profile-search" className="mt-4 block text-[13px] text-apple-text-muted">查找档案</label>
+            <div className="relative mt-2">
+              <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-apple-text-muted" />
+              <input id="bazi-profile-search" type="search" value={profileQuery} onChange={event => setProfileQuery(event.target.value)} placeholder="称呼、出生日期或地点" className="rail-field w-full pl-10" />
+            </div>
+            <p role="status" className="mt-2 text-[13px] text-apple-text-muted">找到 {filteredProfiles.length} 份档案{activeProfile ? ` · 当前：${activeProfile.name}` : ' · 正在新建'}</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {filteredProfiles.map(profile => <button key={profile.id} type="button" onClick={() => selectProfileForEdit(profile)} aria-pressed={activeProfileId === profile.id} className={cn('min-w-0 rounded-2xl border p-3 text-left', activeProfileId === profile.id ? 'border-apple-gold/40 bg-apple-gold/10' : 'border-apple-border bg-apple-surface hover:bg-apple-surface-hover')}>
+                <span className="flex items-center justify-between gap-2 text-[15px] font-medium text-apple-text"><span className="min-w-0 break-words">{profile.name}</span><Pencil size={15} aria-hidden="true" className="shrink-0 text-apple-text-muted" /></span>
+                <span className="mt-1 block text-[13px] leading-6 text-apple-text-muted">{profile.birthDate} {profile.birthTime}</span>
+                <span className="block break-words text-[13px] leading-6 text-apple-text-muted">出生：{profile.birthLocation} · 现居：{profile.currentLocation}</span>
+                <span className="mt-2 block text-[13px] text-apple-text-muted">{activeProfileId === profile.id ? '编辑当前档案' : '打开并编辑'}</span>
+              </button>)}
+            </div>
+            {filteredProfiles.length === 0 && <div className="mt-3 rounded-2xl border border-dashed border-apple-border p-5 text-center">
+              <p className="text-[15px] text-apple-text">没有找到匹配的档案</p>
+              <p className="rail-muted mt-1">试试称呼、完整出生日期或城市，也可以新建档案。</p>
+              <button type="button" onClick={() => setProfileQuery('')} className="rail-button-secondary mt-3">清除搜索</button>
+            </div>}
+          </>}
+          {profiles.length === 0 && <p className="rail-muted mt-4">先保存自己的资料。再新建第二个人的档案，就能做关系合盘。</p>}
+        </section>
+        {storedBaziResult && resultStatus !== 'current' && <div role="status" className="rounded-2xl border border-apple-border bg-apple-surface p-4">
+          <p className="text-[15px] font-medium text-apple-text">{resultStatus === 'legacy' ? '这份旧排盘需要重新确认归属' : resultStatus === 'changed' ? '资料已变化，旧排盘暂不可用' : '当前档案尚未排盘'}</p>
+          <p className="rail-muted mt-2">{resultStatus === 'legacy' ? '旧存档没有记录对应档案和生辰快照。请确认下面的资料后重新推演，再继续追问。' : '排盘和追问只用于生成时的那份资料。保存当前资料并重新推演后，可以继续查看解读。'}</p>
+          <button type="button" onClick={scrollToProfileForm} className="rail-button-secondary mt-3">核对资料并重新推演</button>
+        </div>}
         <section className="rail-panel w-full max-w-full overflow-hidden">
           <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -1571,59 +1709,17 @@ ${recentFortuneContext}
           </div>
         )}
 
-        {(!baziResult || !baziUnlocked) && !isCalculating && (
+        {(showProfileForm || !baziResult || !baziUnlocked) && !isCalculating && (
           <motion.div
             id="bazi-profile-form"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="rail-panel w-full min-w-0 overflow-hidden"
           >
-            <h2 className="rail-section-title">生辰资料</h2>
-            <p id="bazi-form-hint" className="rail-muted mt-2 mb-6">姓名、出生日期、时间和两处地点都需要填写。出生日期使用公历，不能晚于今天。</p>
+            <h2 className="rail-section-title">{editingProfile ? `编辑档案：${editingProfile.name}` : '新建生辰档案'}</h2>
+            <p id="bazi-form-hint" className="rail-muted mt-2">{editingProfile ? '保存会更新这份档案；资料变更后需要重新排盘。' : '保存会新增一份档案，不会覆盖已有的人。'}姓名、日期、时间和两处地点都需要填写。</p>
+            <p className="rail-muted mt-2 mb-6">出生日期使用公历，时间按填写的钟表时间排盘；目前未按出生地换算时区或真太阳时。出生地用于解读参考，现居地用于近期时间参考。</p>
             <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2">
-              {profiles.length > 0 && (
-                <div className="md:col-span-2">
-                  <p className="mb-3 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Library size={16} aria-hidden="true" />快速选择档案</p>
-                  <div className="flex max-w-full gap-2 overflow-x-auto pb-2 no-scrollbar">
-                    {profiles.map(profile => (
-                      <button
-                        key={profile.id}
-                        aria-pressed={activeProfileId === profile.id}
-                        onClick={() => setActiveProfileId(profile.id)}
-                        className={cn(
-                          "px-4 py-2 rounded-xl text-[15px] font-medium whitespace-nowrap transition-all border",
-                          activeProfileId === profile.id
-                            ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50"
-                            : "bg-apple-surface text-apple-text-muted border-apple-border hover:border-apple-gold/30"
-                        )}
-                      >
-                        {profile.name}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => {
-                        setShowFormValidation(false);
-                        setFormNotice(null);
-                        setActiveProfileId(null);
-                        setBaziResult(null);
-                        setBaziMessages([]);
-                        setBaziFormData({
-                          name: '',
-                          gender: 'male',
-                          birthDate: '',
-                          birthTime: '',
-                          birthLocation: '',
-                          currentLocation: ''
-                        });
-                      }}
-                      className="px-4 py-2 rounded-xl text-[15px] font-medium whitespace-nowrap transition-all border bg-apple-surface text-apple-text-muted border-apple-border hover:border-apple-gold/30"
-                    >
-                      + 新档案
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div>
                 <label htmlFor="bazi-name" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><User size={16} aria-hidden="true" />姓名/称呼</label>
                 <input id="bazi-name" required aria-invalid={Boolean(fieldError('name'))} aria-describedby={`bazi-form-hint${fieldError('name') ? ' bazi-name-error' : ''}`}
@@ -1727,7 +1823,7 @@ ${recentFortuneContext}
                 className="rail-button-secondary w-full md:col-span-2"
               >
                 <Library size={18} />
-                保存档案，用于关系合盘
+                {editingProfile ? `保存 ${editingProfile.name} 的修改` : '保存新档案'}
               </button>
 
               {!baziUnlocked ? (
@@ -1742,13 +1838,12 @@ ${recentFortuneContext}
               ) : !plusActive && energy <= 0 ? (
                 <button
                   onClick={() => {
-                    setEnergy(5);
-                    setFormNotice(null);
+                    navigate('/app/profile?plus=1&plan=plus_monthly');
                   }}
                   className="rail-button w-full md:col-span-2"
                 >
                   <Zap size={18} />
-                  能量不足，点击补充能量
+                  查看能量与陪伴权益
                 </button>
               ) : (
                 <button
@@ -1757,7 +1852,7 @@ ${recentFortuneContext}
                   className="rail-button w-full md:col-span-2"
                 >
                   <Sparkles size={18} />
-                  开始推演 (消耗 1 能量)
+                  {plusActive ? '开始推演（Plus 已包含）' : '开始推演（消耗 1 能量）'}
                 </button>
               )}
             </div>
@@ -1793,10 +1888,10 @@ ${recentFortuneContext}
                   生辰排盘
                 </h2>
                 <button
-                  onClick={() => setBaziResult(null)}
+                  onClick={scrollToProfileForm}
                   className="flex items-center gap-1 text-[15px] text-apple-text-muted hover:text-apple-gold transition-colors bg-apple-surface px-3 py-1.5 rounded-full border border-apple-border"
                 >
-                  <RefreshCw size={14} /> 重新测算
+                  <RefreshCw size={14} /> 编辑资料 / 重新推演
                 </button>
               </div>
 
