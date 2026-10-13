@@ -15,6 +15,7 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK, getPublicServiceError } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import PageHeader from '../components/ui/PageHeader';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -536,7 +537,7 @@ export default function Bazi() {
   const relationshipWeekUnlocked = hasFeatureAccess(membership, 'relationship_weekly');
   const userAddress = normalizeUserAddress(preferredAddress) || normalizeUserAddress(userName) || baziFormData.name || '你';
   const userAddressInstruction = buildUserAddressInstruction(preferredAddress, userName);
-  
+
   const [isCalculating, setIsCalculating] = useState(false);
   const [chatInput, setChatInput, clearChatDraft] = usePersistentDraft('draft:bazi:chat', '');
   const [isChatting, setIsChatting] = useState(false);
@@ -809,7 +810,7 @@ export default function Bazi() {
           birthLocation: profile.birthLocation,
           currentLocation: profile.currentLocation
         });
-        
+
         // Only clear result if we actually switched to a different profile
         if (prevActiveProfileIdRef.current !== null && prevActiveProfileIdRef.current !== activeProfileId) {
           setBaziResult(null);
@@ -853,18 +854,18 @@ export default function Bazi() {
     try {
       const [yearStr, monthStr, dayStr] = baziFormData.birthDate.split('-');
       const [hourStr, minuteStr] = baziFormData.birthTime.split(':');
-      
+
       const solar = Solar.fromYmdHms(
-        parseInt(yearStr), 
-        parseInt(monthStr), 
-        parseInt(dayStr), 
-        parseInt(hourStr), 
-        parseInt(minuteStr), 
+        parseInt(yearStr),
+        parseInt(monthStr),
+        parseInt(dayStr),
+        parseInt(hourStr),
+        parseInt(minuteStr),
         0
       );
       const lunar = solar.getLunar();
       const baZi = lunar.getEightChar();
-      
+
       const exactBazi = {
         year: [baZi.getYearGan(), baZi.getYearZhi()] as [string, string],
         month: [baZi.getMonthGan(), baZi.getMonthZhi()] as [string, string],
@@ -875,7 +876,7 @@ export default function Bazi() {
       const weightedMetrics = buildWeightedBaziMetrics(baZi);
       const exactElements = weightedMetrics.elements;
       const exactTenGods = weightedMetrics.tenGods;
-      
+
       // Calculate ShenSha precisely
       const shenshaData = calculateShenSha({
         yearGan: baZi.getYearGan(), yearZhi: baZi.getYearZhi(),
@@ -964,7 +965,7 @@ ${exactBaziStr}
       };
       let aiText = "";
       let usedPartialBaziFallback = false;
-      
+
       try {
         const res = await apiFetch('/api/deepseek/chat', {
           method: 'POST',
@@ -1001,7 +1002,7 @@ ${exactBaziStr}
         parsedResult = fallbackInterpretation;
         usedPartialBaziFallback = true;
       }
-      
+
       // Merge exact calculations with LLM interpretations
       const finalResult: BaziResult = {
         bazi: exactBazi,
@@ -1054,14 +1055,14 @@ ${exactBaziStr}
       openBaziPayment();
       return;
     }
-    
+
     const newUserMsg = {
       id: createRecordId('bazi'),
       role: 'user' as const,
       text: chatInput,
       timestamp: Date.now()
     };
-    
+
     setBaziMessages(prev => [...prev, newUserMsg]);
     clearChatDraft('');
     setIsChatting(true);
@@ -1149,32 +1150,22 @@ ${recentFortuneContext}
   };
 
   return (
-    <div className="relative h-full w-full overflow-x-hidden overflow-y-auto overscroll-contain px-3 pt-6 pb-40 text-apple-text no-scrollbar sm:px-4">
-      {/* Decorative Background Elements */}
-      <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-apple-gold/10 to-transparent pointer-events-none"></div>
-      
-      <div className="flex flex-col items-center mb-8 relative z-10">
-        <h1 className="font-sans text-3xl font-bold tracking-widest text-apple-gold mb-2 flex items-center gap-2">
-          <Compass size={28} />
-          生辰八字
-        </h1>
-        <p className="text-apple-text-muted text-sm tracking-widest">洞悉命理，指引前程</p>
-      </div>
-
-      <div className="relative z-10 mx-auto w-full max-w-md min-w-0 space-y-6">
-        <section className="w-full max-w-full overflow-hidden rounded-[2rem] border border-rose-300/18 bg-[linear-gradient(145deg,rgba(255,245,248,0.92),rgba(255,255,255,0.72))] p-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:border-rose-300/12 dark:bg-[linear-gradient(145deg,rgba(40,24,38,0.62),rgba(15,18,28,0.76))] dark:shadow-[0_8px_30px_rgba(0,0,0,0.28)] sm:p-4">
+    <div className="rail-page">
+      <PageHeader eyebrow="个人档案与关系" title="生辰八字" description="从生辰资料出发，阅读你的性格、节奏与关系线索。" />
+      <div className="rail-page-content min-w-0 space-y-6">
+        <section className="rail-panel w-full max-w-full overflow-hidden">
           <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-400/14 text-rose-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-400/14 text-rose-600 dark:text-rose-400">
                 <Heart size={18} />
               </div>
               <div className="min-w-0">
-                <h2 className="text-sm font-bold text-apple-text">双人关系合盘</h2>
-                <p className="truncate text-[11px] text-apple-text-muted">免费先看默契分，完整报告适合两个人一起看。</p>
+                <h2 className="rail-section-title">双人关系合盘</h2>
+                <p className="mt-1 text-[13px] leading-5 text-apple-text-muted">免费先看默契分，完整报告适合两个人一起看。</p>
               </div>
             </div>
             {relationshipMatch && (
-              <div className="shrink-0 rounded-full border border-apple-gold/18 bg-apple-gold/10 px-3 py-1 text-xs font-black text-apple-gold">
+              <div className="shrink-0 rounded-full border border-apple-gold/18 bg-apple-gold/10 px-3 py-1 text-[13px] font-semibold text-apple-gold">
                 {relationshipMatch.score} 分
               </div>
             )}
@@ -1183,11 +1174,12 @@ ${recentFortuneContext}
           <button
             type="button"
             onClick={() => setRelationshipExpanded(prev => !prev)}
-            className="flex w-full min-w-0 items-center justify-between gap-3 rounded-[24px] border border-apple-border bg-apple-surface/78 px-3 py-3 text-left transition-all active:scale-[0.99] dark:border-white/10 dark:bg-white/[0.05]"
+            className="flex w-full min-w-0 items-center justify-between gap-3 rounded-[24px] border border-apple-border bg-apple-surface px-3 py-3 text-left transition-all active:scale-[0.99]"
             aria-expanded={relationshipExpanded}
+            aria-controls="relationship-detail"
           >
-            <span className="min-w-0 truncate text-xs font-bold text-apple-text-muted">{relationshipSummary}</span>
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-apple-surface-hover px-2.5 py-1 text-[11px] font-black text-apple-text-muted dark:bg-white/10">
+            <span className="min-w-0 truncate text-[13px] font-medium text-apple-text-muted">{relationshipSummary}</span>
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-apple-surface-hover px-2.5 py-1 text-[13px] font-semibold text-apple-text-muted">
               {relationshipExpanded ? '收起' : '展开'}
               <ChevronDown size={13} className={cn('transition-transform', relationshipExpanded && 'rotate-180')} />
             </span>
@@ -1196,7 +1188,7 @@ ${recentFortuneContext}
           <AnimatePresence initial={false}>
             {relationshipExpanded && (
               <motion.div
-                key="relationship-body"
+                key="relationship-body" id="relationship-detail"
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
@@ -1210,13 +1202,13 @@ ${recentFortuneContext}
               <div
                 key={step.label}
                 className={cn(
-                  'rounded-2xl border px-2 py-2 text-center text-[10px] font-black leading-tight',
+                  'rounded-2xl border px-2 py-2 text-center text-[13px] font-semibold leading-tight',
                   step.done
                     ? 'border-apple-gold/24 bg-apple-gold/12 text-apple-gold'
-                    : 'border-apple-border bg-apple-surface/70 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+                    : 'border-apple-border bg-apple-surface text-apple-text-muted',
                 )}
               >
-                <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-surface-hover dark:bg-black/15">
+                <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-surface-hover">
                   {step.done ? <Check size={12} /> : index + 1}
                 </div>
                 <div className="min-h-[24px]">{step.label}</div>
@@ -1227,19 +1219,19 @@ ${recentFortuneContext}
           {profiles.length >= 2 ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                <select
+                <select aria-label="选择第一位关系档案"
                   value={matchAId}
                   onChange={event => setMatchAId(event.target.value)}
-                  className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-3 text-sm font-semibold text-apple-text outline-none dark:border-white/10 dark:bg-[#080b13]"
+                  className="rail-field min-w-0"
                 >
                   {profiles.map(profile => (
                     <option key={profile.id} value={profile.id}>{profile.name}</option>
                   ))}
                 </select>
-                <select
+                <select aria-label="选择第二位关系档案"
                   value={matchBId}
                   onChange={event => setMatchBId(event.target.value)}
-                  className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-3 text-sm font-semibold text-apple-text outline-none dark:border-white/10 dark:bg-[#080b13]"
+                  className="rail-field min-w-0"
                 >
                   {profiles.map(profile => (
                     <option key={profile.id} value={profile.id}>{profile.name}</option>
@@ -1248,42 +1240,42 @@ ${recentFortuneContext}
               </div>
 
               {relationshipMatch ? (
-                <div className="rounded-[28px] border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/18">
+                <div className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
                   <div className="grid grid-cols-[96px_1fr] gap-3">
                     <div
-                      className="relative h-24 w-24 rounded-full p-1 shadow-[0_12px_34px_rgba(244,207,131,0.14)]"
+                      className="relative h-24 w-24 rounded-full p-1"
                       style={{ background: `conic-gradient(var(--app-gold) ${relationshipMatch.score * 3.6}deg, rgba(116,105,94,0.18) 0deg)` }}
                     >
-                      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface dark:bg-[#111722]">
-                        <div className="text-2xl font-black text-apple-gold">{relationshipMatch.score}</div>
-                        <div className="text-[10px] font-bold text-apple-text-muted">默契分</div>
+                      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface">
+                        <div className="text-2xl font-semibold text-apple-gold">{relationshipMatch.score}</div>
+                        <div className="text-[13px] font-medium text-apple-text-muted">默契分</div>
                       </div>
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-lg font-black text-apple-text">{relationshipMatch.label}</div>
-                        <div className="rounded-full bg-apple-gold/10 px-2 py-0.5 text-[10px] font-black text-apple-gold">
+                        <div className="text-lg font-semibold text-apple-text">{relationshipMatch.label}</div>
+                        <div className="rounded-full bg-apple-gold/10 px-2 py-0.5 text-[13px] font-semibold text-apple-gold">
                           {relationshipMatch.branches}
                         </div>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {relationshipMatch.reasons.map((reason) => (
-                          <span key={reason} className="rounded-full border border-apple-border bg-apple-surface/80 px-2 py-1 text-[10px] font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]">
+                          <span key={reason} className="rounded-full border border-apple-border bg-apple-surface px-2 py-1 text-[13px] font-medium text-apple-text-muted">
                             {reason}
                           </span>
                         ))}
                       </div>
-                      <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">{relationshipMatch.advice}</p>
+                      <p className="mt-3 text-[13px] leading-relaxed text-apple-text-muted">{relationshipMatch.advice}</p>
                     </div>
                   </div>
                   <div className="mt-4 grid gap-2">
                     {relationshipMatch.metrics.map((item) => (
-                      <div key={item.label} className="rounded-2xl border border-apple-border bg-apple-surface/70 px-3 py-2 dark:border-transparent dark:bg-white/[0.05]">
-                        <div className="mb-1 flex items-center justify-between text-[11px]">
-                          <span className="font-black text-apple-text">{item.label}</span>
+                      <div key={item.label} className="rounded-2xl border border-apple-border bg-apple-surface px-3 py-2">
+                        <div className="mb-1 flex items-center justify-between text-[13px]">
+                          <span className="font-semibold text-apple-text">{item.label}</span>
                           <span className="text-apple-text-muted">{item.hint}</span>
                         </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#d9cbb7]">
                           <div className="h-full rounded-full bg-apple-gold" style={{ width: `${item.value}%` }} />
                         </div>
                       </div>
@@ -1291,21 +1283,21 @@ ${recentFortuneContext}
                   </div>
                 </div>
               ) : (
-                <div className="rounded-2xl border border-apple-border bg-apple-surface/72 p-3 text-xs text-apple-text-muted dark:border-white/10 dark:bg-black/18">
+                <div className="rounded-2xl border border-apple-border bg-apple-surface p-3 text-[13px] text-apple-text-muted">
                   请选择两个不同档案。
                 </div>
               )}
               {relationshipMatch && (
-                <div className="rounded-[26px] border border-apple-gold/18 bg-apple-gold/10 p-3">
+                <div className="rounded-[20px] border border-apple-gold/18 bg-apple-gold/10 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-black text-apple-text">完整关系报告</div>
-                      <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                      <div className="text-[15px] font-semibold text-apple-text">完整关系报告</div>
+                      <div className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">
                         吸引点、冲突雷区、沟通方式和关系时间线。
                       </div>
                     </div>
                     {!relationshipUnlocked && (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-apple-surface-hover text-apple-gold dark:bg-black/20">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-apple-surface-hover text-apple-gold">
                         <LockKeyhole size={17} />
                       </div>
                     )}
@@ -1319,24 +1311,24 @@ ${recentFortuneContext}
                         ['沟通方式', relationshipMatch.report.language],
                         ['7 日小任务', relationshipMatch.report.task],
                       ].map(([title, content]) => (
-                        <div key={title} className="rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
-                          <div className="text-xs font-black text-apple-gold">{title}</div>
-                          <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">{content}</div>
+                        <div key={title} className="rounded-2xl border border-apple-border bg-apple-surface p-3">
+                          <div className="text-[13px] font-semibold text-apple-gold">{title}</div>
+                          <div className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">{content}</div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="mt-3 overflow-hidden rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
+                    <div className="mt-3 overflow-hidden rounded-2xl border border-apple-border bg-apple-surface p-3">
                       <div className="mb-3 rounded-2xl border border-apple-gold/16 bg-apple-gold/10 p-3">
-                        <div className="text-[11px] font-black text-apple-gold">免费预览</div>
-                        <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                        <div className="text-[13px] font-semibold text-apple-gold">免费预览</div>
+                        <p className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">
                           {getRelationshipPreview(relationshipMatch.report.sweetSpot)}
                         </p>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-apple-text-muted">
+                      <div className="grid grid-cols-3 gap-2 text-center text-[13px] text-apple-text-muted">
                         {['TA 的安全感', '吵架雷区', '7 日任务'].map((item) => (
-                          <div key={item} className="rounded-2xl border border-apple-border bg-apple-surface/70 px-2 py-2 dark:border-transparent dark:bg-white/[0.05]">
-                            <div className="font-black text-apple-text">{item}</div>
+                          <div key={item} className="rounded-2xl border border-apple-border bg-apple-surface px-2 py-2">
+                            <div className="font-semibold text-apple-text">{item}</div>
                             <div>待解锁</div>
                           </div>
                         ))}
@@ -1344,7 +1336,7 @@ ${recentFortuneContext}
                       <button
                         type="button"
                         onClick={openRelationshipPayment}
-                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-3 text-sm font-black text-[#11131a] shadow-[0_12px_30px_rgba(185,123,40,0.22)] dark:shadow-[0_12px_30px_rgba(244,207,131,0.22)]"
+                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-apple-text py-3 text-[15px] font-semibold text-apple-bg"
                       >
                         <Sparkles size={16} />
                         解锁完整档案包 ¥19.9
@@ -1356,23 +1348,23 @@ ${recentFortuneContext}
                     type="button"
                     onClick={handleCopyRelationshipLink}
                     disabled={isCreatingInviteLink}
-                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-apple-border bg-apple-surface/70 py-2.5 text-xs font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]"
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-apple-border bg-apple-surface py-2.5 text-[13px] font-medium text-apple-text-muted"
                   >
                     <Link2 size={14} />
                     {isCreatingInviteLink ? '正在生成...' : '邀请 TA 加入这次合盘'}
                   </button>
                   <RelationshipInviteGuide compact />
                   {relationshipShareStatus && (
-                    <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[11px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
+                    <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[13px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
                   )}
                 </div>
               )}
               {relationshipMatch && (
-                <div className="rounded-[26px] border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/18">
+                <div className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-black text-apple-text">关系时间线</div>
-                      <div className="mt-1 text-xs text-apple-text-muted">把这段关系从一次心动变成可回看的记录。</div>
+                      <div className="text-[15px] font-semibold text-apple-text">关系时间线</div>
+                      <div className="mt-1 text-[13px] text-apple-text-muted">把这段关系从一次心动变成可回看的记录。</div>
                     </div>
                     {!relationshipUnlocked && <LockKeyhole size={16} className="text-apple-text-muted" />}
                   </div>
@@ -1385,16 +1377,16 @@ ${recentFortuneContext}
                       <div key={title} className="grid grid-cols-[24px_1fr] gap-2">
                         <div className="flex flex-col items-center">
                           <div className={cn(
-                            'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black',
-                            index < 2 || relationshipUnlocked ? 'bg-apple-gold text-[#11131a]' : 'bg-apple-surface-hover text-apple-text-muted dark:bg-white/10',
+                            'flex h-5 w-5 items-center justify-center rounded-full text-[13px] font-semibold',
+                            index < 2 || relationshipUnlocked ? 'bg-apple-text text-apple-bg' : 'bg-apple-surface-hover text-apple-text-muted',
                           )}>
                             {index < 2 || relationshipUnlocked ? <Check size={12} /> : <LockKeyhole size={11} />}
                           </div>
-                          {index < 2 && <div className="mt-1 h-8 w-px bg-apple-border dark:bg-white/10" />}
+                          {index < 2 && <div className="mt-1 h-8 w-px bg-apple-border" />}
                         </div>
                         <div className="pb-2">
-                          <div className="text-xs font-black text-apple-text">{title}</div>
-                          <div className={cn('mt-0.5 text-xs leading-relaxed', index < 2 || relationshipUnlocked ? 'text-apple-text-muted' : 'text-apple-text-muted/70')}>
+                          <div className="text-[13px] font-semibold text-apple-text">{title}</div>
+                          <div className={cn('mt-0.5 text-[13px] leading-relaxed', index < 2 || relationshipUnlocked ? 'text-apple-text-muted' : 'text-apple-text-muted/70')}>
                             {content}
                           </div>
                         </div>
@@ -1405,7 +1397,7 @@ ${recentFortuneContext}
                     <button
                       type="button"
                       onClick={openRelationshipPayment}
-                      className="mt-2 w-full rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-xs font-black text-apple-gold"
+                      className="mt-2 w-full rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-[13px] font-semibold text-apple-gold"
                     >
                       解锁完整档案包
                     </button>
@@ -1413,31 +1405,31 @@ ${recentFortuneContext}
                 </div>
               )}
               {relationshipMatch && (
-                <div className="rounded-[26px] border border-apple-border bg-[linear-gradient(145deg,rgba(185,123,40,0.12),rgba(124,156,255,0.08))] p-3 dark:border-white/10 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.12),rgba(124,156,255,0.08))]">
+                <div className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-black text-apple-text">7 日关系陪伴</div>
-                      <div className="mt-1 text-xs text-apple-text-muted">
+                      <div className="text-[15px] font-semibold text-apple-text">7 日关系陪伴</div>
+                      <div className="mt-1 text-[13px] text-apple-text-muted">
                         {relationshipWeekUnlocked ? `第 ${relationshipWeekDay} 天 · 已完成 ${completedRelationshipTasks.length}/7 天` : '每天一个低压力观察任务，适合暧昧期和磨合期。'}
                       </div>
                     </div>
                     {!relationshipWeekUnlocked && (
-                      <div className="rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-black text-apple-gold">档案包内</div>
+                      <div className="rounded-full bg-apple-gold/12 px-2 py-1 text-[13px] font-semibold text-apple-gold">档案包内</div>
                     )}
                   </div>
                   {relationshipWeekUnlocked && (
-                    <div className="mb-3 rounded-2xl border border-apple-border bg-apple-surface/72 p-3 dark:border-white/10 dark:bg-black/15">
-                      <div className="mb-2 flex items-center justify-between text-[11px] text-apple-text-muted">
+                    <div className="mb-3 rounded-2xl border border-apple-border bg-apple-surface p-3">
+                      <div className="mb-2 flex items-center justify-between text-[13px] text-apple-text-muted">
                         <span>陪伴进度</span>
                         <span>{completedRelationshipTasks.length}/7</span>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-[#d9cbb7] dark:bg-white/10">
+                      <div className="h-2 overflow-hidden rounded-full bg-[#d9cbb7]">
                         <div
                           className="h-full rounded-full bg-apple-gold transition-all"
                           style={{ width: `${Math.round((completedRelationshipTasks.length / 7) * 100)}%` }}
                         />
                       </div>
-                      <div className="mt-2 text-xs leading-relaxed text-apple-text-muted">
+                      <div className="mt-2 text-[13px] leading-relaxed text-apple-text-muted">
                         {completedRelationshipTasks.length >= 7
                           ? '一周观察已完成，可以回看任务记录，判断这段关系是否让你更稳定。'
                           : nextRelationshipTask
@@ -1457,22 +1449,22 @@ ${recentFortuneContext}
                           onClick={() => toggleRelationshipTask(task.day)}
                           className={cn(
                             'rounded-2xl border p-3 text-left transition-all',
-                            visible ? 'border-apple-border bg-apple-surface/72 dark:border-white/10 dark:bg-black/15' : 'border-apple-border bg-apple-surface/55 opacity-55 dark:border-white/8 dark:bg-black/10',
+                            visible ? 'border-apple-border bg-apple-surface' : 'border-apple-border bg-apple-surface opacity-55',
                             done && 'border-apple-gold/35 bg-apple-gold/10',
                           )}
                         >
                           <div className="flex items-start gap-2">
                             <div className={cn(
-                              'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black',
-                              done ? 'bg-apple-gold text-[#11131a]' : 'bg-apple-surface-hover text-apple-text-muted dark:bg-white/10',
+                              'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold',
+                              done ? 'bg-apple-text text-apple-bg' : 'bg-apple-surface-hover text-apple-text-muted',
                             )}>
                               {visible ? (done ? <Check size={13} /> : task.day) : <LockKeyhole size={12} />}
                             </div>
                             <div className="min-w-0">
-                              <div className="text-xs font-black text-apple-text">
+                              <div className="text-[13px] font-semibold text-apple-text">
                                 {visible ? task.title : relationshipWeekUnlocked ? `第 ${task.day} 天后解锁` : `第 ${task.day} 天任务`}
                               </div>
-                              <div className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                              <div className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">
                                 {visible ? task.desc : relationshipWeekUnlocked ? '按天慢慢观察，不一次性把关系推到结论。' : '解锁后继续查看。'}
                               </div>
                             </div>
@@ -1486,14 +1478,14 @@ ${recentFortuneContext}
                       <button
                         type="button"
                         onClick={openRelationshipWeekPayment}
-                        className="rounded-full bg-apple-gold py-2.5 text-xs font-black text-[#11131a]"
+                        className="rounded-full bg-apple-text py-2.5 text-[13px] font-semibold text-apple-bg"
                       >
                         开通完整档案
                       </button>
                       <button
                         type="button"
                         onClick={openCouplePlusPayment}
-                        className="rounded-full border border-apple-border bg-apple-surface/70 py-2.5 text-xs font-bold text-apple-text-muted dark:border-white/10 dark:bg-white/[0.05]"
+                        className="rounded-full border border-apple-border bg-apple-surface py-2.5 text-[13px] font-medium text-apple-text-muted"
                       >
                         看双人 Plus
                       </button>
@@ -1503,15 +1495,15 @@ ${recentFortuneContext}
               )}
             </div>
           ) : (
-            <div className="rounded-[28px] border border-dashed border-apple-border bg-apple-surface/72 p-4 text-xs leading-relaxed text-apple-text-muted dark:border-white/12 dark:bg-black/18">
+            <div className="rounded-[20px] border border-dashed border-apple-border bg-apple-surface p-4 text-[13px] leading-relaxed text-apple-text-muted">
               <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
-                <div className="rounded-2xl border border-apple-border bg-apple-surface/70 px-3 py-3 dark:border-transparent dark:bg-white/[0.05]">
-                  <div className="text-sm font-black text-apple-text">{profiles[0]?.name || '你'}</div>
+                <div className="rounded-2xl border border-apple-border bg-apple-surface px-3 py-3">
+                  <div className="text-[15px] font-semibold text-apple-text">{profiles[0]?.name || '你'}</div>
                   <div className="mt-1">已准备</div>
                 </div>
                 <Heart size={16} className="text-apple-gold" />
-                <div className="rounded-2xl border border-dashed border-apple-border bg-apple-surface/55 px-3 py-3 dark:border-white/12 dark:bg-white/[0.03]">
-                  <div className="text-sm font-black text-apple-text-muted">TA</div>
+                <div className="rounded-2xl border border-dashed border-apple-border bg-apple-surface px-3 py-3">
+                  <div className="text-[15px] font-semibold text-apple-text-muted">TA</div>
                   <div className="mt-1">待建档</div>
                 </div>
               </div>
@@ -1521,7 +1513,7 @@ ${recentFortuneContext}
                 <button
                   type="button"
                   onClick={scrollToProfileForm}
-                  className="flex items-center justify-center gap-2 rounded-full bg-apple-gold py-2.5 text-xs font-black text-[#11131a]"
+                  className="flex items-center justify-center gap-2 rounded-full bg-apple-text py-2.5 text-[13px] font-semibold text-apple-bg"
                 >
                   <Sparkles size={14} />
                   去建档案
@@ -1530,14 +1522,14 @@ ${recentFortuneContext}
                   type="button"
                   onClick={handleCopyRelationshipLink}
                   disabled={isCreatingInviteLink}
-                  className="flex items-center justify-center gap-2 rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-xs font-bold text-apple-gold"
+                  className="flex items-center justify-center gap-2 rounded-full border border-apple-gold/22 bg-apple-gold/10 py-2.5 text-[13px] font-medium text-apple-gold"
                 >
                   <Link2 size={14} />
                   {isCreatingInviteLink ? '生成中' : '复制给 TA 填资料'}
                 </button>
               </div>
               {relationshipShareStatus && (
-                <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[11px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
+                <div className="mt-2 rounded-2xl bg-apple-gold/10 px-3 py-2 text-center text-[13px] leading-relaxed text-apple-gold">{relationshipShareStatus}</div>
               )}
             </div>
           )}
@@ -1548,14 +1540,14 @@ ${recentFortuneContext}
         </section>
 
         {baziResult && !baziUnlocked && !isCalculating && (
-          <div className="rounded-[2rem] border border-apple-gold/22 bg-apple-gold/[0.08] p-4 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-apple-gold/18 dark:bg-apple-gold/[0.07]">
+          <div className="rounded-[20px] border border-apple-gold/22 bg-apple-gold/[0.08] p-4">
             <div className="flex items-start gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-apple-gold/14 text-apple-gold">
                 <LockKeyhole size={19} />
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-black text-apple-text">完整命理档案已上锁</div>
-                <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
+                <div className="text-[15px] font-semibold text-apple-text">完整命理档案已上锁</div>
+                <p className="mt-1 text-[13px] leading-relaxed text-apple-text-muted">
                   免费版可以保存出生资料和做关系默契分；完整排盘、用神、神煞、近期运势和大师追问需要解锁八字档案。
                 </p>
               </div>
@@ -1563,7 +1555,7 @@ ${recentFortuneContext}
             <button
               type="button"
               onClick={openBaziPayment}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-apple-gold py-3 text-sm font-black text-[#17130f] shadow-[0_14px_30px_rgba(185,123,40,0.20)] active:scale-[0.99]"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-apple-text py-3 text-[15px] font-semibold text-apple-bg active:scale-[0.99]"
             >
               <Sparkles size={17} />
               解锁八字完整档案 ¥19.9
@@ -1572,27 +1564,28 @@ ${recentFortuneContext}
         )}
 
         {(!baziResult || !baziUnlocked) && !isCalculating && (
-          <motion.div 
+          <motion.div
             id="bazi-profile-form"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8 w-full max-w-full box-border overflow-hidden rounded-[2rem] border border-apple-border bg-apple-surface p-3 shadow-[0_14px_38px_rgba(117,82,42,0.12)] backdrop-blur-xl dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] sm:mb-0 sm:p-6"
+            className="rail-panel w-full min-w-0 overflow-hidden"
           >
-            <div className="min-w-0 max-w-full space-y-4 sm:space-y-5">
+            <h2 className="rail-section-title">生辰资料</h2>
+            <p id="bazi-form-hint" className="rail-muted mt-2 mb-6">填写以下资料即可保存档案，出生日期使用公历。</p>
+            <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2">
               {profiles.length > 0 && (
-                <div className="mb-6">
-                  <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                    <Library size={16} /> 快速选择档案
-                  </label>
+                <div className="md:col-span-2">
+                  <p className="mb-3 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Library size={16} aria-hidden="true" />快速选择档案</p>
                   <div className="flex max-w-full gap-2 overflow-x-auto pb-2 no-scrollbar">
                     {profiles.map(profile => (
                       <button
                         key={profile.id}
+                        aria-pressed={activeProfileId === profile.id}
                         onClick={() => setActiveProfileId(profile.id)}
                         className={cn(
-                          "px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all border",
+                          "px-4 py-2 rounded-xl text-[15px] font-medium whitespace-nowrap transition-all border",
                           activeProfileId === profile.id
-                            ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]"
+                            ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50"
                             : "bg-apple-surface text-apple-text-muted border-apple-border hover:border-apple-gold/30"
                         )}
                       >
@@ -1613,7 +1606,7 @@ ${recentFortuneContext}
                           currentLocation: ''
                         });
                       }}
-                      className="px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all border bg-apple-surface text-apple-text-muted border-apple-border hover:border-apple-gold/30"
+                      className="px-4 py-2 rounded-xl text-[15px] font-medium whitespace-nowrap transition-all border bg-apple-surface text-apple-text-muted border-apple-border hover:border-apple-gold/30"
                     >
                       + 新档案
                     </button>
@@ -1622,38 +1615,38 @@ ${recentFortuneContext}
               )}
 
               <div>
-                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                  <User size={16} /> 姓名/称呼
-                </label>
-                <input 
-                  type="text" 
+                <label htmlFor="bazi-name" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><User size={16} aria-hidden="true" />姓名/称呼</label>
+                <input id="bazi-name" required aria-describedby="bazi-form-hint"
+                  type="text"
                   value={baziFormData.name}
                   onChange={e => setBaziFormData({...baziFormData, name: e.target.value})}
                   placeholder="输入你的名字"
-                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="rail-field min-w-0"
                 />
               </div>
 
               <div>
-                <label className="mb-2 ml-1 block text-sm font-medium text-apple-gold">性别</label>
-                <div className="flex min-w-0 gap-3">
-                  <button 
+                <p id="bazi-gender-label" className="mb-2 text-[15px] font-medium text-apple-text">性别</p>
+                <div className="flex min-w-0 gap-3" role="group" aria-labelledby="bazi-gender-label">
+                  <button
+                    aria-pressed={baziFormData.gender === 'male'}
                     onClick={() => setBaziFormData({...baziFormData, gender: 'male'})}
                     className={cn(
                       "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
-                      baziFormData.gender === 'male' 
-                        ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]" 
+                      baziFormData.gender === 'male'
+                        ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50"
                         : "bg-apple-surface border-apple-border text-apple-text-muted"
                     )}
                   >
                     男
                   </button>
-                  <button 
+                  <button
+                    aria-pressed={baziFormData.gender === 'female'}
                     onClick={() => setBaziFormData({...baziFormData, gender: 'female'})}
                     className={cn(
                       "min-w-0 flex-1 py-3.5 rounded-2xl border transition-all font-medium",
-                      baziFormData.gender === 'female' 
-                        ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]" 
+                      baziFormData.gender === 'female'
+                        ? "bg-apple-gold/20 text-apple-gold border-apple-gold/50"
                         : "bg-apple-surface border-apple-border text-apple-text-muted"
                     )}
                   >
@@ -1663,57 +1656,49 @@ ${recentFortuneContext}
               </div>
 
               <div>
-                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                  <Calendar size={16} /> 出生日期 (公历)
-                </label>
-                <input 
-                  type="date" 
+                <label htmlFor="bazi-birthDate" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Calendar size={16} aria-hidden="true" />出生日期 (公历)</label>
+                <input id="bazi-birthDate" required aria-describedby="bazi-form-hint"
+                  type="date"
                   value={baziFormData.birthDate}
                   onChange={e => setBaziFormData({...baziFormData, birthDate: e.target.value})}
-                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="rail-field min-w-0"
                 />
               </div>
 
               <div>
-                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                  <Clock size={16} /> 出生时间
-                </label>
-                <input 
-                  type="time" 
+                <label htmlFor="bazi-birthTime" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><Clock size={16} aria-hidden="true" />出生时间</label>
+                <input id="bazi-birthTime" required aria-describedby="bazi-form-hint"
+                  type="time"
                   value={baziFormData.birthTime}
                   onChange={e => setBaziFormData({...baziFormData, birthTime: e.target.value})}
-                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="rail-field min-w-0"
                 />
               </div>
 
               <div>
-                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                  <MapPin size={16} /> 出生地
-                </label>
-                <input 
-                  type="text" 
+                <label htmlFor="bazi-birthLocation" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><MapPin size={16} aria-hidden="true" />出生地</label>
+                <input id="bazi-birthLocation" required aria-describedby="bazi-form-hint"
+                  type="text"
                   value={baziFormData.birthLocation}
                   onChange={e => setBaziFormData({...baziFormData, birthLocation: e.target.value})}
                   placeholder="如：北京市朝阳区"
-                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="rail-field min-w-0"
                 />
               </div>
 
               <div>
-                <label className="mb-2 ml-1 flex items-center gap-2 text-sm font-medium text-apple-gold">
-                  <MapPin size={16} /> 现居地
-                </label>
-                <input 
-                  type="text" 
+                <label htmlFor="bazi-currentLocation" className="mb-2 flex items-center gap-2 text-[15px] font-medium text-apple-text"><MapPin size={16} aria-hidden="true" />现居地</label>
+                <input id="bazi-currentLocation" required aria-describedby="bazi-form-hint"
+                  type="text"
                   value={baziFormData.currentLocation}
                   onChange={e => setBaziFormData({...baziFormData, currentLocation: e.target.value})}
                   placeholder="如：上海市浦东新区"
-                  className="w-full min-w-0 max-w-full appearance-none rounded-2xl border border-apple-border bg-apple-surface px-4 py-3.5 text-base text-apple-text transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 sm:px-5"
+                  className="rail-field min-w-0"
                 />
               </div>
 
               {formNotice && (
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm leading-relaxed text-apple-text-muted">
+                <div role="status" className="md:col-span-2 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-[15px] leading-7 text-apple-text">
                   {formNotice}
                 </div>
               )}
@@ -1722,7 +1707,7 @@ ${recentFortuneContext}
                 type="button"
                 onClick={handleSaveProfileOnly}
                 disabled={!isBaziFormComplete}
-                className="mt-8 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/10 px-3 py-3.5 text-sm font-bold text-apple-gold transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rail-button-secondary w-full md:col-span-2"
               >
                 <Library size={18} />
                 保存档案，用于关系合盘
@@ -1732,27 +1717,27 @@ ${recentFortuneContext}
                 <button
                   type="button"
                   onClick={openBaziPayment}
-                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_4px_20px_rgba(212,175,55,0.3)] transition-all active:scale-95"
+                  className="rail-button w-full md:col-span-2"
                 >
                   <Sparkles size={18} />
                   解锁完整八字档案 ¥19.9
                 </button>
               ) : !plusActive && energy <= 0 ? (
-                <button 
+                <button
                   onClick={() => {
                     setEnergy(5);
                     setFormNotice(null);
                   }}
-                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_14px_28px_rgba(185,123,40,0.20)] transition-all active:scale-95 hover:shadow-[0_16px_34px_rgba(185,123,40,0.24)] dark:from-blue-500 dark:to-blue-600 dark:text-white dark:shadow-[0_4px_20px_rgba(59,130,246,0.3)] dark:hover:shadow-[0_4px_25px_rgba(59,130,246,0.5)]"
+                  className="rail-button w-full md:col-span-2"
                 >
                   <Zap size={18} />
                   能量不足，点击补充能量
                 </button>
               ) : (
-                <button 
+                <button
                   onClick={handleCalculate}
                   disabled={!isBaziFormComplete}
-                  className="mt-3 flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-apple-gold to-[#B8860B] px-3 py-4 text-sm font-bold text-black shadow-[0_4px_20px_rgba(212,175,55,0.3)] transition-all active:scale-95 hover:shadow-[0_4px_25px_rgba(212,175,55,0.5)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rail-button w-full md:col-span-2"
                 >
                   <Sparkles size={18} />
                   开始推演 (消耗 1 能量)
@@ -1763,37 +1748,36 @@ ${recentFortuneContext}
         )}
 
         {isCalculating && (
-          <motion.div 
+          <motion.div role="status" aria-label="正在推演星轨与命理"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center py-32"
+            className="rail-panel flex flex-col items-center justify-center py-20"
           >
             <div className="relative">
               <div className="absolute inset-0 bg-apple-gold/20 rounded-full blur-xl animate-pulse"></div>
               <Compass className="w-16 h-16 text-apple-gold animate-spin-slow relative z-10" />
             </div>
-            <p className="mt-6 text-apple-gold font-sans tracking-widest animate-pulse">正在推演星轨与命理...</p>
+            <p className="mt-6 text-apple-gold font-sans animate-pulse">正在推演星轨与命理...</p>
           </motion.div>
         )}
 
         {baziUnlocked && baziResult && !isCalculating && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="space-y-6"
           >
             {/* Bazi Chart Card */}
-            <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] overflow-hidden relative">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-apple-gold/10 to-transparent rounded-bl-full pointer-events-none"></div>
-              
+            <div className="rail-panel overflow-hidden relative">
+
               <div className="flex justify-between items-center mb-6 relative z-10">
-                <h2 className="font-sans text-xl font-bold text-apple-gold flex items-center gap-2">
+                <h2 className="font-sans text-xl font-medium text-apple-gold flex items-center gap-2">
                   <Compass size={20} />
                   生辰排盘
                 </h2>
-                <button 
+                <button
                   onClick={() => setBaziResult(null)}
-                  className="flex items-center gap-1 text-sm text-apple-text-muted hover:text-apple-gold transition-colors bg-apple-surface px-3 py-1.5 rounded-full border border-apple-border"
+                  className="flex items-center gap-1 text-[15px] text-apple-text-muted hover:text-apple-gold transition-colors bg-apple-surface px-3 py-1.5 rounded-full border border-apple-border"
                 >
                   <RefreshCw size={14} /> 重新测算
                 </button>
@@ -1807,11 +1791,11 @@ ${recentFortuneContext}
                   { label: '时柱', data: baziResult.bazi.hour }
                 ].map((col, idx) => (
                   <div key={idx} className="flex flex-col items-center">
-                    <div className="text-xs text-apple-text-muted mb-2 tracking-widest">{col.label}</div>
-                    <div className="w-full bg-apple-surface border border-apple-border rounded-2xl py-5 flex flex-col items-center gap-4 shadow-sm">
-                      <span className="font-serif text-2xl font-bold text-apple-text">{col.data[0]}</span>
+                    <div className="text-[13px] text-apple-text-muted mb-2">{col.label}</div>
+                    <div className="w-full bg-apple-surface border border-apple-border rounded-2xl py-5 flex flex-col items-center gap-4">
+                      <span className="font-serif text-2xl font-medium text-apple-text">{col.data[0]}</span>
                       <div className="w-6 h-px bg-apple-gold/30"></div>
-                      <span className="font-serif text-2xl font-bold text-apple-text">{col.data[1]}</span>
+                      <span className="font-serif text-2xl font-medium text-apple-text">{col.data[1]}</span>
                     </div>
                   </div>
                 ))}
@@ -1820,10 +1804,10 @@ ${recentFortuneContext}
               {/* Pattern */}
               <div className="bg-apple-surface rounded-2xl p-4 border border-apple-border relative z-10">
                 <div className="flex items-start gap-3">
-                  <div className="bg-apple-gold/20 text-apple-gold border border-apple-gold/30 text-xs font-bold px-2 py-1 rounded mt-0.5 whitespace-nowrap">格局</div>
+                  <div className="bg-apple-gold/20 text-apple-gold border border-apple-gold/30 text-[13px] font-medium px-2 py-1 rounded mt-0.5 whitespace-nowrap">格局</div>
                   <div>
-                    <h4 className="font-bold text-apple-text mb-1">{baziResult.pattern.name}</h4>
-                    <p className="text-sm text-apple-text-muted">{baziResult.pattern.description}</p>
+                    <h3 className="rail-section-title mb-2">{baziResult.pattern.name}</h3>
+                    <p className="rail-body">{baziResult.pattern.description}</p>
                   </div>
                 </div>
               </div>
@@ -1831,20 +1815,20 @@ ${recentFortuneContext}
 
             {/* Daily Luck Card */}
             {baziResult.dailyLuck && (
-              <div className="bg-gradient-to-br from-apple-gold/20 to-[#B8860B]/10 border border-apple-gold/30 rounded-[2rem] p-6 shadow-lg text-apple-text relative overflow-hidden backdrop-blur-xl">
-                <div className="absolute top-0 right-0 w-40 h-40 bg-apple-surface rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>
-                <h3 className="font-serif text-lg font-bold mb-4 flex items-center gap-2 text-apple-gold">
+              <div className="rail-panel text-apple-text relative overflow-hidden">
+
+                <h3 className="font-sans text-lg font-semibold mb-4 flex items-center gap-2 text-apple-gold">
                   <Sparkles size={20} className="text-apple-gold" />
                   今日运势
                 </h3>
                 <div className="flex items-center gap-6">
-                  <div className="flex flex-col items-center justify-center w-20 h-20 rounded-full border-4 border-apple-gold/30 bg-apple-surface-hover backdrop-blur-sm">
-                    <span className="text-2xl font-bold font-serif text-apple-gold">{baziResult.dailyLuck.score}</span>
-                    <span className="text-[10px] opacity-80 text-apple-gold">分</span>
+                  <div className="flex flex-col items-center justify-center w-20 h-20 rounded-full border-4 border-apple-gold/30 bg-apple-surface-hover">
+                    <span className="text-2xl font-medium font-serif text-apple-gold">{baziResult.dailyLuck.score}</span>
+                    <span className="text-[13px] opacity-80 text-apple-gold">分</span>
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm leading-relaxed text-apple-text mb-2">{baziResult.dailyLuck.summary}</p>
-                    <div className="inline-block bg-apple-surface-hover border border-apple-border px-3 py-1 rounded-lg text-xs backdrop-blur-sm text-apple-gold">
+                    <p className="rail-body mb-3">{baziResult.dailyLuck.summary}</p>
+                    <div className="inline-block bg-apple-surface-hover border border-apple-border px-3 py-1 rounded-lg text-[13px] text-apple-gold">
                       吉时：{baziResult.dailyLuck.luckyHours}
                     </div>
                   </div>
@@ -1853,19 +1837,19 @@ ${recentFortuneContext}
             )}
 
             {/* Wuxing & Favorable Elements */}
-            <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-              <h3 className="font-serif text-lg font-bold text-apple-gold mb-4 flex items-center gap-2">
+            <div className="rail-panel">
+              <h3 className="font-sans text-lg font-semibold text-apple-gold mb-4 flex items-center gap-2">
                 <Zap size={20} />
                 五行强弱与喜用
               </h3>
-              
+
               <div className="flex items-center gap-4 mb-6">
-                <div className="bg-apple-gold/20 border border-apple-gold/30 text-apple-gold px-4 py-2 rounded-xl font-bold font-serif text-lg">
+                <div className="bg-apple-gold/20 border border-apple-gold/30 text-apple-gold px-4 py-2 rounded-xl font-medium font-serif text-lg">
                   {baziResult.wuxing.strength}
                 </div>
                 <div className="flex-1 bg-apple-surface rounded-xl p-3 border border-apple-border flex items-center justify-center gap-2">
-                  <span className="text-sm text-apple-text-muted">喜用神</span>
-                  <span className="font-bold text-apple-text">{baziResult.wuxing.favorable.join('、')}</span>
+                  <span className="text-[15px] text-apple-text-muted">喜用神</span>
+                  <span className="font-medium text-apple-text">{baziResult.wuxing.favorable.join('、')}</span>
                 </div>
               </div>
 
@@ -1879,27 +1863,27 @@ ${recentFortuneContext}
                     '金': 'bg-[#9CA3AF]',
                     '水': 'bg-[#60A5FA]'
                   };
-                  
+
                   const getWuxingIcon = (name: string) => {
                     switch (name) {
-                      case '木': return <Leaf size={24} className="text-[#4ADE80] mb-1 drop-shadow-sm" />;
-                      case '火': return <Flame size={24} className="text-[#F87171] mb-1 drop-shadow-sm" />;
-                      case '土': return <Mountain size={24} className="text-[#FBBF24] mb-1 drop-shadow-sm" />;
-                      case '金': return <Gem size={24} className="text-[#9CA3AF] mb-1 drop-shadow-sm" />;
-                      case '水': return <Waves size={24} className="text-[#60A5FA] mb-1 drop-shadow-sm" />;
+                      case '木': return <Leaf size={24} className="text-[#4ADE80] mb-1" />;
+                      case '火': return <Flame size={24} className="text-[#F87171] mb-1" />;
+                      case '土': return <Mountain size={24} className="text-[#FBBF24] mb-1" />;
+                      case '金': return <Gem size={24} className="text-[#9CA3AF] mb-1" />;
+                      case '水': return <Waves size={24} className="text-[#60A5FA] mb-1" />;
                       default: return <Sparkles size={24} className="text-apple-text-muted mb-1" />;
                     }
                   };
 
                   return (
-                    <div key={idx} className="flex items-center gap-3 text-sm">
+                    <div key={idx} className="flex items-center gap-3 text-[15px]">
                       <div className="w-10 flex flex-col items-center relative">
                         {getWuxingIcon(el.name)}
-                        <span className="font-bold text-xs text-apple-text">{el.name}</span>
-                        {el.isDayMaster && <span className="absolute -top-1 -right-2 text-[8px] bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-sm">主</span>}
+                        <span className="font-medium text-[13px] text-apple-text">{el.name}</span>
+                        {el.isDayMaster && <span className="absolute -top-1 -right-2 text-[8px] bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center">主</span>}
                       </div>
                       <div className="flex-1 h-3 bg-apple-surface rounded-full overflow-hidden border border-apple-border">
-                        <motion.div 
+                        <motion.div
                           initial={{ width: 0 }}
                           animate={{ width: `${el.percentage}%` }}
                           transition={{ duration: 1, delay: idx * 0.1 }}
@@ -1907,7 +1891,7 @@ ${recentFortuneContext}
                         />
                       </div>
                       <div className="w-10 text-right text-apple-text-muted font-medium">{el.percentage}%</div>
-                      <div className="w-24 text-right text-[11px] leading-tight text-apple-text-muted">{el.gods}</div>
+                      <div className="w-24 text-right text-[13px] leading-tight text-apple-text-muted">{el.gods}</div>
                     </div>
                   );
                 })}
@@ -1915,32 +1899,32 @@ ${recentFortuneContext}
 
               <div className="mt-6 grid grid-cols-3 gap-3">
                 <div className="bg-apple-surface rounded-xl p-3 border border-apple-border text-center">
-                  <div className="text-xs text-apple-text-muted mb-1">幸运颜色</div>
-                  <div className="text-sm font-bold text-apple-text">{baziResult.wuxing.luckyColors.join(' ')}</div>
+                  <div className="text-[13px] text-apple-text-muted mb-1">幸运颜色</div>
+                  <div className="text-[15px] font-medium text-apple-text">{baziResult.wuxing.luckyColors.join(' ')}</div>
                 </div>
                 <div className="bg-apple-surface rounded-xl p-3 border border-apple-border text-center">
-                  <div className="text-xs text-apple-text-muted mb-1">幸运方位</div>
-                  <div className="text-sm font-bold text-apple-text">{baziResult.wuxing.luckyDirections.join(' ')}</div>
+                  <div className="text-[13px] text-apple-text-muted mb-1">幸运方位</div>
+                  <div className="text-[15px] font-medium text-apple-text">{baziResult.wuxing.luckyDirections.join(' ')}</div>
                 </div>
                 <div className="bg-apple-surface rounded-xl p-3 border border-apple-border text-center">
-                  <div className="text-xs text-apple-text-muted mb-1">幸运数字</div>
-                  <div className="text-sm font-bold text-apple-text">{baziResult.wuxing.luckyNumbers.join(' ')}</div>
+                  <div className="text-[13px] text-apple-text-muted mb-1">幸运数字</div>
+                  <div className="text-[15px] font-medium text-apple-text">{baziResult.wuxing.luckyNumbers.join(' ')}</div>
                 </div>
               </div>
             </div>
 
             {/* Ten Gods Chart */}
-            <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-              <h3 className="font-serif text-lg font-bold text-apple-gold mb-6 flex items-center gap-2">
+            <div className="rail-panel">
+              <h3 className="font-sans text-lg font-semibold text-apple-gold mb-6 flex items-center gap-2">
                 <Star size={20} />
                 十神占比
               </h3>
               <div className="flex h-48 items-end gap-1 justify-between pt-4">
                 {baziResult.tenGods.map((god: any, idx: number) => (
                   <div key={idx} className="flex flex-col items-center flex-1 h-full">
-                    <div className="text-[10px] text-apple-text-muted mb-1">{god.percentage}%</div>
+                    <div className="text-[13px] text-apple-text-muted mb-1">{god.percentage}%</div>
                     <div className="w-full flex-1 flex items-end justify-center relative">
-                      <motion.div 
+                      <motion.div
                         initial={{ height: 0 }}
                         animate={{ height: `${Math.max(god.percentage, 2)}%` }}
                         transition={{ duration: 1, delay: idx * 0.05 }}
@@ -1948,15 +1932,15 @@ ${recentFortuneContext}
                         style={{ backgroundColor: god.color }}
                       />
                     </div>
-                    <div className="text-xs font-medium text-apple-text mt-2" style={{ writingMode: 'vertical-rl' }}>{god.name}</div>
+                    <div className="text-[13px] font-medium text-apple-text mt-2" style={{ writingMode: 'vertical-rl' }}>{god.name}</div>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Shensha */}
-            <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-              <h3 className="font-serif text-lg font-bold text-apple-gold mb-4 flex items-center gap-2">
+            <div className="rail-panel">
+              <h3 className="font-sans text-lg font-semibold text-apple-gold mb-4 flex items-center gap-2">
                 <Sparkles size={20} />
                 神煞解析
               </h3>
@@ -1966,7 +1950,7 @@ ${recentFortuneContext}
                   return (
                     <div key={idx}>
                       <div className={cn(
-                        "text-sm font-bold mb-2 flex items-center gap-2",
+                        "text-[15px] font-medium mb-2 flex items-center gap-2",
                         isBad ? "text-rose-400" : "text-apple-gold"
                       )}>
                         <div className={cn(
@@ -1978,9 +1962,9 @@ ${recentFortuneContext}
                       <div className="flex flex-wrap gap-2">
                         {group.items.map((item: string, i: number) => (
                           <span key={i} className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm shadow-sm border",
-                            isBad 
-                              ? "bg-rose-500/10 border-rose-500/30 text-rose-300" 
+                            "px-3 py-1.5 rounded-lg text-[15px] border",
+                            isBad
+                              ? "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
                               : "bg-apple-surface border-apple-border text-apple-text"
                           )}>
                             {item}
@@ -1994,32 +1978,33 @@ ${recentFortuneContext}
             </div>
 
             {/* Analysis Cards */}
-            <div className="grid grid-cols-1 gap-4">
-              <AnalysisCard 
-                icon={<User className="text-apple-gold" size={20} />} 
-                title="性格特质" 
-                content={baziResult.personality} 
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <AnalysisCard
+                icon={<User className="text-apple-gold" size={20} />}
+                title="性格特质"
+                content={baziResult.personality}
               />
-              <AnalysisCard 
-                icon={<Briefcase className="text-apple-gold" size={20} />} 
-                title="事业学业" 
-                content={baziResult.career} 
+              <AnalysisCard
+                icon={<Briefcase className="text-apple-gold" size={20} />}
+                title="事业学业"
+                content={baziResult.career}
               />
-              <AnalysisCard 
-                icon={<Heart className="text-apple-gold" size={20} />} 
-                title="感情运势" 
-                content={baziResult.romance} 
+              <AnalysisCard
+                icon={<Heart className="text-apple-gold" size={20} />}
+                title="感情运势"
+                content={baziResult.romance}
               />
             </div>
 
             {/* Chat Interface */}
-            <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] mt-8">
-              <h3 className="font-serif text-lg font-bold text-apple-gold mb-4 flex items-center gap-2">
+            <div className="rail-panel mt-8">
+              <h3 className="font-sans text-lg font-semibold text-apple-gold mb-4 flex items-center gap-2">
                 <Sparkles size={20} />
                 大师解惑
               </h3>
               <button
                 type="button"
+                aria-pressed={useRecentFortuneContext}
                 onClick={() => {
                   setUseRecentFortuneContext((value) => {
                     const next = !value;
@@ -2037,8 +2022,8 @@ ${recentFortuneContext}
                 <span className="flex min-w-0 items-start gap-3">
                   <Clock size={17} className="mt-0.5 shrink-0 text-apple-gold" />
                   <span>
-                    <span className="block text-sm font-bold">近期运势参考</span>
-                    <span className="mt-1 block text-xs leading-relaxed text-apple-text-muted">
+                    <span className="block text-[15px] font-medium">近期运势参考</span>
+                    <span className="mt-1 block text-[13px] leading-relaxed text-apple-text-muted">
                       问最近、今日、本月运势时，大师会结合当前日期、现居地、流年流月流日推断。
                     </span>
                   </span>
@@ -2046,33 +2031,34 @@ ${recentFortuneContext}
                 <span
                   className={cn(
                     'relative h-7 w-12 shrink-0 rounded-full border transition-colors',
-                    useRecentFortuneContext ? 'border-apple-gold/60 bg-apple-gold/35' : 'border-apple-border bg-apple-surface-hover dark:border-white/10 dark:bg-white/[0.06]',
+                    useRecentFortuneContext ? 'border-apple-gold/60 bg-apple-gold/35' : 'border-apple-border bg-apple-surface-hover',
                   )}
                 >
                   <span
                     className={cn(
-                      'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform',
+                      'absolute top-1 h-5 w-5 rounded-full bg-white transition-transform',
                       useRecentFortuneContext ? 'translate-x-5' : 'translate-x-1',
                     )}
                   />
                 </span>
               </button>
               {recentFortuneStatus && (
-                <div className="mb-4 rounded-2xl border border-apple-accent/20 bg-apple-accent/10 p-3 text-xs leading-relaxed text-apple-text-muted">
+                <div className="mb-4 rounded-2xl border border-apple-accent/20 bg-apple-accent/10 p-3 text-[13px] leading-relaxed text-apple-text-muted">
                   {recentFortuneStatus}
                 </div>
               )}
-              
-              <div 
+
+              <div
                 ref={chatContainerRef}
+                role="log" aria-label="命理问答记录" aria-live="polite"
                 className="h-64 overflow-y-auto mb-4 space-y-4 pr-2 scrollbar-thin scrollbar-thumb-[#D4AF37]/50 scrollbar-track-transparent"
               >
                 {baziMessages.map((msg) => (
                   <div key={msg.id} className={cn("flex", msg.role === 'user' ? "justify-end" : "justify-start")}>
                     <div className={cn(
-                      "max-w-[85%] rounded-2xl p-3 text-sm leading-relaxed",
-                      msg.role === 'user' 
-                        ? "bg-apple-gold/20 text-apple-gold border border-apple-gold/30 rounded-br-sm" 
+                      "max-w-[90%] rounded-2xl p-4 text-base leading-7 whitespace-pre-wrap break-words",
+                      msg.role === 'user'
+                        ? "bg-apple-gold/20 text-apple-gold border border-apple-gold/30 rounded-br-sm"
                         : "bg-apple-surface border border-apple-border text-apple-text rounded-bl-sm"
                     )}>
                       {msg.text}
@@ -2083,25 +2069,25 @@ ${recentFortuneContext}
                   <div className="flex justify-start">
                     <div className="bg-apple-surface border border-apple-border rounded-2xl rounded-bl-sm p-4 flex items-center gap-2">
                       <Loader2 size={16} className="animate-spin text-apple-gold" />
-                      <span className="text-sm text-apple-text-muted">大师正在推演...</span>
+                      <span className="text-[15px] text-apple-text-muted">大师正在推演...</span>
                     </div>
                   </div>
                 )}
               </div>
 
               <div className="flex gap-2">
-                <input 
-                  type="text" 
+                <input aria-label="向命理大师提问"
+                  type="text"
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                  onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSendMessage()}
                   placeholder="比如：我最近事业运怎么样？"
-                  className="flex-1 bg-apple-surface border border-apple-border rounded-xl px-4 py-3 text-sm text-apple-text focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 transition-all placeholder:text-apple-text-muted"
+                  className="rail-field min-w-0 flex-1"
                 />
-                <button 
+                <button
                   onClick={handleSendMessage}
                   disabled={!chatInput.trim() || isChatting}
-                  className="bg-apple-gold/20 border border-apple-gold/30 text-apple-gold px-4 py-3 rounded-xl hover:bg-apple-gold/30 transition-colors disabled:opacity-50 flex items-center justify-center"
+                  className="rail-button"
                 >
                   发送
                 </button>
@@ -2117,14 +2103,14 @@ ${recentFortuneContext}
 
 function AnalysisCard({ icon, title, content }: { icon: React.ReactNode, title: string, content: string }) {
   return (
-    <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-[2rem] p-6 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+    <div className="rail-panel">
       <div className="flex items-center gap-3 mb-3">
         <div className="p-2 rounded-xl bg-apple-surface border border-apple-border">
           {icon}
         </div>
-        <h3 className="font-serif text-lg font-bold text-apple-text">{title}</h3>
+        <h3 className="font-sans text-lg font-semibold text-apple-text">{title}</h3>
       </div>
-      <p className="text-sm text-apple-text-muted leading-relaxed">
+      <p className="rail-reader">
         {content}
       </p>
     </div>
@@ -2138,25 +2124,25 @@ function RelationshipInviteGuide({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={cn(
-      'mt-3 rounded-2xl border border-apple-gold/18 bg-apple-gold/[0.07] text-apple-text-muted dark:border-white/10 dark:bg-white/[0.04]',
+      'mt-3 rounded-2xl border border-apple-gold/18 bg-apple-gold/[0.07] text-apple-text-muted',
       compact ? 'p-2.5' : 'p-3',
     )}>
-      <div className="flex items-center gap-2 text-[11px] font-black text-apple-gold">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-apple-gold">
         <Link2 size={13} />
         邀请加入方式
       </div>
       <div className="mt-2 grid grid-cols-3 gap-1.5">
         {steps.map((step, index) => (
-          <div key={step} className="rounded-xl border border-apple-border bg-apple-surface/70 px-2 py-2 text-center dark:border-white/10 dark:bg-black/15">
-            <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-gold text-[10px] font-black text-[#11131a]">
+          <div key={step} className="rounded-xl border border-apple-border bg-apple-surface px-2 py-2 text-center">
+            <div className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-apple-text text-[13px] font-semibold text-apple-bg">
               {index + 1}
             </div>
-            <div className="text-[10px] font-bold leading-snug text-apple-text">{step}</div>
+            <div className="text-[13px] font-medium leading-snug text-apple-text">{step}</div>
           </div>
         ))}
       </div>
       {!compact && (
-        <p className="mt-2 text-[11px] leading-relaxed">
+        <p className="mt-2 text-[13px] leading-relaxed">
           TA 打开链接后，会自动带入你的档案；如果微信里打不开，让 TA 点右上角用浏览器打开。
         </p>
       )}

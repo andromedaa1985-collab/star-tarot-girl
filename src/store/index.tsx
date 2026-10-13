@@ -269,7 +269,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark') return saved;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return 'light';
   });
   const [baziResult, setBaziResult] = useState<any | null>(() => readStoredJson('baziResult', null));
   const [baziFormData, setBaziFormData] = useState<any>(() => {

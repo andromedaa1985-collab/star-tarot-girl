@@ -1,13 +1,12 @@
+import PageHeader from '../components/ui/PageHeader';
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   CheckCircle2,
-  ChevronLeft,
   Cloud,
   Database,
   Download,
-  KeyRound,
   Shield,
   Trash2,
 } from 'lucide-react';
@@ -21,9 +20,9 @@ type PrivacyNotice = {
 
 const privacyPoints = [
   {
-    icon: <KeyRound size={18} />,
-    title: 'API key 不在前端',
-    desc: '网页只调用后端 /api/* 通道，模型密钥应放在 Netlify 环境变量或服务端配置里，不会打包进浏览器代码。',
+    icon: <Shield size={18} />,
+    title: '模型密钥由服务端保管',
+    desc: '应用通过服务端访问模型，模型密钥不会包含在浏览器加载的网页代码中。',
   },
   {
     icon: <Database size={18} />,
@@ -62,41 +61,32 @@ export default function Privacy() {
   };
 
   return (
-    <div className="relative h-full w-full overflow-y-auto overscroll-contain px-6 pt-4 pb-40 text-apple-text no-scrollbar">
-      <div className="mb-8 flex items-center">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          aria-label="返回"
-          className="-ml-2 rounded-full p-2 text-apple-text transition-colors hover:bg-apple-surface-hover"
-        >
-          <ChevronLeft size={24} />
-        </button>
-        <h1 className="ml-2 font-sans text-2xl font-bold tracking-widest text-[#6B8AFF]">隐私与存档</h1>
-      </div>
+    <div className="rail-page">
+      <div className="rail-page-content">
+      <PageHeader eyebrow="信任与透明" title="隐私与存档" description="了解记录如何使用，随时备份和管理自己的数据。" backTo="/app/settings" />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="flex flex-col gap-6"
       >
-        <section className="rounded-3xl border border-apple-border bg-apple-surface p-5 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
+        <section className="rail-panel">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-apple-gold/25 bg-apple-gold/12 text-apple-gold">
               <Shield size={20} />
             </div>
             <div className="min-w-0">
-              <div className="text-base font-bold text-apple-text">你的记录不是用来打扰你的</div>
-              <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
+              <div className="text-base font-semibold text-apple-text">你的记录不是用来打扰你的</div>
+              <p className="mt-2 text-base leading-[1.85] text-apple-text-muted">
                 星轨塔罗少女会用你的历史记录生成更贴近你的复盘，但不会把模型密钥放在前端，也不会把本机存档默认公开。
               </p>
             </div>
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-3xl border border-apple-border bg-apple-surface shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
+        <section className="rail-surface overflow-hidden">
           <div className="border-b border-apple-border px-5 py-3">
-            <span className="text-xs font-medium tracking-widest text-apple-text-muted">信任说明</span>
+            <span className="text-[13px] font-medium text-apple-text-muted">信任说明</span>
           </div>
           <div className="divide-y divide-apple-border">
             {privacyPoints.map((point) => (
@@ -105,21 +95,21 @@ export default function Privacy() {
                   {point.icon}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold tracking-wide text-apple-text">{point.title}</div>
-                  <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">{point.desc}</p>
+                  <div className="text-base font-medium text-apple-text">{point.title}</div>
+                  <p className="mt-2 text-[15px] leading-[1.85] text-apple-text-muted">{point.desc}</p>
                 </div>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="rounded-3xl border border-apple-border bg-apple-surface p-5 shadow-[0_14px_38px_rgba(117,82,42,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-          <div className="text-xs font-medium tracking-widest text-apple-text-muted">存档操作</div>
-          <div className="mt-4 grid grid-cols-1 gap-3">
+        <section className="rail-panel">
+          <div className="text-[13px] font-medium text-apple-text-muted">存档操作</div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={handleExportBackup}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-apple-gold px-4 py-3 text-sm font-bold text-[#121018] shadow-[0_10px_24px_rgba(185,123,40,0.18)]"
+              className="rail-button"
             >
               <Download size={16} />
               导出本机存档
@@ -127,13 +117,13 @@ export default function Privacy() {
             <button
               type="button"
               onClick={() => navigate('/app/settings')}
-              className="flex items-center justify-center gap-2 rounded-2xl border border-apple-border bg-apple-surface-hover px-4 py-3 text-sm font-bold text-apple-text"
+              className="rail-button-secondary"
             >
               <Trash2 size={16} />
               管理导入与清空
             </button>
           </div>
-          <p className="mt-3 text-xs leading-relaxed text-apple-text-muted">
+          <p className="mt-3 text-[13px] leading-[1.8] text-apple-text-muted">
             清空本机记录前建议先导出备份。有效 Plus 权益和已领取试用状态会尽量保留，避免误删记录时连权益一起丢失。
           </p>
 
@@ -143,6 +133,7 @@ export default function Privacy() {
         </section>
       </motion.div>
     </div>
+      </div>
   );
 }
 
@@ -150,9 +141,9 @@ function NoticeBox({ notice }: { notice: PrivacyNotice }) {
   const isError = notice.type === 'error';
   return (
     <div
-      className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-relaxed ${
+      role="status" className={`mt-4 flex items-start gap-2 rounded-2xl border px-3 py-2 text-[13px] leading-[1.8] ${
         isError
-          ? 'border-red-500/25 bg-red-500/10 text-red-300'
+          ? 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300'
           : 'border-apple-gold/25 bg-apple-gold/10 text-apple-text'
       }`}
     >

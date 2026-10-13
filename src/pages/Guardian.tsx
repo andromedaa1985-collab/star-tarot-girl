@@ -17,6 +17,8 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import PageHeader from '../components/ui/PageHeader';
+import { useDialogFocus } from '../lib/useDialogFocus';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -39,7 +41,7 @@ const moodLabels: Record<string, string> = {
 };
 
 export default function Guardian() {
-  const { 
+  const {
     userName, preferredAddress, bondLevel, setBondExp,
     diaryEntries, baziResult,
     tarotReadings, simulationHistory, profiles, activeProfileId,
@@ -48,12 +50,14 @@ export default function Guardian() {
     dailyLetterDate, setDailyLetterDate,
     setAppEvents
   } = useAppContext();
-  
+
   const [input, setInput, clearInputDraft] = usePersistentDraft('draft:guardian:input', '');
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const letterDialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(letterDialogRef, showLetter, () => setShowLetter(false));
 
   const todayStr = new Date().toLocaleDateString('zh-CN');
   const hasLetterToday = dailyLetterDate === todayStr && dailyLetter;
@@ -296,45 +300,17 @@ export default function Guardian() {
 
   return (
     <div className="relative h-full w-full overflow-hidden text-apple-text">
-      {/* Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <picture>
-          {/* 横版图片 (图2) 放在这里的 srcSet 里 */}
-          <source media="(min-aspect-ratio: 1/1)" srcSet="/image-262.png" />
-          {/* 竖版图片 (图1) 放在这里的 src 里 */}
-          <img src="/image-259.png" alt="Guardian Background" className="w-full h-full object-cover opacity-60 dark:opacity-40" referrerPolicy="no-referrer" />
-        </picture>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-apple-bg/50 to-apple-bg"></div>
-      </div>
-      
-      <div className="relative z-10 h-full overflow-y-auto overscroll-contain px-4 pb-[calc(var(--app-bottom-pad)+150px)] pt-7 no-scrollbar sm:px-6 sm:pt-9">
-      {/* Header & Guardian Orb */}
-      <div className="mx-auto flex w-full max-w-md flex-col items-center pb-6">
-        <h1 className="font-serif text-2xl font-bold tracking-widest text-apple-accent mb-4 relative z-10 dark:text-[#6B8AFF]">星轨守护</h1>
-        
-        {/* The "Guardian" Orb */}
-        <div className="relative mb-5 flex h-24 w-24 items-center justify-center">
-          <motion.div 
-            animate={{ scale: isTyping ? [1, 1.1, 1] : [1, 1.05, 1], opacity: 0.4 }}
-            transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute inset-0 bg-apple-gold rounded-full blur-2xl dark:bg-[#6B8AFF]"
-          />
-          <motion.div 
-            animate={{ scale: isTyping ? [1, 1.05, 1] : [1, 1.02, 1] }}
-            transition={{ duration: isTyping ? 1.5 : 4, repeat: Infinity, ease: "easeInOut" }}
-            className="relative w-16 h-16 bg-gradient-to-tr from-apple-gold to-[#dcb66f] rounded-full shadow-[0_18px_38px_rgba(185,123,40,0.26)] flex items-center justify-center overflow-hidden border border-apple-border dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:shadow-[0_0_30px_rgba(107,138,255,0.6)]"
-          >
-            <Moon size={28} className="text-white/90 drop-shadow-md" fill="currentColor" />
-          </motion.div>
-        </div>
-
+      <div className="rail-page pb-[calc(180px+var(--rail-nav-height)+var(--app-safe-bottom))]">
+        <PageHeader eyebrow="陪伴与回访" title="星轨守护" description="从你的近况里找一点线索，也留一个可以安心说话的地方。" />
+        <div className="rail-page-content pb-8">
         {/* Daily Letter Trigger */}
-        <div className="w-full max-w-md relative z-10">
+        <div className="grid gap-4 md:grid-cols-2">
           {!hasLetterToday ? (
-            <button 
+            <button
               onClick={generateDailyLetter}
               disabled={isGeneratingLetter}
-              className="w-full bg-apple-surface backdrop-blur-xl p-4 rounded-2xl border border-apple-border hover:bg-apple-surface-hover transition-all flex items-center justify-between shadow-sm group"
+              aria-busy={isGeneratingLetter}
+              className="rail-panel w-full flex items-center justify-between gap-3 text-left hover:bg-apple-surface-hover group"
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-apple-accent/10 flex items-center justify-center text-apple-accent">
@@ -342,7 +318,7 @@ export default function Guardian() {
                 </div>
                 <div className="text-left">
                   <div className="font-medium text-apple-text">今日守护回访</div>
-                  <div className="text-xs text-apple-text-muted">
+                  <div className="text-[13px] text-apple-text-muted">
                     {guardianContextLines.length ? `回看 ${guardianContextLines.length} 条档案线索` : '先从一条近况线索开始'}
                   </div>
                 </div>
@@ -350,28 +326,28 @@ export default function Guardian() {
               <Sparkles size={16} className="text-apple-accent opacity-50 group-hover:opacity-100 transition-opacity" />
             </button>
           ) : (
-            <button 
+            <button
               onClick={() => setShowLetter(true)}
-              className="w-full bg-gradient-to-r from-apple-gold to-[#dcb66f] p-4 rounded-2xl text-[#17130f] transition-all flex items-center justify-between shadow-lg shadow-[rgba(185,123,40,0.18)] dark:from-[#6B8AFF] dark:to-[#8BA4FF] dark:text-white dark:shadow-[#6B8AFF]/20"
+              className="rail-panel w-full flex items-center justify-between gap-3 text-left hover:bg-apple-surface-hover"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                <div className="w-10 h-10 rounded-full bg-apple-accent/10 text-apple-accent flex items-center justify-center">
                   <Mail size={20} />
                 </div>
                 <div className="text-left">
                   <div className="font-medium">查看今日回访</div>
-                  <div className="text-xs text-white/75">已生成，随时可以重温</div>
+                  <div className="rail-muted">已生成，随时可以重温</div>
                 </div>
               </div>
             </button>
           )}
-          <div className="mt-3 rounded-2xl border border-apple-border bg-apple-surface/90 p-4 text-left shadow-sm backdrop-blur-xl">
+          <div className="rail-panel text-left">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-apple-text">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
                 <History size={16} className="text-apple-accent" />
                 今日引用线索
               </div>
-              <div className="flex items-center gap-1 rounded-full bg-apple-accent/10 px-2.5 py-1 text-[11px] font-medium text-apple-accent">
+              <div className="flex items-center gap-1 rounded-full bg-apple-accent/10 px-2.5 py-1 text-[13px] font-medium text-apple-accent">
                 <ScrollText size={12} />
                 档案 + 近 7 天
               </div>
@@ -379,16 +355,16 @@ export default function Guardian() {
             {visibleContextLines.length ? (
               <div className="space-y-2">
                 {visibleContextLines.map((line) => (
-                  <div key={line} className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+                  <div key={line} className="rounded-xl bg-apple-bg px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
                     {line}
                   </div>
                 ))}
                 {hiddenContextCount > 0 && (
-                  <div className="text-xs font-medium text-apple-accent">还有 {hiddenContextCount} 条线索会放进回访里</div>
+                  <div className="text-[13px] font-medium text-apple-accent">还有 {hiddenContextCount} 条线索会放进回访里</div>
                 )}
               </div>
             ) : (
-              <div className="rounded-xl bg-apple-bg/55 px-3 py-2 text-xs leading-relaxed text-apple-text-muted">
+              <div className="rounded-xl bg-apple-bg px-3 py-2 text-[13px] leading-relaxed text-apple-text-muted">
                 还没有可引用的近况。写一篇日记、抽一次牌，或做一次沙盘后，守护会更像是在接着你的故事说话。
               </div>
             )}
@@ -397,9 +373,9 @@ export default function Guardian() {
       </div>
 
       {/* Chat Area */}
-      <div className="mx-auto w-full max-w-md space-y-6 pb-6">
+      <div className="rail-page-content space-y-6 pb-6" role="log" aria-label="与守护的对话" aria-live="polite">
           {guardianMessages.map((msg) => (
-            <motion.div 
+            <motion.div
               key={msg.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -409,22 +385,22 @@ export default function Guardian() {
               )}
             >
               <div className={clsx(
-                "max-w-[80%] rounded-3xl px-5 py-3.5 text-[15px] leading-relaxed shadow-sm",
-                msg.role === 'user' 
-                  ? "bg-apple-gold text-[#17130f] rounded-tr-sm dark:bg-[#6B8AFF] dark:text-white" 
-                  : "bg-apple-surface backdrop-blur-xl border border-apple-border rounded-tl-sm text-apple-text"
+                "max-w-[88%] rounded-[20px] px-5 py-4 text-base leading-7 whitespace-pre-wrap break-words sm:max-w-[76%]",
+                msg.role === 'user'
+                  ? "bg-apple-text text-apple-bg rounded-tr-sm"
+                  : "bg-apple-surface border border-apple-border rounded-tl-sm text-apple-text"
               )}>
                 {msg.text}
               </div>
             </motion.div>
           ))}
-          
+
           {isTyping && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              className="flex justify-start"
+              className="flex justify-start" role="status" aria-label="守护正在回复"
             >
-              <div className="bg-apple-surface backdrop-blur-xl border border-apple-border rounded-3xl rounded-tl-sm px-5 py-4 flex gap-1.5 shadow-sm">
+              <div className="bg-apple-surface border border-apple-border rounded-[20px] rounded-tl-sm px-5 py-4 flex gap-1.5">
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
                 <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} className="w-2 h-2 bg-apple-accent/50 rounded-full" />
@@ -436,21 +412,22 @@ export default function Guardian() {
       </div>
 
       {/* Input Area */}
-      <div className="fixed left-0 w-full px-4 pb-4 bg-gradient-to-t from-apple-bg via-apple-bg/95 to-transparent pt-10 z-20 dark:from-[#05050A] dark:via-[#05050A]" style={{ bottom: 'calc(var(--app-bottom-pad) + 76px)' }}>
-        <div className="max-w-md mx-auto relative">
+      <div className="absolute inset-x-0 z-20 border-t border-apple-border bg-apple-bg px-5 py-4 sm:px-10" style={{ bottom: 'calc(var(--rail-nav-height) + var(--app-safe-bottom))' }}>
+        <div className="mx-auto max-w-[960px] relative">
           <input
+            aria-label="向守护倾诉"
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSend()}
             placeholder="向守护灵倾诉..."
-            className="w-full bg-apple-surface backdrop-blur-xl border border-apple-border rounded-full pl-6 pr-14 py-4 text-[15px] focus:outline-none focus:ring-2 focus:ring-apple-accent/35 shadow-[0_12px_34px_rgba(117,82,42,0.13)] text-apple-text placeholder:text-apple-text-muted/55 dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
+            className="rail-field pr-16"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
             aria-label="发送给守护"
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-apple-gold text-[#17130f] rounded-full flex items-center justify-center shadow-[0_12px_24px_rgba(185,123,40,0.20)] disabled:opacity-50 disabled:shadow-none transition-all hover:bg-[#c88a34] dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_0_15px_rgba(107,138,255,0.4)] dark:hover:bg-[#5A75E6]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-xl bg-apple-text text-apple-bg disabled:opacity-50 hover:opacity-85"
           >
             <Send size={18} className="ml-0.5" />
           </button>
@@ -460,42 +437,43 @@ export default function Guardian() {
       {/* Daily Letter Modal */}
       <AnimatePresence>
         {showLetter && dailyLetter && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center p-3 pb-[calc(12px+var(--app-safe-bottom))] pt-[calc(12px+var(--app-safe-top))] sm:items-center sm:p-6">
-            <motion.div 
+          <div className="fixed inset-0 z-[160] flex items-end justify-center p-3 pb-[calc(12px+var(--app-safe-bottom))] pt-[calc(12px+var(--app-safe-top))] sm:items-center sm:p-6">
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60"
               onClick={() => setShowLetter(false)}
             />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative z-10 flex w-full max-w-md flex-col rounded-[30px] border border-apple-border bg-apple-surface p-5 shadow-2xl backdrop-blur-xl sm:p-7"
+              ref={letterDialogRef}
+              role="dialog" aria-modal="true" aria-labelledby="guardian-letter-title" tabIndex={-1}
+              className="relative z-10 flex w-full max-w-2xl flex-col rounded-[20px] border border-apple-border bg-apple-surface p-5 sm:p-7"
               style={{
                 height: 'min(82svh, 680px)',
                 maxHeight: 'calc(100svh - var(--app-safe-top) - var(--app-safe-bottom) - 24px)',
               }}
             >
-              <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-apple-accent/10 to-transparent rounded-t-3xl pointer-events-none shrink-0"></div>
-              
+
               <div className="flex justify-center mb-4 relative z-10 shrink-0">
                 <div className="w-12 h-12 rounded-full bg-apple-accent/10 flex items-center justify-center">
                   <Moon size={24} className="text-apple-accent" />
                 </div>
               </div>
-              
-              <h3 className="font-serif font-bold text-xl text-center text-apple-text mb-4 tracking-widest relative z-10 shrink-0">
+
+              <h2 id="guardian-letter-title" className="font-serif text-2xl text-center text-apple-text mb-5 relative z-10 shrink-0">
                 今日守护回访
-              </h3>
-              
-              <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg/48 p-4 pr-3 font-serif text-[15px] leading-8 text-apple-text-muted whitespace-pre-wrap custom-scrollbar">
+              </h2>
+
+              <div className="relative z-10 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-apple-border/70 bg-apple-bg p-4 pr-3 text-base leading-8 text-apple-text whitespace-pre-wrap custom-scrollbar">
                 {dailyLetter}
               </div>
-              
+
               <div className="mt-6 flex justify-center relative z-10 shrink-0 pt-2">
-                <button 
+                <button
                   onClick={() => setShowLetter(false)}
-                  className="px-8 py-3 bg-apple-gold text-[#17130f] rounded-full font-bold shadow-[0_12px_24px_rgba(185,123,40,0.20)] hover:bg-[#c88a34] transition-colors dark:bg-[#6B8AFF] dark:text-white dark:shadow-[0_4px_15px_rgba(107,138,255,0.3)] dark:hover:bg-[#5A75E6]"
+                  className="rail-button px-10"
                 >
                   收下回访
                 </button>

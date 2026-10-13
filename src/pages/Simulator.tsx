@@ -23,6 +23,7 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import PageHeader from '../components/ui/PageHeader';
 
 interface SimulationResult {
   choiceA: {
@@ -510,31 +511,11 @@ ${userAddressInstruction}
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto overscroll-contain px-4 pt-5 pb-36 text-apple-text no-scrollbar sm:px-6 sm:pt-8">
-      <div className="mx-auto max-w-3xl space-y-5">
-        <section className="relative overflow-hidden rounded-[34px] border border-apple-border bg-[linear-gradient(145deg,rgba(255,252,246,0.94),rgba(244,232,214,0.72))] p-5 shadow-[0_22px_58px_rgba(117,82,42,0.14)] backdrop-blur-2xl dark:border-white/10 dark:bg-[linear-gradient(145deg,rgba(24,29,42,0.94),rgba(8,10,18,0.88))] dark:shadow-[0_24px_68px_rgba(0,0,0,0.42)]">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(185,123,40,0.08)_1px,transparent_1px),linear-gradient(180deg,rgba(185,123,40,0.08)_1px,transparent_1px)] bg-[length:36px_36px] opacity-45 dark:opacity-25" />
-          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/45 to-transparent" />
-
-          <div className="relative z-10 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-apple-gold/26 bg-apple-gold/10 px-3 py-1.5 text-xs font-bold text-apple-gold">
-                <Sparkles size={14} />
-                双线推演
-              </div>
-              <h1 className="text-[28px] font-black leading-tight tracking-tight text-apple-text sm:text-4xl">
-                命运沙盘
-              </h1>
-              <p className="mt-2 max-w-md text-sm leading-relaxed text-apple-text-muted">
-                把纠结拆成两条路：短期会发生什么，长期会付出什么，哪条代价更值得承受。
-              </p>
-            </div>
-            <div className="shrink-0 rounded-[24px] border border-apple-gold/24 bg-apple-surface/72 p-3 text-apple-gold shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] dark:bg-white/[0.055]">
-              <GitMerge size={28} />
-            </div>
-          </div>
-
-          <div className="relative z-10 mt-5 grid grid-cols-3 gap-2">
+    <div className="rail-page">
+      <PageHeader eyebrow="把选择想清楚" title="命运沙盘" description="把纠结拆成两条路，看看短期变化、长期代价，以及你愿意承担的风险。" />
+      <div className="rail-page-content space-y-6">
+        <section className="rail-surface p-4">
+          <div className="grid grid-cols-3 gap-3">
             <SignalPill label="命主" value={currentBazi?.name || '未绑定'} active={Boolean(currentBazi?.name)} />
             <SignalPill label="历史" value={`${simulationHistory.length} 次`} active={simulationHistory.length > 0} />
             <SignalPill label="模式" value="A/B" active />
@@ -542,13 +523,13 @@ ${userAddressInstruction}
         </section>
 
         {simulationHistory.length > 0 && !result && !isSimulating && (
-          <section className="rounded-[28px] border border-apple-border bg-apple-surface/72 p-3 shadow-[0_14px_38px_rgba(117,82,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.045] dark:shadow-[0_12px_34px_rgba(0,0,0,0.28)]">
+          <section className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-black text-apple-text">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
                 <History size={16} className="text-apple-gold" />
                 沙盘档案
               </div>
-              <span className="text-[11px] text-apple-text-muted">可回看、可继续问</span>
+              <span className="text-[13px] text-apple-text-muted">可回看、可继续问</span>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               {simulationHistory.slice(0, 3).map((item) => (
@@ -584,11 +565,11 @@ ${userAddressInstruction}
               exit={{ opacity: 0, y: -18 }}
               className="space-y-4"
             >
-              <div className="rounded-[32px] border border-apple-border bg-apple-surface/82 p-4 shadow-[0_18px_48px_rgba(117,82,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111722]/78 dark:shadow-[0_18px_52px_rgba(0,0,0,0.34)]">
+              <div className="rail-panel">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-base font-black text-apple-text">不知道怎么问，先选方向</div>
-                    <p className="mt-1 text-xs text-apple-text-muted">适合只有大概烦恼、还没组织好问题的时候。</p>
+                    <div className="rail-section-title">不知道怎么问，先选方向</div>
+                    <p className="mt-1 text-[13px] text-apple-text-muted">适合只有大概烦恼、还没组织好问题的时候。</p>
                   </div>
                 </div>
                 <div className="mb-3 grid grid-cols-4 gap-2 sm:grid-cols-8">
@@ -596,12 +577,13 @@ ${userAddressInstruction}
                     <button
                       key={category}
                       type="button"
+                      aria-pressed={selectedPresetCategory === category}
                       onClick={() => setSelectedPresetCategory(category)}
                       className={clsx(
-                        'rounded-full border px-2 py-2 text-xs font-bold transition-transform active:scale-[0.98]',
+                        'rounded-full border px-2 py-2 text-[13px] font-medium transition-transform active:scale-[0.98]',
                         selectedPresetCategory === category
-                          ? 'border-apple-gold/42 bg-apple-gold text-[#17130f] shadow-[0_10px_24px_rgba(185,123,40,0.18)]'
-                          : 'border-apple-border bg-apple-surface/72 text-apple-text-muted dark:border-white/10 dark:bg-white/[0.045]',
+                          ? 'border-apple-gold/42 bg-apple-text text-apple-bg'
+                          : 'border-apple-border bg-apple-surface text-apple-text-muted',
                       )}
                     >
                       {category}
@@ -614,31 +596,32 @@ ${userAddressInstruction}
                       key={preset.label}
                       type="button"
                       onClick={() => applyPreset(preset)}
-                      className="group rounded-[22px] border border-apple-border bg-apple-surface/72 p-3 text-left transition-transform active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.045]"
+                      className="group rounded-[20px] border border-apple-border bg-apple-surface p-3 text-left transition-transform active:scale-[0.98]"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-black text-apple-text">{preset.label}</span>
-                        <span className="rounded-full bg-apple-gold/12 px-2 py-0.5 text-[10px] font-bold text-apple-gold group-active:bg-apple-gold group-active:text-[#17130f]">
+                        <span className="text-[13px] font-semibold text-apple-text">{preset.label}</span>
+                        <span className="rounded-full bg-apple-gold/12 px-2 py-0.5 text-[13px] font-medium text-apple-gold group-active:bg-apple-gold group-active:text-[#17130f]">
                           填入
                         </span>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-apple-text-muted">{preset.hint}</p>
+                      <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-apple-text-muted">{preset.hint}</p>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="rounded-[34px] border border-apple-border bg-apple-surface/86 p-4 shadow-[0_20px_58px_rgba(117,82,42,0.13)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111722]/82 dark:shadow-[0_22px_62px_rgba(0,0,0,0.36)] sm:p-5">
+              <div className="rail-panel">
                 <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-sm font-black text-apple-text">
+                  <label htmlFor="simulation-dilemma" className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
                     <Compass size={16} className="text-apple-gold" />
                     当前岔路
                   </label>
-                  <textarea
+                  <textarea id="simulation-dilemma" required
+                    aria-describedby="simulation-form-hint"
                     value={dilemma}
                     onChange={(e) => setDilemma(e.target.value)}
                     placeholder="比如：现在工作稳定但消耗很大，另一个机会更有想象力，可风险也高。"
-                    className="h-28 w-full resize-none rounded-[24px] border border-apple-border bg-apple-bg/55 p-4 text-sm leading-relaxed text-apple-text outline-none transition-all placeholder:text-apple-text-muted/55 focus:border-apple-gold/45 focus:ring-4 focus:ring-apple-gold/12 dark:border-white/10 dark:bg-black/18"
+                    className="rail-field min-h-32 resize-y"
                   />
                 </div>
 
@@ -659,16 +642,17 @@ ${userAddressInstruction}
                   />
                 </div>
 
+                <p id="simulation-form-hint" className="rail-muted mt-4">写下当前岔路和两个选择后，即可开始推演。也可以先选上方示例。</p>
                 {formError && (
-                  <div className="mt-4 rounded-2xl border border-apple-gold/22 bg-apple-gold/10 p-3 text-xs leading-relaxed text-apple-text-muted">
+                  <div role="alert" className="mt-4 rounded-2xl border border-apple-gold/22 bg-apple-gold/10 p-4 text-[15px] leading-7 text-apple-text">
                     {formError}
                   </div>
                 )}
 
                 <button
                   onClick={handleSimulate}
-                  disabled={!canSimulate}
-                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-apple-gold py-4 text-sm font-black text-[#17130f] shadow-[0_18px_36px_rgba(185,123,40,0.24)] transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none dark:shadow-[0_14px_34px_rgba(244,207,131,0.18)]"
+                  disabled={!canSimulate} aria-describedby="simulation-form-hint"
+                  className="rail-button mt-5 w-full"
                 >
                   <Sparkles size={18} />
                   开始双线推演
@@ -680,17 +664,17 @@ ${userAddressInstruction}
 
         <AnimatePresence>
           {isSimulating && (
-            <motion.section
+            <motion.section role="status" aria-label="正在校准两条时间线"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -16 }}
-              className="rounded-[34px] border border-apple-border bg-apple-surface/82 p-8 text-center shadow-[0_20px_58px_rgba(117,82,42,0.13)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#111722]/82 dark:shadow-[0_22px_62px_rgba(0,0,0,0.36)]"
+              className="rounded-[20px] border border-apple-border bg-apple-surface p-8 text-center"
             >
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] border border-apple-gold/28 bg-apple-gold/12 text-apple-gold">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[20px] border border-apple-gold/28 bg-apple-gold/12 text-apple-gold">
                 <Loader2 size={34} className="animate-spin" />
               </div>
-              <div className="mt-5 text-base font-black text-apple-text">正在校准两条时间线</div>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-apple-text-muted">
+              <div className="mt-5 text-base font-semibold text-apple-text">正在校准两条时间线</div>
+              <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed text-apple-text-muted">
                 星轨会拆解短期阻力、长期代价和命理契合度，给你一个更清醒的选择视角。
               </p>
             </motion.section>
@@ -719,22 +703,22 @@ ${userAddressInstruction}
                 <ResultBranch label="B 线" result={result.choiceB} tone="b" />
               </div>
 
-              <div className="relative overflow-hidden rounded-[32px] border border-apple-gold/24 bg-[linear-gradient(145deg,rgba(185,123,40,0.12),rgba(255,252,246,0.82))] p-5 shadow-[0_18px_48px_rgba(117,82,42,0.13)] backdrop-blur-2xl dark:border-apple-gold/18 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.13),rgba(18,23,34,0.82))] dark:shadow-[0_20px_56px_rgba(0,0,0,0.36)]">
+              <div className="rail-panel relative overflow-hidden">
                 <div className="pointer-events-none absolute right-4 top-4 text-apple-gold/10">
                   <Scale size={108} />
                 </div>
-                <div className="relative z-10 mb-3 flex items-center gap-2 text-sm font-black text-apple-gold">
+                <div className="relative z-10 mb-3 flex items-center gap-2 text-[15px] font-semibold text-apple-gold">
                   <Sparkles size={16} />
                   破局建议
                 </div>
-                <p className="relative z-10 text-sm leading-relaxed text-apple-text">
+                <p className="rail-reader relative z-10">
                   {result.advice}
                 </p>
               </div>
 
               <button
                 onClick={resetForm}
-                className="flex w-full items-center justify-center gap-2 rounded-full border border-apple-border bg-apple-surface/76 py-3.5 text-sm font-bold text-apple-text-muted shadow-[0_12px_32px_rgba(117,82,42,0.10)] backdrop-blur-xl transition-transform active:scale-[0.99] dark:border-white/10 dark:bg-white/[0.045]"
+                className="rail-button-secondary w-full"
               >
                 <RotateCcw size={16} />
                 重新推演
@@ -765,17 +749,16 @@ function SimulationArchivePanel({
   const archive = buildSimulationArchive({ date, dilemma, choiceA, choiceB, result });
 
   return (
-    <div className="relative overflow-hidden rounded-[32px] border border-apple-gold/24 bg-[linear-gradient(145deg,rgba(244,207,131,0.16),rgba(255,252,246,0.82))] p-5 shadow-[0_18px_48px_rgba(117,82,42,0.13)] backdrop-blur-2xl dark:border-apple-gold/18 dark:bg-[linear-gradient(145deg,rgba(244,207,131,0.13),rgba(18,23,34,0.82))] dark:shadow-[0_20px_56px_rgba(0,0,0,0.36)]">
-      <div className="pointer-events-none absolute -right-10 -top-14 h-40 w-40 rounded-full bg-apple-gold/16 blur-3xl" />
-      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/42 to-transparent" />
+    <div className="rail-panel relative overflow-hidden">
+
       <div className="relative z-10 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-apple-gold">
+          <div className="flex items-center gap-2 text-[13px] font-semibold uppercase text-apple-gold">
             <Scale size={14} />
             推演档案
           </div>
-          <h2 className="mt-1 line-clamp-2 text-xl font-black text-apple-text">{archive.title}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-apple-text-muted">
+          <h2 className="mt-1 line-clamp-2 text-xl font-semibold text-apple-text">{archive.title}</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-apple-text-muted">
             <span className="inline-flex items-center gap-1">
               <Clock3 size={12} />
               {archive.dateLabel}
@@ -786,19 +769,19 @@ function SimulationArchivePanel({
         </div>
         <button
           onClick={onContinue}
-          className="shrink-0 rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] shadow-[0_12px_28px_rgba(185,123,40,0.20)] transition-transform active:scale-[0.98]"
+          className="shrink-0 rounded-full bg-apple-text px-3 py-2 text-[13px] font-semibold text-apple-bg transition-transform active:scale-[0.98]"
         >
           继续问
         </button>
       </div>
 
-      <p className="relative z-10 mt-4 rounded-[20px] border border-apple-border bg-apple-surface/70 p-3 text-sm leading-relaxed text-apple-text dark:border-white/10 dark:bg-black/16">
+      <p className="rail-reader relative z-10 mt-5">
         {archive.summary}
       </p>
 
       <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
         {archive.keywords.map((keyword) => (
-          <span key={keyword} className="rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[11px] font-bold text-apple-gold">
+          <span key={keyword} className="rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[13px] font-medium text-apple-gold">
             {keyword}
           </span>
         ))}
@@ -806,16 +789,16 @@ function SimulationArchivePanel({
 
       <div className="relative z-10 mt-4 grid gap-2 sm:grid-cols-3">
         {archive.timeline.map((item) => (
-          <div key={item.label} className="rounded-[20px] border border-apple-border bg-apple-surface/70 p-3 dark:border-white/10 dark:bg-black/16">
-            <div className="text-xs font-black text-apple-text">{item.label}</div>
-            <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-apple-text-muted">{item.text}</p>
+          <div key={item.label} className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
+            <div className="text-[13px] font-semibold text-apple-text">{item.label}</div>
+            <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-apple-text-muted">{item.text}</p>
           </div>
         ))}
       </div>
 
       <button
         onClick={onContinue}
-        className="relative z-10 mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-apple-gold/24 bg-apple-surface/70 py-3 text-sm font-black text-apple-gold transition-transform active:scale-[0.99] dark:bg-black/18"
+        className="rail-button-secondary relative z-10 mt-4 w-full"
       >
         <MessageCircle size={16} />
         带着这次推演问塔罗
@@ -843,23 +826,23 @@ function SimulationHistoryCard({
   });
 
   return (
-    <div className="min-w-0 rounded-[22px] border border-apple-border bg-apple-surface/72 p-3 text-left dark:border-white/10 dark:bg-black/15">
+    <div className="min-w-0 rounded-[20px] border border-apple-border bg-apple-surface p-3 text-left">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[10px] font-black text-apple-gold">
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-apple-gold">
             <Scale size={12} />
             {archive.dateLabel}
           </div>
-          <div className="mt-1 line-clamp-2 text-xs font-black leading-snug text-apple-text">{archive.summary}</div>
+          <div className="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-apple-text">{archive.summary}</div>
         </div>
-        <div className="shrink-0 rounded-full bg-apple-gold/12 px-2 py-1 text-[10px] font-bold text-apple-gold">
+        <div className="shrink-0 rounded-full bg-apple-gold/12 px-2 py-1 text-[13px] font-medium text-apple-gold">
           {archive.saferLine}
         </div>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1">
         {archive.keywords.slice(0, 3).map((keyword) => (
-          <span key={keyword} className="rounded-full bg-apple-bg/55 px-2 py-0.5 text-[10px] text-apple-text-muted dark:bg-white/[0.055]">
+          <span key={keyword} className="rounded-full bg-apple-bg px-2 py-0.5 text-[13px] text-apple-text-muted">
             {keyword}
           </span>
         ))}
@@ -869,14 +852,14 @@ function SimulationHistoryCard({
         <button
           type="button"
           onClick={onOpen}
-          className="rounded-full border border-apple-border bg-apple-surface/80 px-3 py-2 text-[11px] font-black text-apple-text-muted transition-transform active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.045]"
+          className="rounded-full border border-apple-border bg-apple-surface px-3 py-2 text-[13px] font-semibold text-apple-text-muted transition-transform active:scale-[0.98]"
         >
           回看
         </button>
         <button
           type="button"
           onClick={onContinue}
-          className="rounded-full bg-apple-gold px-3 py-2 text-[11px] font-black text-[#17130f] transition-transform active:scale-[0.98]"
+          className="rounded-full bg-apple-text px-3 py-2 text-[13px] font-semibold text-apple-bg transition-transform active:scale-[0.98]"
         >
           继续问
         </button>
@@ -887,9 +870,9 @@ function SimulationHistoryCard({
 
 function SignalPill({ label, value, active }: { label: string; value: string; active?: boolean }) {
   return (
-    <div className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface/62 px-3 py-2 backdrop-blur-xl dark:border-white/10 dark:bg-black/15">
-      <div className="text-[10px] font-bold text-apple-text-muted">{label}</div>
-      <div className={clsx('mt-0.5 truncate text-sm font-black', active ? 'text-apple-text' : 'text-apple-text-muted')}>
+    <div className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-2">
+      <div className="text-[13px] font-medium text-apple-text-muted">{label}</div>
+      <div className={clsx('mt-0.5 truncate text-[15px] font-semibold', active ? 'text-apple-text' : 'text-apple-text-muted')}>
         {value}
       </div>
     </div>
@@ -912,22 +895,22 @@ function ChoiceInput({
   const isA = tone === 'a';
 
   return (
-    <div className="rounded-[26px] border border-apple-border bg-apple-bg/42 p-3 dark:border-white/10 dark:bg-black/16">
-      <label className="mb-2 flex items-center gap-2 text-xs font-black text-apple-text">
+    <div className="rounded-2xl border border-apple-border bg-apple-bg p-4">
+      <label htmlFor={`simulation-choice-${tone}`} className="mb-3 flex items-center gap-2 text-[15px] font-medium text-apple-text">
         <span className={clsx(
-          'flex h-6 w-6 items-center justify-center rounded-full text-[11px]',
-          isA ? 'bg-apple-gold text-[#17130f]' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]',
+          'flex h-6 w-6 items-center justify-center rounded-full text-[13px]',
+          isA ? 'bg-apple-text text-apple-bg' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]',
         )}>
           {isA ? 'A' : 'B'}
         </span>
         {label}
       </label>
-      <input
+      <input id={`simulation-choice-${tone}`} required
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-12 w-full rounded-2xl border border-apple-border bg-apple-surface/82 px-3 text-sm text-apple-text outline-none transition-all placeholder:text-apple-text-muted/55 focus:border-apple-gold/42 focus:ring-4 focus:ring-apple-gold/12 dark:border-white/10 dark:bg-[#0b0f18]/72"
+        className="rail-field"
       />
     </div>
   );
@@ -947,16 +930,16 @@ function ResultBranch({
 
   return (
     <div className={clsx(
-      'relative overflow-hidden rounded-[32px] border bg-apple-surface/84 p-4 shadow-[0_18px_48px_rgba(117,82,42,0.12)] backdrop-blur-2xl dark:bg-[#111722]/80 dark:shadow-[0_20px_54px_rgba(0,0,0,0.34)]',
-      isA ? 'border-apple-gold/28 dark:border-apple-gold/18' : 'border-[#486B78]/30 dark:border-[#8eb7c5]/22',
+      'relative overflow-hidden rounded-[20px] border bg-apple-surface p-4',
+      isA ? 'border-apple-gold/28' : 'border-[#486B78]/30',
     )}>
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-apple-gold/34 to-transparent" />
+
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={clsx('mb-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-black', isA ? 'bg-apple-gold text-[#17130f]' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]')}>
+          <div className={clsx('mb-2 inline-flex rounded-full px-2.5 py-1 text-[13px] font-semibold', isA ? 'bg-apple-text text-apple-bg' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]')}>
             {label}
           </div>
-          <h3 className="line-clamp-2 text-lg font-black leading-snug text-apple-text">{result.title}</h3>
+          <h3 className="line-clamp-2 text-lg font-semibold leading-snug text-apple-text">{result.title}</h3>
         </div>
         <RiskDial value={risk} tone={tone} />
       </div>
@@ -967,17 +950,17 @@ function ResultBranch({
         <ResultPoint icon={<CheckCircle2 size={13} />} title="命理契合" content={result.baziFit} tone={tone} />
       </div>
 
-      <div className="mt-4 rounded-2xl border border-apple-border bg-apple-bg/45 p-3 dark:border-white/10 dark:bg-black/16">
-        <div className="mb-2 flex items-center justify-between text-[11px]">
-          <span className="flex items-center gap-1 font-bold text-apple-text-muted">
+      <div className="mt-4 rounded-2xl border border-apple-border bg-apple-bg p-3">
+        <div className="mb-2 flex items-center justify-between text-[13px]">
+          <span className="flex items-center gap-1 font-medium text-apple-text-muted">
             <AlertTriangle size={12} />
             风险指数
           </span>
-          <span className={clsx('font-black', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
+          <span className={clsx('font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
             {getRiskLabel(risk)} · {risk}%
           </span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-apple-border/30 dark:bg-white/10">
+        <div className="h-2 overflow-hidden rounded-full bg-apple-border/30">
           <div
             className={clsx('h-full rounded-full transition-all', isA ? 'bg-apple-gold' : 'bg-[#486B78] dark:bg-[#8eb7c5]')}
             style={{ width: `${risk}%` }}
@@ -991,12 +974,12 @@ function ResultBranch({
 function ResultPoint({ icon, title, content, tone }: { icon: React.ReactNode; title: string; content: string; tone: 'a' | 'b' }) {
   const isA = tone === 'a';
   return (
-    <div className="rounded-2xl border border-apple-border bg-apple-bg/42 p-3 dark:border-white/10 dark:bg-black/16">
-      <div className={clsx('mb-1.5 flex items-center gap-1.5 text-[11px] font-black', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
+    <div className="rounded-2xl border border-apple-border bg-apple-bg p-3">
+      <div className={clsx('mb-1.5 flex items-center gap-1.5 text-[13px] font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
         {icon}
         {title}
       </div>
-      <p className="text-xs leading-relaxed text-apple-text-muted">{content}</p>
+      <p className="rail-body">{content}</p>
     </div>
   );
 }
@@ -1007,12 +990,12 @@ function RiskDial({ value, tone }: { value: number; tone: 'a' | 'b' }) {
 
   return (
     <div
-      className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]"
+      className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full p-[3px]"
       style={{ background: `conic-gradient(${color} ${value * 3.6}deg, rgba(116,105,94,0.18) 0deg)` }}
     >
-      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface text-center dark:bg-[#101622]">
-        <span className="text-[10px] font-bold text-apple-text-muted">风险</span>
-        <span className={clsx('text-sm font-black', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
+      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface text-center">
+        <span className="text-[13px] font-medium text-apple-text-muted">风险</span>
+        <span className={clsx('text-[15px] font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
           {value}
         </span>
       </div>

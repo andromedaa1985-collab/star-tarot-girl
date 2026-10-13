@@ -74,6 +74,14 @@ const MERGE_ARRAY_KEYS = new Set<string>([
   'guardianMessages',
   'appEvents',
 ]);
+const NEWEST_FIRST_KEYS = new Set<string>([
+  'tarotReadings',
+  'simulationHistory',
+  'diaryEntries',
+  'reviewHistory',
+  'appEvents',
+]);
+const OLDEST_FIRST_KEYS = new Set<string>(['messages', 'baziMessages', 'guardianMessages']);
 
 type StorageValue = unknown;
 
@@ -172,8 +180,8 @@ function itemKey(item: unknown, index: number) {
 function itemTime(item: unknown) {
   if (!item || typeof item !== 'object') return 0;
   const record = item as Record<string, unknown>;
-  const candidate = record.updatedAt || record.timestamp || record.createdAt || record.date;
-  if (typeof candidate === 'number') return candidate;
+  const candidate = record.updatedAt || record.timestamp || record.createdAt || record.generatedAt || record.date;
+  if (typeof candidate === 'number') return Number.isFinite(candidate) ? candidate : 0;
   if (typeof candidate === 'string') {
     const parsed = Date.parse(candidate);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -181,7 +189,7 @@ function itemTime(item: unknown) {
   return 0;
 }
 
-function mergeArrays(current: unknown[], incoming: unknown[]) {
+function mergeArrays(key: string, current: unknown[], incoming: unknown[]) {
   const merged = new Map<string, unknown>();
 
   current.forEach((item, index) => {
@@ -196,7 +204,10 @@ function mergeArrays(current: unknown[], incoming: unknown[]) {
     }
   });
 
-  return Array.from(merged.values());
+  const result = Array.from(merged.values());
+  if (NEWEST_FIRST_KEYS.has(key)) return result.sort((a, b) => itemTime(b) - itemTime(a));
+  if (OLDEST_FIRST_KEYS.has(key)) return result.sort((a, b) => itemTime(a) - itemTime(b));
+  return result;
 }
 
 function getCount(key: string) {
@@ -378,7 +389,7 @@ export function importAppBackup(backup: AppBackup): ImportResult {
     const incomingArray = asArray(incoming);
 
     if (MERGE_ARRAY_KEYS.has(key) && currentArray && incomingArray) {
-      writeValue(key, mergeArrays(currentArray, incomingArray));
+      writeValue(key, mergeArrays(key, currentArray, incomingArray));
       mergedKeys += 1;
     } else {
       writeValue(key, incoming);
