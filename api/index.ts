@@ -6,6 +6,8 @@ import { registerAnalyticsRoutes } from "./analyticsRoutes.js";
 import { registerAuthRoutes } from "./authRoutes.js";
 import { registerPaymentRoutes } from "./paymentRoutes.js";
 import { prepareChatEntitlementCharge, registerEntitlementRoutes } from "./entitlementRoutes.js";
+import { CHAT_UPSTREAM_TIMEOUT_MS, requestChatCompletion, runOptionalSearchWithDeadline } from "./_chatProxy.js";
+import { CHAT_REQUEST_TOTAL_TIMEOUT_MS, runWithRequestDeadline } from "./_requestDeadline.js";
 
 dotenv.config();
 
@@ -102,6 +104,15 @@ app.get("/api/relationship/invites/:token", (req, res) => {
 });
 
 app.post("/api/deepseek/chat", async (req, res) => {
+  const requestStartedAt = Date.now();
+  const controller = new AbortController();
+  const cancelAbortedRequest = () => controller.abort();
+  const cancelDisconnectedResponse = () => { if (!res.writableEnded) controller.abort(); };
+  // IncomingMessage.close also occurs when a normal request body finishes.
+  // Only an aborted body or an unfinished response closing cancels upstream.
+  req.once("aborted", cancelAbortedRequest);
+  res.once("close", cancelDisconnectedResponse);
+  return runWithRequestDeadline({ expiresAt: requestStartedAt + CHAT_REQUEST_TOTAL_TIMEOUT_MS, signal: controller.signal }, async () => {
   try {
     const apiKey = requireEnv("DEEPSEEK_API_KEY", "DeepSeek API Key");
     if (isDailyDeepBypassRequest(req)) {
@@ -117,7 +128,11 @@ app.post("/api/deepseek/chat", async (req, res) => {
       const lastUserMsg = messages[messages.length - 1];
       if (lastUserMsg?.role === "user" && lastUserMsg.content) {
         try {
-          const searchResults = await search(lastUserMsg.content);
+          const searchResults = await runOptionalSearchWithDeadline(
+            () => search(lastUserMsg.content, undefined, { open_timeout: 1500, response_timeout: 1500, read_timeout: 1500 }),
+            controller.signal,
+            Math.min(4_000, Math.max(0, CHAT_UPSTREAM_TIMEOUT_MS - (Date.now() - requestStartedAt))),
+          );
           if (searchResults?.results?.length) {
             const topResults = searchResults.results
               .slice(0, 5)
@@ -139,22 +154,34 @@ app.post("/api/deepseek/chat", async (req, res) => {
     };
     delete bodyPayload.isInternetMode;
     delete bodyPayload.entitlement;
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(bodyPayload)
+    if (controller.signal.aborted) return;
+    const { status, data } = await requestChatCompletion(bodyPayload, apiKey, {
+      signal: controller.signal,
+      timeoutMs: CHAT_UPSTREAM_TIMEOUT_MS - (Date.now() - requestStartedAt),
     });
-    const data = await response.json();
-    if (response.ok && !data?.error && entitlementCharge) {
+    if (controller.signal.aborted) return;
+    if (status >= 200 && status < 300 && !data?.error && entitlementCharge) {
       data.entitlement = await entitlementCharge.commit();
     }
-    res.status(response.status).json(data);
+    if (!controller.signal.aborted) res.status(status).json(data);
   } catch (error: any) {
-    sendApiError(res, error);
+    if (!controller.signal.aborted && !res.destroyed) sendApiError(res, error);
+  } finally {
+    req.removeListener("aborted", cancelAbortedRequest);
+    res.removeListener("close", cancelDisconnectedResponse);
   }
+  });
+});
+
+// Keep API errors as JSON in every host, including Vercel and Netlify, where
+// server.ts (and its SPA fallback) does not run.
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: { message: "接口不存在。" } });
+});
+app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(error);
+  const status = Number(error?.status) || 500;
+  res.status(status).json({ error: { message: status === 400 ? "请求 JSON 格式无效。" : status === 413 ? "请求内容过大。" : "接口请求失败。" } });
 });
 
 const DAILY_DEEP_API_STRONG_KEYWORDS = ["今日深解", "深解", "深度解读", "深度分析", "完整解读", "完整分析"];
@@ -250,7 +277,8 @@ function sanitizeRelationshipProfile(input: any) {
 function sendApiError(res: express.Response, error: Error) {
   res.status(Number((error as any)?.status) || 500).json({
     error: {
-      message: error.message || "接口请求失败"
+      message: error.message || "接口请求失败",
+      ...((error as any)?.code ? { code: (error as any).code } : {}),
     }
   });
 }

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, test } from "node:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import type { Server } from "node:http";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest, type Server } from "node:http";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +20,10 @@ before(async () => {
   scratchDirectory = await mkdtemp(path.join(scratchRoot, "api-tests-"));
   const previousCwd = process.cwd();
   process.env.DEEPSEEK_API_KEY = "api-tests-placeholder";
+  process.env.AUTH_SESSION_SECRET = "api-tests-session-placeholder";
+  // Tests use only their own fixture files, even if the invoking shell has a
+  // cloud runtime or Redis integration configured.
+  for (const key of ["VERCEL", "NETLIFY", "NETLIFY_BLOBS_CONTEXT", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"]) process.env[key] = "";
   let app: typeof import("../api/index.js").app;
   try {
     process.chdir(scratchDirectory);
@@ -128,4 +133,144 @@ test("chat preserves an upstream failure status and JSON error", async () => {
   assert.equal(response.status, 429);
   assert.deepEqual(await response.json(), { error: { message: "Mock rate limit" } });
   assert.equal(upstreamCalls, 1);
+});
+
+test("shared API returns JSON for unknown routes and malformed bodies", async () => {
+  const missing = await realFetch(`${baseUrl}/api/fixture-unknown`);
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("content-type") || "", /application\/json/);
+  assert.match((await missing.json()).error.message, /接口不存在/);
+  const malformed = await realFetch(`${baseUrl}/api/deepseek/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: '{"messages":',
+  });
+  assert.equal(malformed.status, 400);
+  assert.match((await malformed.json()).error.message, /JSON/);
+});
+
+test("normal completed request bodies do not cancel a pending chat response", async () => {
+  globalThis.fetch = async (_input, init) => {
+    assert.equal(JSON.parse(String(init?.body)).stream, false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(init?.signal?.aborted, false);
+    return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Fixture complete" } }] }), { headers: { "Content-Type": "application/json" } });
+  };
+  const response = await realFetch(`${baseUrl}/api/deepseek/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stream: true, messages: [] }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).choices[0].message.content, "Fixture complete");
+});
+
+test("a disconnected response cancels its pending upstream without waiting for the deadline", async () => {
+  let enterUpstream: () => void;
+  const entered = new Promise<void>((resolve) => { enterUpstream = resolve; });
+  let reportAbort: () => void;
+  const aborted = new Promise<void>((resolve) => { reportAbort = resolve; });
+  globalThis.fetch = async (_input, init) => {
+    init?.signal?.addEventListener("abort", () => reportAbort(), { once: true });
+    enterUpstream();
+    return new Promise<Response>(() => {});
+  };
+  const client = httpRequest(`${baseUrl}/api/deepseek/chat`, { method: "POST", headers: { "Content-Type": "application/json" } });
+  client.on("error", () => {});
+  client.end(JSON.stringify({ messages: [] }));
+  await entered;
+  client.destroy();
+  let timeout: ReturnType<typeof setTimeout>;
+  try {
+    await Promise.race([aborted, new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("disconnect did not cancel upstream")), 1000); })]);
+  } finally { clearTimeout(timeout!); }
+});
+
+test("incomplete answers never deduct fixture entitlements, while a complete answer deducts once", async () => {
+  const previousCwd = process.cwd();
+  const fixtureId = "api-fixture-user";
+  const entitlementPath = path.join(scratchDirectory, ".data", "entitlements", "users", `${fixtureId}.json`);
+  const now = new Date().toISOString();
+  await mkdir(path.join(scratchDirectory, ".data", "accounts", "users"), { recursive: true });
+  await mkdir(path.dirname(entitlementPath), { recursive: true });
+  await writeFile(path.join(scratchDirectory, ".data", "accounts", "users", `${fixtureId}.json`), JSON.stringify({ id: fixtureId, email: "fixture@example.invalid", displayName: "Fixture", createdAt: now, updatedAt: now }));
+  await writeFile(entitlementPath, JSON.stringify({ userId: fixtureId, membership: { plan: "free" }, energy: 5, grantedOrderIds: [], redeemedCodeHashes: [], relationshipEntitlementsVersion: 1, createdAt: now, updatedAt: now }));
+  const tokenBody = Buffer.from(JSON.stringify({ userId: fixtureId, email: "fixture@example.invalid", exp: Date.now() + 60_000 })).toString("base64url");
+  const token = `${tokenBody}.${crypto.createHmac("sha256", "api-tests-session-placeholder").update(tokenBody).digest("base64url")}`;
+  const callFixture = () => realFetch(`${baseUrl}/api/deepseek/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ entitlement: { type: "tarot_message", energyCost: 1 }, messages: [] }),
+  });
+  try {
+    process.chdir(scratchDirectory);
+    for (const incomplete of [
+      '{"choices":[',
+      JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "Fixture cut off" } }] }),
+      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "" } }] }),
+    ]) {
+      globalThis.fetch = async () => new Response(incomplete, { headers: { "Content-Type": "application/json" } });
+      const response = await callFixture();
+      assert.equal(response.status, 502);
+      assert.ok((await response.json()).error.code);
+      assert.equal(JSON.parse(await readFile(entitlementPath, "utf8")).energy, 5);
+    }
+    globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Fixture complete" } }] }), { headers: { "Content-Type": "application/json" } });
+    const success = await callFixture();
+    assert.equal(success.status, 200);
+    assert.equal((await success.json()).entitlement.energy, 4);
+    assert.equal(JSON.parse(await readFile(entitlementPath, "utf8")).energy, 4);
+  } finally { process.chdir(previousCwd); }
+});
+
+test("a stalled entitlement prepare returns a bounded storage error before generating AI", async () => {
+  process.env.UPSTASH_REDIS_REST_URL = "https://store-fixture.example.invalid";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "api-tests-store-placeholder";
+  let calls = 0;
+  globalThis.fetch = async (input) => {
+    assert.equal(input, "https://store-fixture.example.invalid");
+    calls += 1;
+    return new Promise<Response>(() => {});
+  };
+  const body = Buffer.from(JSON.stringify({ userId: "slow-fixture", email: "fixture@example.invalid", exp: Date.now() + 60_000 })).toString("base64url");
+  const token = `${body}.${crypto.createHmac("sha256", "api-tests-session-placeholder").update(body).digest("base64url")}`;
+  try {
+    const response = await realFetch(`${baseUrl}/api/deepseek/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ entitlement: { type: "tarot_message" }, messages: [] }),
+    });
+    assert.equal(response.status, 504);
+    assert.equal((await response.json()).error.code, "STORE_REQUEST_TIMEOUT");
+    assert.equal(calls, 1);
+  } finally { process.env.UPSTASH_REDIS_REST_URL = ""; process.env.UPSTASH_REDIS_REST_TOKEN = ""; }
+});
+
+test("a stalled entitlement commit reports an uncertain debit instead of retrying it", async () => {
+  process.env.UPSTASH_REDIS_REST_URL = "https://store-fixture.example.invalid";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "api-tests-store-placeholder";
+  const fixtureId = "commit-fixture";
+  const now = new Date().toISOString();
+  let fixtureRecord = { userId: fixtureId, membership: { plan: "free" }, energy: 5, grantedOrderIds: [], redeemedCodeHashes: [], relationshipEntitlementsVersion: 1, createdAt: now, updatedAt: now };
+  let writes = 0;
+  globalThis.fetch = async (input, init) => {
+    if (input === "https://api.deepseek.com/chat/completions") return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Fixture complete" } }] }), { headers: { "Content-Type": "application/json" } });
+    assert.equal(input, "https://store-fixture.example.invalid");
+    const [command, key, value] = JSON.parse(String(init?.body));
+    if (command === "SET") {
+      writes += 1;
+      fixtureRecord = JSON.parse(value);
+      return new Promise<Response>(() => {});
+    }
+    const result = String(key).startsWith("astro-rail-accounts:") ? { id: fixtureId, email: "fixture@example.invalid", displayName: "Fixture", createdAt: now, updatedAt: now } : fixtureRecord;
+    return new Response(JSON.stringify({ result: JSON.stringify(result) }), { headers: { "Content-Type": "application/json" } });
+  };
+  const body = Buffer.from(JSON.stringify({ userId: fixtureId, email: "fixture@example.invalid", exp: Date.now() + 60_000 })).toString("base64url");
+  const token = `${body}.${crypto.createHmac("sha256", "api-tests-session-placeholder").update(body).digest("base64url")}`;
+  try {
+    const response = await realFetch(`${baseUrl}/api/deepseek/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ entitlement: { type: "tarot_message", energyCost: 1 }, messages: [] }),
+    });
+    assert.equal(response.status, 503);
+    const data = await response.json();
+    assert.equal(data.error.code, "STORE_WRITE_UNCONFIRMED");
+    assert.match(data.error.message, /刷新.*核对/);
+    assert.equal(fixtureRecord.energy, 4);
+    assert.equal(writes, 1);
+  } finally { process.env.UPSTASH_REDIS_REST_URL = ""; process.env.UPSTASH_REDIS_REST_TOKEN = ""; }
 });

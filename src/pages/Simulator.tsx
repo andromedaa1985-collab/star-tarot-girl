@@ -25,6 +25,7 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import { AI_CLIENT_TIMEOUT_MS } from '../lib/aiRequestBudget';
 import PageHeader from '../components/ui/PageHeader';
 import { appendSimulationHistory, calculateDecisionMatrix, createDefaultDecisionCriteria, createLocalComparisonEntry, decisionDraftSignature, getSimulationAction, hasDifferentDecisionDraft, normalizeSimulationResult, readDecisionCriteria, type DecisionCriterion, type DecisionDraft, type SimulationResult } from '../lib/decisionMatrix';
 import { formatRecordDate, matchesRecordQuery } from '../lib/recordSearch';
@@ -418,7 +419,7 @@ export default function Simulator() {
     const requestSignature = decisionDraftSignature(requestDraft);
     const controller = new AbortController();
     requestAbortRef.current = controller;
-    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
     setIsSimulating(true);
     setFormError(null);
     setResult(null);

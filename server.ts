@@ -5,11 +5,6 @@ import { app } from "./api/index.js";
 async function startServer() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 
-  // Keep unknown API requests out of the SPA fallback.
-  app.use("/api", (_req, res) => {
-    res.status(404).json({ error: { message: "接口不存在。" } });
-  });
-
   const isProduction = process.env.NODE_ENV === "production" || process.env.ZEABUR === "true";
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");

@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { RequestDeadlineError, runStorageOperation } from "./_requestDeadline.js";
 
 let warnedVercelMissingPersistentStore = false;
 
@@ -47,19 +48,37 @@ async function upstashCommand(command: string, ...args: string[]) {
   const token = config.token;
   if (!url || !token) return undefined;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify([command, ...args]),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data?.error) {
-    throw new Error(data?.error || `Upstash ${command} failed with ${response.status}`);
+  let submitted = false;
+  try {
+    return await runStorageOperation(async (signal) => {
+      submitted = true;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify([command, ...args]),
+        signal,
+      });
+      const raw = await response.text();
+      let data: any;
+      try { data = JSON.parse(raw); }
+      catch { throw new RequestDeadlineError(502, "云端存储返回内容无效，请刷新账户后重试。", "STORE_RESPONSE_INVALID"); }
+      if (!response.ok || data?.error) {
+        throw new RequestDeadlineError(503, "云端存储暂时不可用，请稍后重试。", "STORE_UPSTREAM_ERROR");
+      }
+      if (!data || typeof data !== "object" || !("result" in data) || (command === "SET" && data.result !== "OK")) {
+        throw new RequestDeadlineError(502, "云端存储未确认操作结果，请刷新账户后重试。", "STORE_RESPONSE_INVALID");
+      }
+      return data.result;
+    });
+  } catch (error) {
+    // A cancelled/timed-out SET may already have reached Redis. Do not retry
+    // the mutation, or tell the user that a debit definitely did not happen.
+    if (command === "SET" && submitted) {
+      throw new RequestDeadlineError(503, "账户变更结果尚未确认，请刷新账户核对权益后再操作。", "STORE_WRITE_UNCONFIRMED");
+    }
+    if (error instanceof RequestDeadlineError) throw error;
+    throw new RequestDeadlineError(503, "云端存储连接失败，请稍后重试。", "STORE_UPSTREAM_UNAVAILABLE");
   }
-  return data?.result;
 }
 
 async function readUpstashJson<T>(storeName: string, key: string): Promise<T | null> {

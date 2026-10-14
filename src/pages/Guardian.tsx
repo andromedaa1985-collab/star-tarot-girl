@@ -17,6 +17,7 @@ import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
+import { AI_CLIENT_TIMEOUT_MS } from '../lib/aiRequestBudget';
 import PageHeader from '../components/ui/PageHeader';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
@@ -154,7 +155,7 @@ export default function Guardian() {
     letterRequestRef.current = true;
     const controller = new AbortController();
     letterAbortRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const timeout = setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
     setIsGeneratingLetter(true);
     try {
       const recentDiary = recentDiaries[0] || null;

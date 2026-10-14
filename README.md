@@ -31,6 +31,16 @@ npm start
 
 `server.ts` 与 Vercel、Netlify 使用同一套 `api/index.ts` 路由，保证接口状态码、CORS 和权益校验一致。Vercel 配置见 `vercel.json`，Netlify 配置见 `netlify.toml`。
 
+## Vercel 部署与 API
+
+导入整个 Git 仓库并将生产分支设为 `main`，使用 Vite 预设、构建命令 `npm run build`、输出目录 `dist`。不要仅上传 `dist`；仓库里的 `api/` 同时部署为 Node.js Functions。Web 前端默认向同一域名的 `/api` 请求，通常不需要设置 `VITE_API_BASE_URL`；只有确实使用独立后端时才设置它，不能填写 localhost。
+
+在项目 Settings → Environment Variables 中设置服务端 `DEEPSEEK_API_KEY`，选择 Production 和需要的 Preview 环境，再重新部署。环境变量不会自动加入已经生成的部署；也不要把密钥改名为 `VITE_DEEPSEEK_API_KEY` 或写进浏览器代码。账户与云端存档还需要 `AUTH_SESSION_SECRET` 和 Upstash 的 URL/token（支持 `UPSTASH_REDIS_REST_*` 或 `KV_REST_API_*`），支付使用各渠道独立配置。
+
+上线检查分别看 `/api/health`、`/api/time` 与实际 AI 请求。健康接口正常只证明函数能响应，不证明 AI 密钥已经配置。AI 密钥缺失返回 JSON 500；上游超时返回 JSON 504；非 JSON、正文未完成或模型 token 上限截断返回 JSON 错误，不会作为成功生成入账。代理使用完整 JSON 协议并关闭上游流式模式，不自动重试付费请求。
+
+函数执行上限显式设为 60 秒。AI 从请求开始到完整正文使用 50 秒预算，含前置权益检查和联网搜索；权益提交再保留至多 3 秒，Vercel 聊天存储使用每请求独立的绝对 deadline，每次 Upstash 连接与完整正文最多等待 3 秒。守护与沙盘客户端等待 55 秒，留出错误返回时间。这是一组应用预算，不代表所有 Vercel 项目默认只有 60 秒。平台规则见 [Vercel 函数时限](https://vercel.com/docs/functions/configuring-functions/duration)。存储 SET 已发起但未收到完整确认时，可能已经应用，返回“结果尚未确认，请刷新账户核对”，不会自动重试或承诺没有扣费。
+
 ## Android
 
 ```sh
