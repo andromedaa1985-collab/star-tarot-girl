@@ -6,6 +6,17 @@ const SESSION_STORAGE_KEY = ACCOUNT_SESSION_STORAGE_KEY;
 const TRANSITION_CHANGE_EVENT = 'astroRailAccountTransitionChange';
 export const ACCOUNT_REQUEST_TIMEOUT_MS = 30_000;
 
+export class AccountRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'AccountRequestError';
+  }
+}
+
+export function isInvalidAccountSessionResponse(status: number, code: unknown) {
+  return status === 401 && code === 'ACCOUNT_SESSION_INVALID';
+}
+
 function notifyAccountTransition() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(TRANSITION_CHANGE_EVENT));
 }
@@ -79,7 +90,11 @@ function isValidAccountSession(value: unknown): value is AccountSession {
 async function readJsonResponse(response: Response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(toPublicErrorMessage(data?.error?.message));
+    throw new AccountRequestError(
+      toPublicErrorMessage(data?.error?.message),
+      response.status,
+      typeof data?.error?.code === 'string' ? data.error.code : undefined,
+    );
   }
   return data;
 }
@@ -94,7 +109,7 @@ async function requestAccountJson(path: string, init?: RequestInit) {
     if (controller.signal.aborted) throw new Error('Account request timed out');
     return data;
   } catch (error) {
-    if (controller.signal.aborted) throw new Error('账户服务响应超时，请稍后重试。当前本机存档已保留。');
+    if (controller.signal.aborted) throw new AccountRequestError('账户服务响应超时，请稍后重试。当前本机存档已保留。', 504, 'ACCOUNT_SERVICE_TIMEOUT');
     throw error;
   } finally { clearTimeout(timeout); }
 }

@@ -5,8 +5,10 @@ import {
   beginAccountTransition,
   beginAccountTransitionSafely,
   ACCOUNT_REQUEST_TIMEOUT_MS,
+  AccountRequestError,
   getStoredAccountSession,
   isAccountTransitioning,
+  isInvalidAccountSessionResponse,
   loginAccount,
   refreshAccountSession,
   registerAccount,
@@ -177,6 +179,29 @@ test('credential requests return a candidate without replacing the active sessio
   assert.deepEqual(await loginAccount({ email: candidate.user.email, password: 'fixture-password' }), candidate);
   assert.deepEqual(await registerAccount({ email: candidate.user.email, password: 'fixture-password', displayName: candidate.user.displayName }), candidate);
   assert.deepEqual(storage.snapshot(), before);
+});
+
+test('session expiry and account outages retain status and preserve the original workspace owner', async () => {
+  const previous = session('previous');
+  storeAccountSession(previous);
+  storage.setItem('diaryEntries', JSON.stringify(backup('previous').data.diaryEntries));
+  storage.setItem('draft:diary:content', JSON.stringify('Fictional unsaved draft'));
+  const before = storage.snapshot();
+  for (const [status, code] of [[401, 'ACCOUNT_SESSION_INVALID'], [503, 'ACCOUNT_SERVICE_UNAVAILABLE']] as const) {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { code, message: status === 401 ? '登录状态已失效，请重新登录。' : 'Vercel UPSTASH_REDIS_REST storage configuration' } }), { status });
+    await assert.rejects(refreshAccountSession(previous), (error: unknown) => {
+      assert.ok(error instanceof AccountRequestError);
+      assert.equal(error.status, status);
+      assert.equal(error.code, code);
+      assert.equal(isInvalidAccountSessionResponse(error.status, error.code), status === 401);
+      assert.doesNotMatch(error.message, /Vercel|UPSTASH/);
+      return true;
+    });
+    assert.deepEqual(storage.snapshot(), before);
+  }
+  assert.equal(isInvalidAccountSessionResponse(401, 'AI_UPSTREAM_AUTH_ERROR'), false);
+  assert.equal(isInvalidAccountSessionResponse(403, 'ACCOUNT_SESSION_INVALID'), false);
+  assert.equal(isInvalidAccountSessionResponse(503, 'ACCOUNT_SESSION_INVALID'), false);
 });
 
 test('failed cloud activation preserves the original session, records, drafts and recovery metadata', async () => {

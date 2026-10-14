@@ -79,6 +79,15 @@ export async function requestChatCompletion(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    // Provider credentials and billing belong to the AI service. They must not
+    // masquerade as an expired Railstar account or insufficient user energy.
+    if (response.status === 401 || response.status === 403 || response.status === 402) {
+      const error = new ChatProxyError(502, "AI 服务暂时不可用，请稍后重试。", response.status === 402 ? "AI_UPSTREAM_BILLING_ERROR" : "AI_UPSTREAM_AUTH_ERROR");
+      // Release an unread provider response immediately. Cleanup may fail or
+      // stall; it must not delay or replace the classified service failure.
+      try { void response.body?.cancel(error).catch(() => {}); } catch { /* Keep the provider error classification. */ }
+      throw error;
+    }
     const raw = await response.text();
     let data: any;
     try {

@@ -23,7 +23,7 @@ before(async () => {
   process.env.AUTH_SESSION_SECRET = "api-tests-session-placeholder";
   // Tests use only their own fixture files, even if the invoking shell has a
   // cloud runtime or Redis integration configured.
-  for (const key of ["VERCEL", "NETLIFY", "NETLIFY_BLOBS_CONTEXT", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"]) process.env[key] = "";
+  for (const key of ["VERCEL", "NETLIFY", "NETLIFY_BLOBS_CONTEXT", "NETLIFY_BLOBS_SITE_ID", "NETLIFY_BLOBS_TOKEN", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"]) process.env[key] = "";
   let app: typeof import("../api/index.js").app;
   try {
     process.chdir(scratchDirectory);
@@ -182,7 +182,7 @@ test("a disconnected response cancels its pending upstream without waiting for t
   } finally { clearTimeout(timeout!); }
 });
 
-test("incomplete answers never deduct fixture entitlements, while a complete answer deducts once", async () => {
+test("incomplete answers and provider failures never deduct fixture entitlements, while a complete answer deducts once", async () => {
   const previousCwd = process.cwd();
   const fixtureId = "api-fixture-user";
   const entitlementPath = path.join(scratchDirectory, ".data", "entitlements", "users", `${fixtureId}.json`);
@@ -199,6 +199,13 @@ test("incomplete answers never deduct fixture entitlements, while a complete ans
   });
   try {
     process.chdir(scratchDirectory);
+    for (const status of [401, 403, 402]) {
+      globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "Fixture private provider failure" } }), { status });
+      const response = await callFixture();
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).error.code, status === 402 ? "AI_UPSTREAM_BILLING_ERROR" : "AI_UPSTREAM_AUTH_ERROR");
+      assert.equal(JSON.parse(await readFile(entitlementPath, "utf8")).energy, 5);
+    }
     for (const incomplete of [
       '{"choices":[',
       JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "Fixture cut off" } }] }),
@@ -218,7 +225,51 @@ test("incomplete answers never deduct fixture entitlements, while a complete ans
   } finally { process.chdir(previousCwd); }
 });
 
-test("a stalled entitlement prepare returns a bounded storage error before generating AI", async () => {
+test("guest chat remains available while expired account and insufficient energy requests stop before AI", async () => {
+  const previousCwd = process.cwd();
+  const fixtureId = "empty-energy-fixture";
+  const now = new Date().toISOString();
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input) => {
+    assert.equal(input, "https://api.deepseek.com/chat/completions");
+    upstreamCalls += 1;
+    return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Fixture guest daily fortune." } }] }));
+  };
+  const guest = await realFetch(`${baseUrl}/api/deepseek/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "用户原始输入：今日运势" }] }),
+  });
+  assert.equal(guest.status, 200);
+  assert.equal("entitlement" in await guest.json(), false);
+  assert.equal(upstreamCalls, 1);
+
+  const token = (exp: number) => {
+    const body = Buffer.from(JSON.stringify({ userId: fixtureId, email: "fixture@example.invalid", exp })).toString("base64url");
+    return `${body}.${crypto.createHmac("sha256", "api-tests-session-placeholder").update(body).digest("base64url")}`;
+  };
+  const callAccount = (accountToken: string) => realFetch(`${baseUrl}/api/deepseek/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${accountToken}` },
+    body: JSON.stringify({ entitlement: { type: "tarot_message", energyCost: 1 }, messages: [] }),
+  });
+  const expired = await callAccount(token(Date.now() - 1));
+  assert.equal(expired.status, 401);
+  assert.equal((await expired.json()).error.code, "ACCOUNT_SESSION_INVALID");
+  assert.equal(upstreamCalls, 1);
+
+  try {
+    process.chdir(scratchDirectory);
+    await mkdir(path.join(scratchDirectory, ".data/accounts/users"), { recursive: true });
+    await mkdir(path.join(scratchDirectory, ".data/entitlements/users"), { recursive: true });
+    await writeFile(path.join(scratchDirectory, ".data/accounts/users", `${fixtureId}.json`), JSON.stringify({ id: fixtureId, email: "fixture@example.invalid", displayName: "Fixture", createdAt: now, updatedAt: now }));
+    await writeFile(path.join(scratchDirectory, ".data/entitlements/users", `${fixtureId}.json`), JSON.stringify({ userId: fixtureId, membership: { plan: "free" }, energy: 0, grantedOrderIds: [], redeemedCodeHashes: [], relationshipEntitlementsVersion: 1, createdAt: now, updatedAt: now }));
+    const emptyEnergy = await callAccount(token(Date.now() + 60_000));
+    assert.equal(emptyEnergy.status, 402);
+    assert.match((await emptyEnergy.json()).error.message, /能量不足/);
+    assert.equal(upstreamCalls, 1);
+  } finally { process.chdir(previousCwd); }
+});
+
+test("a stalled account lookup during entitlement prepare returns a bounded account service error before AI", async () => {
   process.env.UPSTASH_REDIS_REST_URL = "https://store-fixture.example.invalid";
   process.env.UPSTASH_REDIS_REST_TOKEN = "api-tests-store-placeholder";
   let calls = 0;
@@ -234,8 +285,8 @@ test("a stalled entitlement prepare returns a bounded storage error before gener
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ entitlement: { type: "tarot_message" }, messages: [] }),
     });
-    assert.equal(response.status, 504);
-    assert.equal((await response.json()).error.code, "STORE_REQUEST_TIMEOUT");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error.code, "ACCOUNT_SERVICE_UNAVAILABLE");
     assert.equal(calls, 1);
   } finally { process.env.UPSTASH_REDIS_REST_URL = ""; process.env.UPSTASH_REDIS_REST_TOKEN = ""; }
 });

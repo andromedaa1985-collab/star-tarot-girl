@@ -176,7 +176,7 @@ test('the authenticated apply-order route grants couple rights once and repairs 
   await mkdir(scratchRoot, { recursive: true });
   const scratchDirectory = await mkdtemp(path.join(scratchRoot, 'entitlement-tests-'));
   const previousCwd = process.cwd();
-  const isolatedEnv = ['NETLIFY', 'NETLIFY_BLOBS_CONTEXT', 'VERCEL', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'AUTH_SESSION_SECRET'];
+  const isolatedEnv = ['NETLIFY', 'NETLIFY_BLOBS_CONTEXT', 'NETLIFY_BLOBS_SITE_ID', 'NETLIFY_BLOBS_TOKEN', 'VERCEL', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'AUTH_SESSION_SECRET'];
   const previousEnv = new Map(isolatedEnv.map((name) => [name, process.env[name]]));
   let server: Server | undefined;
   try {
@@ -251,7 +251,7 @@ test('the authenticated apply-order route grants couple rights once and repairs 
 
 test('a slow legacy entitlement GET cannot overwrite an order granted while its historical lookup is pending', { timeout: 5000 }, async () => {
   const realFetch = globalThis.fetch;
-  const isolatedEnv = ['NETLIFY', 'NETLIFY_BLOBS_CONTEXT', 'VERCEL', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'AUTH_SESSION_SECRET'];
+  const isolatedEnv = ['NETLIFY', 'NETLIFY_BLOBS_CONTEXT', 'NETLIFY_BLOBS_SITE_ID', 'NETLIFY_BLOBS_TOKEN', 'VERCEL', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'AUTH_SESSION_SECRET'];
   const previousEnv = new Map(isolatedEnv.map((name) => [name, process.env[name]]));
   let server: Server | undefined;
   let releaseOldRead = () => {};

@@ -64,6 +64,41 @@ test("provider rate limits retain their status and original JSON error", async (
   assert.deepEqual(result, { status: 429, data: error });
 });
 
+test("provider authentication and billing failures cannot impersonate user account or energy errors", async () => {
+  for (const status of [401, 403, 402]) {
+    for (const jsonBody of [true, false]) {
+      await assert.rejects(requestChatCompletion({}, "fixture-key", { fetchImpl: async () => jsonBody
+        ? json({ error: { message: "Fixture private provider credentials and billing details" } }, status)
+        : new Response("<html>Fixture private provider details</html>", { status })
+      }), (error: unknown) => {
+        assert.ok(error instanceof ChatProxyError);
+        assert.equal(error.status, 502);
+        assert.equal(error.code, status === 402 ? "AI_UPSTREAM_BILLING_ERROR" : "AI_UPSTREAM_AUTH_ERROR");
+        assert.equal(error.message, "AI 服务暂时不可用，请稍后重试。");
+        return true;
+      });
+    }
+  }
+});
+
+test("provider authentication and billing failures cancel unread bodies without waiting for cleanup", async () => {
+  for (const status of [401, 403, 402]) {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"error":')); },
+      cancel(reason) {
+        cancelled = true;
+        assert.ok(reason instanceof ChatProxyError);
+        // A slow provider cleanup must not replace the already-known failure
+        // with a request timeout, or leave its body uncancelled.
+        return new Promise<void>(() => {});
+      },
+    });
+    await assert.rejects(requestChatCompletion({}, "fixture-key", { timeoutMs: 100, fetchImpl: async () => new Response(body, { status }) }), expectedError(502, status === 402 ? "AI_UPSTREAM_BILLING_ERROR" : "AI_UPSTREAM_AUTH_ERROR"));
+    assert.equal(cancelled, true);
+  }
+});
+
 test("non-JSON provider failures retain status and become safe JSON errors", async () => {
   const result = await requestChatCompletion({}, "fixture-key", { fetchImpl: async () => new Response("<html>Fixture gateway failure</html>", { status: 503 }) });
   assert.equal(result.status, 503);

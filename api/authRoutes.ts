@@ -72,7 +72,7 @@ function getSessionSecret() {
   }
 
   if (process.env.NODE_ENV === "production" || process.env.NETLIFY === "true") {
-    throw new Error("账户服务暂时不可用，请稍后再试。");
+    throw accountServiceError();
   }
   return "dev-only-astro-rail-session-secret";
 }
@@ -92,19 +92,25 @@ function signToken(payload: TokenPayload) {
 }
 
 function verifyToken(token: string): TokenPayload {
-  const [body, signature] = token.split(".");
-  if (!body || !signature) throw new Error("登录状态已失效，请重新登录。");
+  const parts = token.split(".");
+  const [body, signature] = parts;
+  if (parts.length !== 2 || !body || !signature) throw authError("登录状态已失效，请重新登录。");
 
   const expected = crypto.createHmac("sha256", getSessionSecret()).update(body).digest("base64url");
   const expectedBuffer = Buffer.from(expected);
   const signatureBuffer = Buffer.from(signature);
   if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
-    throw new Error("登录状态已失效，请重新登录。");
+    throw authError("登录状态已失效，请重新登录。");
   }
 
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as TokenPayload;
-  if (!payload.userId || !payload.email || payload.exp < Date.now()) {
-    throw new Error("登录状态已失效，请重新登录。");
+  let payload: TokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as TokenPayload;
+  } catch {
+    throw authError("登录状态已失效，请重新登录。");
+  }
+  if (!payload || typeof payload.userId !== "string" || !payload.userId || typeof payload.email !== "string" || !payload.email || !Number.isFinite(payload.exp) || payload.exp <= Date.now()) {
+    throw authError("登录状态已失效，请重新登录。");
   }
   return payload;
 }
@@ -146,11 +152,21 @@ async function verifyPassword(password: string, user: UserRecord) {
 }
 
 async function readJson<T>(key: string): Promise<T | null> {
-  return readStoreJson<T>(ACCOUNT_STORE_NAME, key, LOCAL_STORE_DIR);
+  try {
+    return await readStoreJson<T>(ACCOUNT_STORE_NAME, key, LOCAL_STORE_DIR);
+  } catch {
+    throw accountServiceError();
+  }
 }
 
 async function writeJson(key: string, value: unknown) {
-  await writeStoreJson(ACCOUNT_STORE_NAME, key, value, LOCAL_STORE_DIR);
+  try {
+    await writeStoreJson(ACCOUNT_STORE_NAME, key, value, LOCAL_STORE_DIR);
+  } catch (error: any) {
+    throw accountServiceError(error?.code === "STORE_WRITE_UNCONFIRMED"
+      ? "账户变更结果尚未确认，请刷新账户核对后再操作。"
+      : undefined);
+  }
 }
 
 function emailIndexKey(email: string) {
@@ -172,8 +188,16 @@ async function findUserByEmail(email: string) {
 }
 
 function authError(message = "请先登录账户。") {
-  const error = new Error(message) as Error & { status: number };
+  const error = new Error(message) as Error & { status: number; code: string };
   error.status = 401;
+  error.code = "ACCOUNT_SESSION_INVALID";
+  return error;
+}
+
+function accountServiceError(message = "账户服务暂时不可用，请稍后再试。") {
+  const error = new Error(message) as Error & { status: number; code: string };
+  error.status = 503;
+  error.code = "ACCOUNT_SERVICE_UNAVAILABLE";
   return error;
 }
 
@@ -182,12 +206,7 @@ export async function requireUser(req: Request) {
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
   if (!token) throw authError("请先登录账户。");
 
-  let payload: TokenPayload;
-  try {
-    payload = verifyToken(token);
-  } catch {
-    throw authError("登录状态已失效，请重新登录。");
-  }
+  const payload = verifyToken(token);
   const user = await readJson<UserRecord>(userKey(payload.userId));
   if (!user) throw authError("账户不存在，请重新登录。");
   return user;
@@ -196,8 +215,9 @@ export async function requireUser(req: Request) {
 export async function getOptionalUser(req: Request) {
   try {
     return await requireUser(req);
-  } catch {
-    return null;
+  } catch (error: any) {
+    if (error?.code === "ACCOUNT_SESSION_INVALID") return null;
+    throw error;
   }
 }
 
@@ -215,9 +235,10 @@ function validateArchive(archive: any) {
 }
 
 function sendError(res: Response, error: any, status = 400) {
-  res.status(status).json({
+  res.status(Number(error?.status) || status).json({
     error: {
       message: error?.message || "请求失败，请稍后再试。",
+      ...(error?.code ? { code: error.code } : {}),
     },
   });
 }
@@ -283,7 +304,7 @@ export function registerAuthRoutes(app: Express) {
       res.setHeader("Cache-Control", "no-store");
       res.json({ user: publicUser(user, archive) });
     } catch (error) {
-      sendError(res, error, 401);
+      sendError(res, error, 503);
     }
   });
 
@@ -321,7 +342,7 @@ export function registerAuthRoutes(app: Express) {
         archiveRecordCount: archive.recordCount,
       });
     } catch (error) {
-      sendError(res, error, 401);
+      sendError(res, error, 503);
     }
   });
 }

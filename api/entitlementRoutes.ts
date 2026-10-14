@@ -378,6 +378,7 @@ function sendError(res: express.Response, error: any, status = 400) {
   res.status(Number(error?.status) || status).json({
     error: {
       message: error?.message || "请求失败，请稍后再试。",
+      ...(error?.code ? { code: error.code } : {}),
     },
   });
 }

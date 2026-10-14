@@ -64,7 +64,7 @@ import { SERVICE_FALLBACK, withFallbackNotice } from '../lib/serviceFeedback';
 import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import { shareImageWithNativeSheet } from '../lib/nativeShare';
-import { authHeaders, getStoredAccountSession } from '../lib/accountClient';
+import { authHeaders, getStoredAccountSession, isAccountTransitioning, isCurrentAccountSession, isInvalidAccountSessionResponse } from '../lib/accountClient';
 import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
 import { drawTarotCardIndices, drawTarotPositions, type TarotPosition } from '../lib/tarotRandom';
 import { preloadImages } from '../lib/preloadImages';
@@ -2047,8 +2047,13 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (response.status === 401 || response.status === 403) {
-        navigate('/auth?next=/app');
+      if (!isCurrentAccountSession(accountSession) || isAccountTransitioning()) {
+        const handled = new Error('账户已切换，请在当前账户重新操作。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
+      if (isInvalidAccountSessionResponse(response.status, data?.error?.code)) {
+        navigate('/auth?next=/app&reauth=1');
         const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
         handled.handledEntitlementError = true;
         throw handled;
@@ -2246,9 +2251,14 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (response.status === 401 || response.status === 403) {
+      if (!isCurrentAccountSession(accountSession) || isAccountTransitioning()) {
+        const handled = new Error('账户已切换，请在当前账户重新操作。') as Error & { handledEntitlementError?: boolean };
+        handled.handledEntitlementError = true;
+        throw handled;
+      }
+      if (isInvalidAccountSessionResponse(response.status, data?.error?.code)) {
         if (accountSession?.token) {
-          navigate('/auth?next=/app');
+          navigate('/auth?next=/app&reauth=1');
           const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
           handled.handledEntitlementError = true;
           throw handled;

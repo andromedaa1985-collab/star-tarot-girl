@@ -16,6 +16,8 @@ const expectedError = (status: number, code: string) => (error: unknown) => {
 before(() => {
   process.env.NETLIFY = "";
   process.env.NETLIFY_BLOBS_CONTEXT = "";
+  process.env.NETLIFY_BLOBS_SITE_ID = "";
+  process.env.NETLIFY_BLOBS_TOKEN = "";
   process.env.UPSTASH_REDIS_REST_URL = fixtureUrl;
   process.env.UPSTASH_REDIS_REST_TOKEN = "store-tests-placeholder";
 });

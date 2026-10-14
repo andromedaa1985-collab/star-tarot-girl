@@ -1,8 +1,10 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, Loader2, Mail, Moon, Sparkles, Sun, UserRound } from 'lucide-react';
-import { beginAccountTransitionSafely, getStoredAccountSession, loginAccount, registerAccount, type AccountSession } from '../lib/accountClient';
+import { beginAccountTransitionSafely, getStoredAccountSession, loginAccount, refreshAccountSession, registerAccount } from '../lib/accountClient';
 import { activateAccountWorkspace, logoutAccountWorkspace } from '../lib/accountWorkspace';
+import { createAuthSessionState, resolveAuthSessionVerification } from '../lib/authRecovery';
+import { markLandingIntroSeen } from '../lib/landingIntro';
 import { cn } from '../lib/utils';
 import { useAppContext } from '../store';
 
@@ -14,7 +16,13 @@ export default function Auth() {
   const [searchParams] = useSearchParams();
   const { theme, setTheme } = useAppContext();
   const nextPath = normalizeNextPath(searchParams.get('next'));
-  const [session, setSession] = React.useState<AccountSession | null>(() => getStoredAccountSession());
+  const requestedReauth = searchParams.get('reauth') === '1';
+  const [manualReauth, setManualReauth] = React.useState(false);
+  const reauth = requestedReauth || manualReauth;
+  const [authState, setAuthState] = React.useState(() => createAuthSessionState(getStoredAccountSession(), reauth));
+  const session = authState.session;
+  const [verificationAttempt, setVerificationAttempt] = React.useState(0);
+  const verificationGeneration = React.useRef(0);
   const [mode, setMode] = React.useState<AuthMode>('login');
   const [email, setEmail] = React.useState(() => session?.user.email || '');
   const [password, setPassword] = React.useState('');
@@ -22,12 +30,43 @@ export default function Auth() {
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<Notice | null>(null);
 
-  const title = mode === 'login' ? '欢迎回来' : '创建星轨账户';
-  const subtitle = mode === 'login' ? '登录，继续你的牌迹与日记。' : '用邮箱和密码，为你的星轨留一个位置。';
+  React.useEffect(() => {
+    let cancelled = false;
+    const generation = ++verificationGeneration.current;
+    const requestedSession = getStoredAccountSession();
+    setAuthState(createAuthSessionState(requestedSession, reauth));
+    if (reauth) {
+      setMode('login');
+      setPassword('');
+      return () => { cancelled = true; };
+    }
+    if (!requestedSession) return () => { cancelled = true; };
+    const finish = (result: Parameters<typeof resolveAuthSessionVerification>[2]) => {
+      if (cancelled || generation !== verificationGeneration.current) return;
+      const nextState = resolveAuthSessionVerification(requestedSession, getStoredAccountSession(), result);
+      if (nextState) setAuthState(nextState);
+    };
+    void refreshAccountSession(requestedSession).then(
+      (verifiedSession) => finish({ session: verifiedSession }),
+      (error: unknown) => finish({ error }),
+    );
+    return () => { cancelled = true; };
+  }, [reauth, verificationAttempt]);
+
+  const recoveringSession = authState.status === 'reauth';
+  const title = mode === 'register' ? '创建星轨账户' : recoveringSession ? '重新登录星轨' : '欢迎回来';
+  const subtitle = mode === 'register'
+    ? '用邮箱和密码，为你的星轨留一个位置。'
+    : recoveringSession
+      ? '请重新登录，继续你的牌迹与日记。本机记录已保留。'
+      : '登录，继续你的牌迹与日记。';
+
+  const retryVerification = () => { setNotice(null); setVerificationAttempt((attempt) => attempt + 1); };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
+    ++verificationGeneration.current;
     setBusy(true);
     setNotice(null);
     const previousSession = getStoredAccountSession();
@@ -37,9 +76,9 @@ export default function Auth() {
       releaseSync = await beginAccountTransitionSafely();
       const nextSession = mode === 'login' ? await loginAccount({ email, password }) : await registerAccount({ email, password, displayName });
       const activation = await activateAccountWorkspace(nextSession, previousSession);
-      setSession(getStoredAccountSession());
       setPassword('');
       setNotice({ type: 'success', message: getActivationMessage(mode, activation.source) });
+      markLandingIntroSeen();
       window.location.replace(nextPath);
       reloading = true;
     } catch (error: any) {
@@ -54,6 +93,7 @@ export default function Auth() {
 
   const handleSwitchAccount = async () => {
     if (busy) return;
+    ++verificationGeneration.current;
     let releaseSync: (() => Promise<void>) | undefined;
     try {
       releaseSync = await beginAccountTransitionSafely();
@@ -85,17 +125,36 @@ export default function Auth() {
             <img src="/detail-card-hero.png" alt="" width="1254" height="1254" className="mt-8 hidden aspect-square w-64 rounded-t-[44%] rounded-b-2xl object-cover lg:block" />
           </aside>
 
-          <section aria-label={session ? '当前星轨账户' : '邮箱账户登录与注册'} className="rail-panel mx-auto w-full max-w-[440px] sm:p-8">
-            {session ? (
+          <section aria-label={authState.status === 'anonymous' || authState.status === 'reauth' ? '邮箱账户登录与注册' : '当前星轨账户'} className="rail-panel mx-auto w-full max-w-[440px] sm:p-8">
+            {authState.status === 'verifying' ? (
+              <div role="status" aria-live="polite" aria-busy="true">
+                <Loader2 size={32} className="mb-5 animate-spin text-apple-accent" aria-hidden="true" />
+                <p className="rail-eyebrow">正在确认登录状态</p>
+                <h2 className="text-balance font-serif text-3xl font-medium leading-relaxed">接回你的星轨</h2>
+                <p className="rail-body mt-6 text-pretty text-apple-text-muted">正在验证当前账户。本机记录会保留，请稍候。</p>
+              </div>
+            ) : authState.status === 'unavailable' ? (
+              <div>
+                <AlertCircle size={32} className="mb-5 text-apple-accent" aria-hidden="true" />
+                <p className="rail-eyebrow">账户连接暂时中断</p>
+                <h2 className="text-balance font-serif text-3xl font-medium leading-relaxed">暂时无法确认登录</h2>
+                <p role="alert" className="rail-body mt-6 text-pretty text-apple-text-muted">{authState.message}</p>
+                <p className="rail-muted mt-3">账户和本机记录已保留。网络恢复后可以重试，也可以重新登录。</p>
+                <div className="mt-7 grid gap-3">
+                  <button type="button" onClick={retryVerification} className="rail-button w-full">重新验证<ArrowRight size={18} aria-hidden="true" /></button>
+                  <button type="button" onClick={() => { setNotice(null); setManualReauth(true); }} className="rail-button-secondary w-full">重新登录</button>
+                </div>
+              </div>
+            ) : authState.status === 'ready' ? (
               <div>
                 <CheckCircle2 size={32} className="mb-5 text-apple-accent" aria-hidden="true" />
                 <p className="rail-eyebrow">账户已就绪</p>
-                <h2 className="text-balance break-words font-serif text-3xl font-medium leading-relaxed">欢迎，{session.user.displayName}</h2>
-                <p className="rail-muted mt-2 break-all">{session.user.email}</p>
+                <h2 className="text-balance break-words font-serif text-3xl font-medium leading-relaxed">欢迎，{authState.session.user.displayName}</h2>
+                <p className="rail-muted mt-2 break-all">{authState.session.user.email}</p>
                 <p className="rail-body mt-6 text-pretty text-apple-text-muted">进入应用后，可在设置中同步或恢复云端存档，接着记录你的今天。</p>
                 {notice && <NoticeMessage notice={notice} />}
                 <div className="mt-7 grid gap-3">
-                  <button type="button" disabled={busy} onClick={() => { window.location.href = nextPath; }} className="rail-button w-full">进入应用<ArrowRight size={18} aria-hidden="true" /></button>
+                  <button type="button" disabled={busy} onClick={() => { markLandingIntroSeen(); window.location.href = nextPath; }} className="rail-button w-full">进入应用<ArrowRight size={18} aria-hidden="true" /></button>
                   <button type="button" disabled={busy} onClick={handleSwitchAccount} className="rail-button-secondary w-full">切换账户</button>
                 </div>
               </div>
@@ -110,6 +169,7 @@ export default function Auth() {
                 </div>
                 <h2 className="text-balance font-serif text-3xl font-medium leading-relaxed">{title}</h2>
                 <p className="rail-muted mt-2 text-pretty">{subtitle}</p>
+                {recoveringSession && session && <p role="status" className="rail-muted mt-3 break-words">重新登录 {session.user.email} 可继续使用原来的本机存档；登录其他账户会载入对应账户的记录。</p>}
 
                 <div className="mt-7 space-y-5">
                   {mode === 'register' && <AuthInput icon={<UserRound size={18} />} label="昵称" value={displayName} onChange={setDisplayName} placeholder="例如：星轨旅人" autoComplete="nickname" disabled={busy} />}
