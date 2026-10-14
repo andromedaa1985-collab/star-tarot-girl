@@ -174,11 +174,11 @@ export default function Auth() {
                 <div className="mt-7 space-y-5">
                   {mode === 'register' && <AuthInput icon={<UserRound size={18} />} label="昵称" value={displayName} onChange={setDisplayName} placeholder="例如：星轨旅人" autoComplete="nickname" disabled={busy} />}
                   <AuthInput icon={<Mail size={18} />} label="邮箱" value={email} onChange={setEmail} placeholder="you@example.com" type="email" autoComplete="email" required disabled={busy} />
-                  <AuthInput icon={<KeyRound size={18} />} label="密码" value={password} onChange={setPassword} placeholder="至少 8 位" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={8} disabled={busy} describedBy="auth-requirements" />
+                  <AuthInput icon={<KeyRound size={18} />} label="密码" value={password} onChange={setPassword} placeholder={mode === 'register' ? '至少 8 位' : '输入原来的密码'} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : 1} disabled={busy} describedBy="auth-requirements" />
                 </div>
-                <p id="auth-requirements" className="rail-muted mt-3">请填写有效邮箱，密码至少 8 位。</p>
+                <p id="auth-requirements" className="rail-muted mt-3">{mode === 'register' ? '请填写有效邮箱，密码至少 8 位。' : '请填写注册时使用的邮箱和密码。'}</p>
                 {notice && <NoticeMessage notice={notice} />}
-                <button type="submit" disabled={busy || !email.trim() || password.length < 8} className="rail-button mt-7 w-full">
+                <button type="submit" disabled={busy || !email.trim() || password.length < (mode === 'register' ? 8 : 1)} className="rail-button mt-7 w-full">
                   {busy ? <><Loader2 size={18} className="animate-spin" aria-hidden="true" />正在处理…</> : <>{mode === 'login' ? '登录进入星轨' : '创建并进入星轨'}<ArrowRight size={18} aria-hidden="true" /></>}
                 </button>
                 <p className="rail-muted mt-4 text-center">目前支持邮箱账户登录</p>

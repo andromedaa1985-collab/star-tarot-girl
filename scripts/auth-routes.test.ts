@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, test } from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -14,6 +14,17 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const realFetch = globalThis.fetch;
 const fixtureSecret = "auth-tests-session-placeholder";
 const fixtureUser = { id: "auth-fixture", email: "fixture@example.invalid", displayName: "Fixture", createdAt: "2026-10-14T00:00:00Z" };
+const legacyPassword = " a1b2 ";
+const legacySalt = "legacy-fixture-salt";
+const legacyUser = {
+  id: "legacy-short-password-fixture", email: "legacy@example.invalid", displayName: "Legacy Fixture",
+  createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z", salt: legacySalt,
+  passwordHash: crypto.scryptSync(legacyPassword, legacySalt, 64).toString("hex"),
+};
+const legacyArchive = {
+  userId: legacyUser.id, updatedAt: "2026-10-02T00:00:00Z", recordCount: 2,
+  archive: { format: "astro-rail-local-archive", version: 1, data: { diaryEntries: [{ id: "legacy-diary-fixture", content: "Fictional legacy record" }] } },
+};
 const isolatedEnv = ["NODE_ENV", "NETLIFY", "NETLIFY_BLOBS_CONTEXT", "NETLIFY_BLOBS_SITE_ID", "NETLIFY_BLOBS_TOKEN", "VERCEL", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN", "AUTH_SESSION_SECRET", "SESSION_SECRET", "DEEPSEEK_API_KEY"];
 const previousEnv = new Map(isolatedEnv.map((name) => [name, process.env[name]]));
 const previousCwd = process.cwd();
@@ -51,6 +62,11 @@ before(async () => {
   process.chdir(scratchDirectory);
   await mkdir(path.join(scratchDirectory, ".data/accounts/users"), { recursive: true });
   await writeFile(path.join(scratchDirectory, ".data/accounts/users/auth-fixture.json"), JSON.stringify(fixtureUser));
+  await mkdir(path.join(scratchDirectory, ".data/accounts/email-index"), { recursive: true });
+  await mkdir(path.join(scratchDirectory, ".data/accounts/archives"), { recursive: true });
+  await writeFile(path.join(scratchDirectory, `.data/accounts/users/${legacyUser.id}.json`), JSON.stringify(legacyUser));
+  await writeFile(path.join(scratchDirectory, `.data/accounts/email-index/${crypto.createHash("sha256").update(legacyUser.email).digest("hex")}.json`), JSON.stringify({ userId: legacyUser.id }));
+  await writeFile(path.join(scratchDirectory, `.data/accounts/archives/${legacyUser.id}.json`), JSON.stringify(legacyArchive));
   const app = express();
   app.use(express.json());
   app.use((_req, _res, next) => expiredStorageDeadline
@@ -65,6 +81,56 @@ before(async () => {
   const address = server.address();
   assert.ok(address && typeof address === "object");
   baseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+test("a six-character legacy password logs into the original account without changing its hash or archive", async () => {
+  assert.equal(legacyPassword.length, 6);
+  const paths = [
+    `.data/accounts/users/${legacyUser.id}.json`,
+    `.data/accounts/email-index/${crypto.createHash("sha256").update(legacyUser.email).digest("hex")}.json`,
+    `.data/accounts/archives/${legacyUser.id}.json`,
+  ].map((relative) => path.join(scratchDirectory, relative));
+  const before = await Promise.all(paths.map((file) => readFile(file, "utf8")));
+  const response = await realFetch(`${baseUrl}/api/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: legacyUser.email, password: legacyPassword }),
+  });
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.user.id, legacyUser.id);
+  assert.equal(data.user.archiveUpdatedAt, legacyArchive.updatedAt);
+  assert.equal(data.user.archiveRecordCount, legacyArchive.recordCount);
+  assert.equal(typeof data.token, "string");
+  assert.equal("passwordHash" in data.user, false);
+
+  for (const password of ["wrong!", legacyPassword.trim()]) {
+    const wrong = await realFetch(`${baseUrl}/api/auth/login`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: legacyUser.email, password }),
+    });
+    assert.equal(wrong.status, 400);
+    assert.match((await wrong.json()).error.message, /邮箱或密码不正确/);
+  }
+  assert.deepEqual(await Promise.all(paths.map((file) => readFile(file, "utf8"))), before);
+});
+
+test("registration keeps its eight-character minimum and both routes reject invalid password input", async () => {
+  const shortRegistration = await realFetch(`${baseUrl}/api/auth/register`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "new-short-fixture@example.invalid", password: "short6" }),
+  });
+  assert.equal(shortRegistration.status, 400);
+  assert.match((await shortRegistration.json()).error.message, /至少需要 8 位/);
+  for (const route of ["login", "register"]) {
+    for (const password of ["", null, 123456, "a".repeat(73)]) {
+      const response = await realFetch(`${baseUrl}/api/auth/${route}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: legacyUser.email, password }),
+      });
+      assert.equal(response.status, 400);
+      assert.equal(typeof (await response.json()).error.message, "string");
+    }
+  }
 });
 
 afterEach(resetFixtures);

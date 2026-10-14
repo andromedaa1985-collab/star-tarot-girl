@@ -43,9 +43,9 @@ function normalizeDisplayName(value: unknown, fallback: string) {
   return displayName || fallback;
 }
 
-function validatePassword(value: unknown) {
-  if (typeof value !== "string" || value.length < 8) {
-    throw new Error("密码至少需要 8 位。");
+function validatePassword(value: unknown, minimumLength = 8) {
+  if (typeof value !== "string" || value.length < minimumLength) {
+    throw new Error(minimumLength === 1 ? "请输入密码。" : "密码至少需要 8 位。");
   }
   if (value.length > 72) {
     throw new Error("密码太长了，请控制在 72 位以内。");
@@ -281,7 +281,8 @@ export function registerAuthRoutes(app: Express) {
     try {
       const email = normalizeEmail(req.body?.email);
       validateEmail(email);
-      const password = validatePassword(req.body?.password);
+      // Verify existing credentials as entered; new-password policy belongs to registration.
+      const password = validatePassword(req.body?.password, 1);
       const user = await findUserByEmail(email);
       if (!user || !(await verifyPassword(password, user))) {
         throw new Error("邮箱或密码不正确。");
