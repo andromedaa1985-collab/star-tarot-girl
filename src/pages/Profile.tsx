@@ -329,7 +329,7 @@ export default function Profile() {
       <div className="rail-page-content">
       <PageHeader title="我的" action={<button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary"><Settings size={17} />设置</button>} />
 
-      <section className="rail-panel mb-6 flex flex-wrap items-center gap-5">
+      <section className="rail-panel rail-profile-card mb-6 flex flex-wrap items-center gap-5">
         <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-apple-border bg-apple-surface-hover">
           {userAvatar ? <img src={userAvatar} alt="我的头像" className="size-full object-cover" onError={handleAvatarError} /> : <User size={28} className="text-apple-gold" />}
         </div>

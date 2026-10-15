@@ -15,6 +15,7 @@ import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
 import { createGenerationTrace, createRecordId } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
+import DiaryIllustration from '../components/DiaryIllustration';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { getStoredAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
@@ -443,25 +444,23 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
   };
 
   return (
-    <div className="rail-page">
+    <div className="rail-page rail-diary">
       <PageHeader title="日记" description="写一句今天的心情。" action={<button onClick={openNewEntry} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
       <div className="rail-page-content space-y-6">
         {entryNotice && <p role="status" className="rounded-xl border border-apple-border bg-apple-surface p-3 text-[14px] text-apple-text-muted">{entryNotice}</p>}
-        <section className="relative overflow-hidden rounded-[20px] border border-apple-gold/22 bg-apple-gold/[0.07] p-4">
-
-          <div className="relative z-10">
-            <div>
-              <div className="flex items-center gap-2 text-apple-gold">
-                <Sparkles size={16} />
-                <span className="text-[15px] font-medium">今天可以写</span>
-              </div>
-              <p className="rail-body mt-2">{todayPrompt}</p>
+        <section className="rail-diary-intro relative flex items-center gap-3 overflow-hidden rounded-[28px] p-5 sm:gap-6 sm:p-8">
+          <div className="rail-diary-intro-copy relative z-10 min-w-0 flex-1">
+            <div className="rail-diary-eyebrow flex items-center gap-2 text-[13px] font-medium">
+              <Sparkles size={15} aria-hidden="true" />
+              <span>今天可以写</span>
             </div>
+            <p className="rail-diary-question mt-3 text-[20px] leading-relaxed sm:text-[24px]">{todayPrompt}</p>
+            <p className="rail-diary-stats mt-5 text-[13px] leading-relaxed">近 7 天写了 {thisWeekCount} 篇 · 最近心情：{latestMoodLabel}</p>
           </div>
-          <p className="rail-muted mt-3">近 7 天写了 {thisWeekCount} 篇 · 最近心情：{latestMoodLabel}</p>
+          <div className="rail-diary-art w-24 shrink-0 sm:w-48 lg:w-56"><DiaryIllustration /></div>
         </section>
 
-        <details className="border-y border-apple-border py-1">
+        <details className="rail-diary-tools border-y border-apple-border py-1">
           <summary className="min-h-12 cursor-pointer py-3 text-[15px] font-medium text-apple-text">回顾与复盘</summary>
           <div className="space-y-5 pb-4 pt-2">
         {diaryEntries.length >= 3 && diaryThemeTrends.length > 0 && (
@@ -602,7 +601,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <Calendar size={18} className="text-apple-text-muted" />
             过往记录
           </h2>
-          {diaryEntries.length > 0 && <details className="border-b border-apple-border pb-3">
+          {diaryEntries.length > 0 && <details className="rail-diary-filters border-b border-apple-border pb-3">
             <summary className="min-h-12 cursor-pointer py-3 text-[15px] text-apple-text-muted">搜索与筛选{hasFilters ? ` · 找到 ${filteredEntries.length} 篇` : ` · ${diaryEntries.length} 篇日记`}</summary>
             <div className="space-y-3 pt-2">
             <label htmlFor="diary-search" className="flex items-center gap-2 text-[15px] font-medium"><Search size={16} aria-hidden="true" />找一篇日记</label>
@@ -631,7 +630,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
           </details>}
 
           {diaryEntries.length === 0 ? (
-            <div className="rail-empty">
+            <div className="rail-empty rail-diary-empty">
               <Book size={32} className="mx-auto text-apple-text-muted mb-3" />
               <p className="text-[15px] text-apple-text-muted">还没有记录过日记，开始写下第一篇吧</p>
             </div>
@@ -645,7 +644,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   key={entry.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rail-panel relative group"
+                  className="rail-panel rail-diary-record relative group"
                 >
                   <div className="absolute right-3 top-3 flex gap-1">
                   <button onClick={() => openEditEntry(entry)} aria-label={`编辑 ${entry.date} 的日记`} className="flex h-10 w-10 items-center justify-center rounded-full text-apple-text-muted hover:bg-apple-surface-hover hover:text-apple-text"><Pencil size={16} /></button>
@@ -676,7 +675,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   {entry.tags && entry.tags.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {entry.tags.map((tag, idx) => (
-                        <span key={idx} className="text-[13px] px-2.5 py-1 bg-apple-surface-hover text-apple-text-muted rounded-lg">
+                        <span key={idx} className="text-[13px] px-2.5 py-1 bg-apple-surface-hover text-apple-text-muted rounded-full">
                           #{tag}
                         </span>
                       ))}
@@ -694,10 +693,10 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
       <Portal>
         <AnimatePresence>
         {isAdding && (
-          <div className="fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
+          <div className="rail-diary-dialog-position fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60"
+              className="rail-glass-backdrop absolute inset-0 bg-black/60"
               onClick={closeEntryDialog}
             />
             <motion.div
@@ -707,7 +706,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
               ref={entryDialogRef}
               role="dialog" aria-modal="true" aria-labelledby="diary-entry-title" tabIndex={-1}
-              className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-[24px] border border-apple-border bg-apple-surface p-6 no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:rounded-[24px]"
+              className="rail-glass-dialog relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[28px] border border-apple-border bg-apple-surface p-5 no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:p-6"
             >
               <div className="flex justify-between items-center mb-6">
                 <h2 id="diary-entry-title" className="rail-section-title">{editingEntry ? '编辑日记' : '写日记'}</h2>
@@ -787,10 +786,10 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
       <Portal>
         <AnimatePresence>
         {showHistoryModal && (
-          <div className="fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
+          <div className="rail-diary-dialog-position fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60"
+              className="rail-glass-backdrop absolute inset-0 bg-black/60"
               onClick={() => setShowHistoryModal(false)}
             />
             <motion.div
@@ -800,7 +799,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
               ref={historyDialogRef}
               role="dialog" aria-modal="true" aria-labelledby="diary-history-title" tabIndex={-1}
-              className="w-full max-w-2xl bg-apple-surface border border-apple-border rounded-t-[24px] sm:rounded-[24px] p-6 relative z-10 max-h-[90vh] flex flex-col"
+              className="rail-glass-dialog w-full max-w-2xl bg-apple-surface border border-apple-border rounded-[28px] p-5 sm:p-6 relative z-10 max-h-[90dvh] flex flex-col"
             >
               <div className="flex justify-between items-center mb-6 shrink-0">
                 <h2 id="diary-history-title" className="rail-section-title flex items-center gap-2">
@@ -870,7 +869,7 @@ function DiaryReviewArchiveCard({
   return (
     <div
       className={clsx(
-        'relative overflow-hidden border border-apple-accent/24 bg-apple-surface',
+        'rail-diary-review relative overflow-hidden border border-apple-accent/24 bg-apple-surface',
         compact ? 'rounded-[20px] p-4' : 'rounded-[20px] p-5 sm:p-6',
       )}
     >

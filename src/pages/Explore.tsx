@@ -20,11 +20,11 @@ export default function Explore() {
       <div className="rail-page-content max-w-[720px]">
         <PageHeader title="探索" description="想多了解一点自己时，来这里看看。" />
         <nav aria-label="探索工具">
-          <ul className="divide-y divide-apple-border border-y border-apple-border">
+          <ul className="rail-explore-list">
             {exploreItems.map(({ to, title, description, icon: Icon }) => (
               <li key={to}>
-                <Link to={to} className="group flex min-h-24 items-center gap-4 rounded-lg px-2 py-6 hover:bg-apple-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-apple-accent sm:px-4">
-                  <Icon size={23} strokeWidth={1.6} className="text-apple-accent" aria-hidden="true" />
+                <Link to={to} className="group flex min-h-24 items-center gap-4 px-4 py-6 hover:bg-apple-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-apple-accent sm:px-6">
+                  <span className="rail-explore-icon"><Icon size={23} strokeWidth={1.6} className="text-apple-accent" aria-hidden="true" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-base font-medium">
                       {title}

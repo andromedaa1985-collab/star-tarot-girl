@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import TarotAtmosphere from '../components/TarotAtmosphere';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -3028,35 +3029,34 @@ export default function Home() {
   };
 
   return (
-    <div className="rail-home relative h-full overflow-hidden bg-apple-bg text-apple-text">
+    <div className={clsx('rail-home relative h-full overflow-hidden text-apple-text', conversationOpen && 'rail-home--conversation')}>
       <header className="rail-home-header">
         {conversationOpen ? (
           <button type="button" className="min-h-11 rounded-xl px-2 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(false); setFollowUpReadingId(null); setShowComposerTools(false); setShowPetMenu(false); scrollRef.current?.scrollTo({ top: 0 }); }}>‹ 返回今日</button>
-        ) : <span className="font-serif text-xl font-medium">今日星轨</span>}
-        <button type="button" onClick={() => setShowReadingLog(true)} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover"><History size={17} aria-hidden="true" />牌迹</button>
+        ) : <span className="rail-home-label"><Sparkles size={15} aria-hidden="true" />今日星轨</span>}
+        <button type="button" onClick={() => setShowReadingLog(true)} className="rail-history-button flex min-h-11 items-center gap-2 px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover"><History size={17} aria-hidden="true" />牌迹</button>
       </header>
 
       <div ref={scrollRef} onScroll={handleScroll} className={clsx('rail-home-scroll relative z-10 h-full overflow-x-hidden overflow-y-auto px-5 pt-[88px] sm:px-8', conversationOpen ? 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+180px)]' : 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+32px)]')}>
         <div className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-5">
           {!conversationOpen && (
             <div className="rail-home-focus">
-              <p className="mb-3 text-center text-[13px] text-apple-text-muted">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
-              <h1 className="font-serif text-center text-[28px] font-medium leading-normal sm:text-[36px]">今天，从一张牌开始</h1>
-              <p className="mt-3 text-center text-[15px] text-apple-text-muted">留一点时间，听听自己的心事。</p>
-              <div data-pet-stage className="rail-ritual-art">
-                <div className="rail-card-pile" aria-hidden="true">
-                  <div className="rail-tarot-back">
-                    <span className="rail-card-star"><Sparkles size={30} /></span>
-                    <span className="text-xs font-medium">RAILSTAR</span>
-                  </div>
+              <div className="rail-ritual-stage">
+                <p className="rail-ritual-date">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
+                <h1 className="rail-ritual-title font-serif">今天，从一张牌开始</h1>
+                <p className="rail-ritual-description">留一点时间，听听自己的心事。</p>
+                <div data-pet-stage className="rail-ritual-art">
+                  <TarotAtmosphere />
+                  {companionPet(clsx('absolute z-30', petStageClass))}
                 </div>
-                {companionPet(clsx('absolute z-30', petStageClass))}
               </div>
-              <button type="button" className="rail-button mx-auto w-full max-w-[320px]" onClick={() => { setFollowUpReadingId(null); handleSend('今日运势', { mode: 'draw' }); }} disabled={isThinking}>
-                <Sparkles size={18} aria-hidden="true" />{isThinking ? '正在解读…' : '抽一张今日牌'}
-              </button>
-              {visibleMessages.length > 0 && <button type="button" className="mx-auto mt-2 block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(true); window.requestAnimationFrame(() => scrollConversationToBottom('auto')); }}>继续上次解读</button>}
-              <div className="mx-auto mt-6 w-full max-w-[480px]">
+              <div className="rail-ritual-actions">
+                <button type="button" className="rail-button rail-draw-button w-full" onClick={() => { setFollowUpReadingId(null); handleSend('今日运势', { mode: 'draw' }); }} disabled={isThinking}>
+                  <Sparkles size={18} aria-hidden="true" />{isThinking ? '正在解读…' : '抽一张今日牌'}
+                </button>
+                {visibleMessages.length > 0 && <button type="button" className="mx-auto mt-2 block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(true); window.requestAnimationFrame(() => scrollConversationToBottom('auto')); }}>继续上次解读</button>}
+              </div>
+              <div className="rail-question-entry mx-auto mt-5 w-full max-w-[520px]">
                 {!questionInputOpen && !inputText && !followUpReading ? (
                   <button type="button" className="mx-auto block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setQuestionInputOpen(true); window.requestAnimationFrame(() => inputRef.current?.focus()); }}>有件事想问问 →</button>
                 ) : (
