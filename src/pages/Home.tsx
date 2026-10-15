@@ -6,9 +6,6 @@ import {
   BookOpen,
   CalendarCheck,
   Check,
-  ChevronDown,
-  ChevronUp,
-  Copy,
   Crown,
   Download,
   Gift,
@@ -18,7 +15,6 @@ import {
   Lock,
   Mic,
   Moon,
-  RefreshCw,
   Send,
   Shirt,
   Sparkles,
@@ -34,7 +30,6 @@ import { filterTarotArchive, getReadingSource, type ReadingSource } from '../lib
 import { formatRecordDate, type RecordRange } from '../lib/recordSearch';
 import { getAppDateKey, getTrustedNow } from '../lib/trustedTime';
 import { getBaziResultStatus } from '../lib/baziProfiles';
-import { getGuardianLetterState } from '../lib/guardianLetter';
 import {
   LEVEL_THRESHOLDS,
   type CompanionMessage,
@@ -55,7 +50,7 @@ import {
   isPlusActive,
   isTesterActive,
 } from '../lib/membership';
-import { buildDiaryThemeTrends, getNextBestAction, getSoftConversionTrigger, recordAppEvent } from '../lib/engagement';
+import { buildDiaryThemeTrends, recordAppEvent } from '../lib/engagement';
 import { usePersistentDraft } from '../lib/usePersistentDraft';
 import { copyTextToClipboard } from '../lib/clipboard';
 import { TAROT_SYSTEM_PROMPT, buildUserAddressInstruction, cleanAiText } from '../lib/aiPrompting';
@@ -127,14 +122,6 @@ const SPREADS = [
   { name: '圣三角', prompt: '用圣三角牌阵看过去、现在和未来' },
   { name: '爱情十字', prompt: '用爱情十字牌阵看看这段关系' },
   { name: '事业岔路', prompt: '用事业岔路牌阵帮我判断选择' },
-];
-
-const COMPOSER_SUGGESTIONS = [
-  { label: '今日运势', prompt: '今日运势' },
-  { label: '感情卡住', prompt: '我现在这段关系最需要看清什么？' },
-  { label: '工作选择', prompt: '我最近工作或事业上最该先处理哪一步？' },
-  { label: '二选一', prompt: '我正在纠结一个选择，帮我看下一步怎么判断。' },
-  { label: '状态低落', prompt: '我最近状态有点乱，今天最该先稳住什么？' },
 ];
 
 type CompanionOutfit = {
@@ -218,14 +205,6 @@ const DRAW_ANIMATION_MIN_MS = 4800;
 const getAutoCompanionOutfit = (level: number) =>
   COMPANION_OUTFITS.filter((outfit) => outfit.id !== 'auto' && outfit.minLevel <= level)
     .sort((a, b) => b.minLevel - a.minLevel)[0] ?? COMPANION_OUTFITS[1];
-
-const PET_MURMURS = [
-  '你今天的心事有点吵，我先帮你把声音调小。',
-  '别急着选答案。真正卡住你的，通常是代价。',
-  '我刚刚把星尘扫开一点，路还在，不算坏。',
-  '今天适合问小一点的问题，答案会更准。',
-  '你不用一次想明白，先把最刺的一句放桌上。',
-];
 
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
@@ -1484,18 +1463,19 @@ export default function Home() {
     setMembership,
     engagement,
     setEngagement,
-    dailyLetterDate,
-    dailyLetter,
-    settings,
     guardianMessages,
     setAppEvents,
   } = useAppContext();
 
   const [inputText, setInputText, clearInputDraft] = usePersistentDraft('draft:home:input', '');
   const [isThinking, setIsThinking] = useState(false);
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const conversationOpenRef = useRef(conversationOpen);
+  conversationOpenRef.current = conversationOpen;
+  const homeToolsRef = useRef<HTMLDetailsElement>(null);
+  const [questionInputOpen, setQuestionInputOpen] = useState(false);
   const [isInternetMode, setIsInternetMode] = useState(false);
   const [showDailyPanel, setShowDailyPanel] = useState(false);
-  const [showSpreadTools, setShowSpreadTools] = useState(false);
   const [showReadingLog, setShowReadingLog] = useState(false);
   const [showWardrobe, setShowWardrobe] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -1506,7 +1486,6 @@ export default function Home() {
   const [scrollControlsActive, setScrollControlsActive] = useState(false);
   const [isDrawingCards, setIsDrawingCards] = useState(false);
   const [drawingCards, setDrawingCards] = useState<DrawnCard[]>([]);
-  const [composerFocused, setComposerFocused] = useState(false);
   const [autoScrollOnNextMessage, setAutoScrollOnNextMessage] = useState(false);
   const [floatingExp, setFloatingExp] = useState<number | null>(null);
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
@@ -1574,17 +1553,6 @@ export default function Home() {
   const followUpReading = tarotReadings.find((reading) => reading.id === followUpReadingId);
   const dailyCheckInEnergy = getDailyCheckInEnergy(membership);
   const dailyMissionEnergy = getDailyMissionEnergy(membership);
-  const hasGuardianLetterToday = getGuardianLetterState(getAppDateKey(getTrustedNow()), dailyLetter, dailyLetterDate, settings.guardianLetterStatus).completed;
-  const nextBestAction = getNextBestAction({
-    plusActive,
-    tarotReadings: tarotReadings.length,
-    hasBaziProfile: profiles.length > 0,
-    wroteDiaryToday,
-    hasGuardianLetterToday,
-    simulatedRecently: simulatedToday,
-    activeDays: engagement.activeDays,
-  });
-
   const visibleMessages = messages.filter((message) => message.id !== 'init');
   const hasDrawnCard = cardImage && cardImage !== '/default-card.png' && cardImage !== 'default-card.png';
   const memoryRecall = useMemo(
@@ -1598,17 +1566,6 @@ export default function Home() {
     () => buildProfileTarotContext(activeProfile, baziResult),
     [activeProfile, baziResult],
   );
-  const companionBubbleText = isDrawingCards
-    ? '别盯着牌背看，它会紧张。'
-    : isThinking
-      ? '我在翻星轨，你先别急着给自己判刑。'
-      : hasDrawnCard
-        ? memoryRecall.contextLines.length
-          ? '我把你留下的线索放在下面了，今天可以接着看。'
-          : PET_MURMURS[(tarotReadings.length + bondLevel) % PET_MURMURS.length]
-        : memoryRecall.contextLines.length
-          ? '我把你留下的线索放在下面了，今天可以接着看。'
-          : '今天先问一个小问题，不要一上来就审判人生。';
   const autoOutfit = getAutoCompanionOutfit(bondLevel);
   const selectedOutfit = COMPANION_OUTFITS.find((item) => item.id === companionOutfit);
   const activeOutfit =
@@ -1630,7 +1587,7 @@ export default function Home() {
     : petExpressionOverride || basePetExpression;
   const activePetAction = getCompanionAction(activePetExpression, activeOutfitId);
   const petStageClass = 'rail-stage-pet';
-  const petIsDocked = visibleMessages.length > 0;
+  const petIsDocked = conversationOpen;
   useEffect(() => {
     // Ritual and conversation areas use different anchors; reset the old drag offset.
     setPetOffset({ x: 0, y: 0 });
@@ -1683,14 +1640,6 @@ export default function Home() {
     }
   };
   const isTarotImage = (image?: string) => Boolean(image && image.startsWith('/tarot/'));
-  const cardStackImages = useMemo(() => {
-    const images = [
-      hasDrawnCard ? cardImage : '',
-      ...tarotReadings.map((reading) => reading.cardImage || ''),
-    ].filter(Boolean);
-    return images.filter((image, index) => index === 0 || image !== images[index - 1]).slice(0, 5);
-  }, [cardImage, hasDrawnCard, tarotReadings]);
-
   const weekReadings = useMemo(
     () => tarotReadings.filter((reading) => Date.now() - new Date(reading.date).getTime() < 7 * 86400000),
     [tarotReadings],
@@ -1699,15 +1648,6 @@ export default function Home() {
   const weekGuardianMessages = useMemo(() => getRecentGuardianMessages(guardianMessages), [guardianMessages]);
   const weeklyMaterialCount = weekReadings.length + weekDiaries.length + weekGuardianMessages.length;
   const weeklyReviewReady = weeklyMaterialCount >= 3;
-  const softConversionTrigger = getSoftConversionTrigger({
-    plusActive,
-    tarotReadings: tarotReadings.length,
-    diaryEntries: diaryEntries.length,
-    activeDays: engagement.activeDays,
-    lastUpgradePromptAt: engagement.lastUpgradePromptAt,
-    weeklyReviewReady,
-  });
-
   const weeklyReportText = useMemo(() => {
     if (weekReadings.length === 0) return '本周还没有足够牌迹，先用今日牌留下第一条轨迹。';
     if (!plusActive && weekReadings.length >= 3) {
@@ -1762,6 +1702,7 @@ export default function Home() {
 
   const scrollConversationToBottom = (behavior: ScrollBehavior = 'smooth') => {
     const run = () => {
+      if (!conversationOpenRef.current) return;
       endRef.current?.scrollIntoView({ behavior, block: 'end' });
       const scrollNode = scrollRef.current;
       if (scrollNode) {
@@ -1806,18 +1747,19 @@ export default function Home() {
   }, [isDrawingCards, isThinking]);
 
   useEffect(() => {
-    if (initialChatScrollDoneRef.current || visibleMessages.length === 0) return;
+    if (!conversationOpen || initialChatScrollDoneRef.current || visibleMessages.length === 0) return;
     initialChatScrollDoneRef.current = true;
     scrollConversationToBottom('auto');
-  }, [visibleMessages.length]);
+  }, [visibleMessages.length, conversationOpen]);
 
   useEffect(() => {
-    if (!autoScrollOnNextMessage) return;
+    if (!conversationOpen || !autoScrollOnNextMessage) return;
     scrollConversationToBottom();
     if (!isThinking) setAutoScrollOnNextMessage(false);
-  }, [messages.length, isThinking, autoScrollOnNextMessage]);
+  }, [messages.length, isThinking, autoScrollOnNextMessage, conversationOpen]);
 
   useEffect(() => {
+    if (!conversationOpen) return;
     const unseenDailyMessages = visibleMessages.filter(
       (message, index, list) =>
         message.role === 'ai' &&
@@ -1838,7 +1780,7 @@ export default function Home() {
         events,
       ),
     );
-  }, [visibleMessages, dailyDeepExpandedIds, dailyDeepImpressionIds, setAppEvents]);
+  }, [conversationOpen, visibleMessages, dailyDeepExpandedIds, dailyDeepImpressionIds, setAppEvents]);
 
   const addExp = (amount: number) => {
     const nextExp = bondExp + amount;
@@ -1857,11 +1799,6 @@ export default function Home() {
     setAppEvents((events) => recordAppEvent(events, 'upgrade_prompt', { reason }));
   };
 
-  const dismissSoftConversion = () => {
-    setEngagement((current) => ({ ...current, lastUpgradePromptAt: new Date().toISOString() }));
-    setAppEvents((events) => recordAppEvent(events, 'upgrade_prompt', { reason: 'soft_dismiss' }));
-  };
-
   const applyServerEntitlements = (snapshot?: EntitlementSnapshot) => {
     if (!snapshot) return;
     applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
@@ -1872,11 +1809,6 @@ export default function Home() {
     if (session?.token) return session;
     navigate(`/auth?next=${encodeURIComponent(next)}`);
     return null;
-  };
-
-  const handleSoftConversion = () => {
-    if (!softConversionTrigger) return;
-    openUpgradePrompt(softConversionTrigger.reason);
   };
 
   const handleStartTrial = async () => {
@@ -1930,14 +1862,6 @@ export default function Home() {
     addExp(10);
   };
 
-  const handleNextBestAction = () => {
-    if (nextBestAction.prompt) {
-      handleSend(nextBestAction.prompt);
-      return;
-    }
-    if (nextBestAction.route) navigate(nextBestAction.route);
-  };
-
   const handleMemoryRecallAction = () => {
     if (memoryRecall.prompt) {
       handleSend(memoryRecall.prompt);
@@ -1949,6 +1873,7 @@ export default function Home() {
   const handleDailyMissionShortcut = (mission: 'ask' | 'diary' | 'simulator') => {
     if (mission === 'ask') {
       setShowDailyPanel(false);
+      setQuestionInputOpen(true);
       window.setTimeout(() => inputRef.current?.focus(), 80);
       return;
     }
@@ -2125,6 +2050,8 @@ export default function Home() {
   const handleSend = async (textOverride?: string, options: { mode?: SendMode; regeneration?: RegenerationSource } = {}) => {
     const question = (textOverride || inputText).trim();
     if (!question || isThinking) return;
+    setConversationOpen(true);
+    setShowDailyPanel(false);
     const accountSession = getStoredAccountSession();
     if (!options.regeneration && (options.mode ?? 'auto') === 'auto' && isDailyDeepRequest(question)) {
       const source = getLatestDailyFortuneDeepSource();
@@ -2202,7 +2129,6 @@ export default function Home() {
     setIsThinking(true);
     setIsDrawingCards(false);
     setDrawingCards(shouldDraw ? cards : []);
-    setComposerFocused(false);
     setAutoScrollOnNextMessage(!options.regeneration);
     if (shouldDraw) setCardImage(image);
     if (!options.regeneration) setMessages((prev) => [...prev, userMessage]);
@@ -2837,118 +2763,66 @@ export default function Home() {
   const scrollControlOpacity = scrollControlsActive ? 1 : 0.18;
 
   const openDailyTasksFromChat = () => {
+    setConversationOpen(false);
     setShowDailyPanel(true);
     setShowComposerTools(false);
     setShowPetMenu(false);
     setShowScrollTop(false);
     setShowScrollBottom(true);
     const scrollToDaily = () => {
-      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      homeToolsRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     };
 
     window.requestAnimationFrame(scrollToDaily);
     window.setTimeout(scrollToDaily, 80);
   };
 
-  const showComposerSuggestions = composerFocused && !showComposerTools && !isThinking;
+  const showComposerSuggestions = showComposerTools && !isThinking;
 
-  const composerSuggestions = (
-    <AnimatePresence initial={false}>
-      {showComposerSuggestions && (
-        <motion.div
-          initial={{ opacity: 0, y: 10, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className="mx-auto mb-1.5 flex w-full max-w-[min(540px,calc(100vw-28px))] gap-1.5 overflow-x-auto rounded-[18px] border border-[#efe3cf]/72 bg-[#fffaf2]/72 p-1.5 shadow-[0_16px_44px_rgba(84,55,24,0.11),inset_0_1px_0_rgba(255,255,255,0.74)] backdrop-blur-2xl no-scrollbar dark:border-white/[0.08] dark:bg-[#111522]/74 dark:shadow-[0_18px_48px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.07)] sm:mb-2 sm:gap-2 sm:rounded-[22px] sm:p-2"
-        >
-          <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              setShowComposerTools(false);
-              setShowReadingLog(true);
-            }}
-            className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#f4cf83]/32 bg-[#f4cf83]/18 px-2.5 py-1.5 text-xs font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.54)] transition-transform active:scale-[0.98] dark:border-[#f4cf83]/20 dark:bg-[#f4cf83]/12 dark:text-[#f4cf83] sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[13px]"
-            aria-label="打开牌迹档案"
-          >
-            <BookOpen size={13} />
-            牌迹
-          </button>
-          {COMPOSER_SUGGESTIONS.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => handleSend(item.prompt, { mode: 'draw' })}
-              className="shrink-0 rounded-[14px] border border-[#eadcc8]/64 bg-white/52 px-2.5 py-1.5 text-xs font-semibold text-[#6f6253] shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] transition-transform active:scale-[0.98] dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/64 sm:rounded-[16px] sm:px-3 sm:py-2 sm:text-[13px]"
-            >
-              {item.label}
-            </button>
-          ))}
-        </motion.div>
-      )}
-    </AnimatePresence>
+  const composerSuggestions = showComposerSuggestions && (
+    <div id="composer-options" className="mx-auto mb-2 flex w-full max-w-[760px] flex-wrap items-center gap-2 rounded-2xl border border-apple-border bg-apple-surface p-3">
+      <button type="button" onClick={() => setIsInternetMode(value => !value)} aria-pressed={isInternetMode} className="rail-button-secondary">
+        <Globe size={16} aria-hidden="true" />联网提示{isInternetMode ? '已开' : '已关'}
+      </button>
+      <button type="button" onClick={handleVoiceInput} disabled={isThinking} className="rail-button-secondary"><Mic size={16} aria-hidden="true" />语音输入</button>
+    </div>
   );
 
   const composer = (
     <div className="rail-composer mx-auto flex w-full max-w-[760px] items-center gap-2 p-2">
-      <button
-        onClick={() => setIsInternetMode((value) => !value)}
-        className={clsx(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-[18px] transition-all',
-          isInternetMode
-            ? 'bg-[#2f5fff]/12 text-[#3558d4] dark:bg-[#7c9cff]/16 dark:text-[#b8c7ff]'
-            : 'bg-[#efe2cc] text-[#7f715f] dark:bg-white/[0.06] dark:text-white/55',
-        )}
-        aria-label={isInternetMode ? '关闭联网提示' : '开启联网提示'}
-        aria-pressed={isInternetMode}
-        title={isInternetMode ? '关闭联网提示' : '开启联网提示'}
-      >
-        <Globe size={19} />
+      <button type="button" onClick={() => setShowComposerTools(value => !value)} aria-label="输入选项" aria-expanded={showComposerTools} aria-controls="composer-options" className="flex size-11 shrink-0 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover">
+        <span aria-hidden="true" className="text-xl leading-none">···</span>
       </button>
       <div className="relative flex flex-1 items-center">
         <input
           ref={inputRef}
+          id="home-question"
           type="text"
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
           onPointerDown={() => {
             setShowComposerTools(false);
             setShowPetMenu(false);
-            setComposerFocused(true);
           }}
           onClick={() => {
             setShowComposerTools(false);
             setShowPetMenu(false);
-            setComposerFocused(true);
           }}
           onFocus={() => {
             setShowComposerTools(false);
             setShowPetMenu(false);
-            setComposerFocused(true);
           }}
-          onBlur={() => window.setTimeout(() => setComposerFocused(false), 140)}
           onKeyDown={handleComposerKeyDown}
           disabled={isThinking}
           aria-label="想问星轨的问题"
           placeholder="说说你现在最想问的事"
-          className="h-12 w-full rounded-xl bg-transparent pl-3 pr-[80px] text-base text-apple-text placeholder:text-apple-text-muted outline-none"
+          className="h-12 w-full rounded-xl bg-transparent pl-1 pr-14 text-base text-apple-text placeholder:text-apple-text-muted outline-none"
         />
-        <button
-          onClick={handleVoiceInput}
-          disabled={isThinking}
-          title="语音输入"
-          aria-label="语音输入"
-          className="absolute right-9 flex h-8 w-8 items-center justify-center rounded-[14px] text-[#81715f] transition-colors disabled:opacity-50 dark:text-white/45"
-        >
-          <Mic size={20} />
-        </button>
         <button
           onClick={() => handleSend()}
           disabled={!inputText.trim() || isThinking}
           aria-label="发送"
-          className="absolute right-1 flex h-8 w-8 items-center justify-center rounded-[14px] bg-[#17130f] text-[#f4cf83] shadow-[0_10px_20px_rgba(55,35,12,0.18)] transition-transform active:scale-95 disabled:opacity-35 dark:bg-[#f4cf83] dark:text-[#17130f]"
+          className="absolute right-1 flex h-11 w-11 items-center justify-center rounded-xl bg-[#17130f] text-[#f4cf83] shadow-[0_10px_20px_rgba(55,35,12,0.18)] transition-transform active:scale-95 disabled:opacity-35 dark:bg-[#f4cf83] dark:text-[#17130f]"
         >
           <Send size={16} className="ml-0.5" />
         </button>
@@ -2981,8 +2855,6 @@ export default function Home() {
         tabIndex={0}
       >
         <motion.div
-          animate={{ y: [0, -8, 0] }}
-          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
           className="pointer-events-none h-full w-full select-none drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]"
         >
           <CompanionSprite
@@ -3149,486 +3021,101 @@ export default function Home() {
         : '今日深解 · ¥1.9';
 
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-[330px] rounded-[22px] border border-[#f4cf83]/28 bg-[#fff8ee]/78 p-3 shadow-[0_12px_30px_rgba(84,55,24,0.10)] backdrop-blur-2xl dark:border-[#f4cf83]/16 dark:bg-white/[0.055]"
-      >
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f4cf83]/18 text-[#b97b28] dark:text-[#f4cf83]">
-            <Sparkles size={16} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-black text-apple-text">想让我把今天讲细一点吗</div>
-            <p className="mt-1 text-xs leading-relaxed text-apple-text-muted">
-              展开情绪、关系、工作节奏和晚间回看；不重新抽牌，只沿着今天这张牌继续陪你看。
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 rounded-full border border-[#eadcc8]/72 bg-[#f7ead8]/78 p-1 shadow-[inset_0_1px_2px_rgba(90,62,28,0.08)] dark:border-white/[0.08] dark:bg-white/[0.055]">
-          {dailyDeepAccess ? (
-            <button
-              onClick={() => handleDailyDeepDive(message, index)}
-              disabled={isThinking}
-              className="flex h-10 w-full items-center justify-center rounded-full bg-[#17130f] px-3 text-xs font-black text-[#f4cf83] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
-            >
-              展开今日深解
-            </button>
-          ) : (
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                onClick={() => setShowDailyDeepPaywall(true)}
-                disabled={isThinking}
-                className="flex h-10 items-center justify-center rounded-full bg-[#17130f] px-3 text-xs font-black text-[#f4cf83] shadow-[0_10px_24px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
-              >
-                {unlockedLabel}
-              </button>
-              <button
-                onClick={() => handleOpenDailyDeepPlan('plus_monthly')}
-                className="flex h-10 items-center justify-center rounded-full px-3 text-xs font-black text-[#9a6a28] transition-colors hover:bg-white/48 dark:text-[#f4cf83] dark:hover:bg-white/[0.06]"
-              >
-                月卡每天看
-              </button>
-            </div>
-          )}
-        </div>
-      </motion.div>
+      <button type="button" onClick={() => dailyDeepAccess ? handleDailyDeepDive(message, index) : setShowDailyDeepPaywall(true)} disabled={isThinking} className="min-h-11 self-start rounded-xl px-3 text-[13px] text-apple-text-muted hover:bg-apple-surface-hover disabled:opacity-40">
+        {dailyDeepAccess ? '展开今日深解' : unlockedLabel}
+      </button>
     );
   };
 
   return (
     <div className="rail-home relative h-full overflow-hidden bg-apple-bg text-apple-text">
       <header className="rail-home-header">
-        <div>
-          <p className="rail-eyebrow mb-1">RAILSTAR · 每日陪伴</p>
-          <h1 className="font-serif text-2xl font-medium text-apple-text">今日星轨</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="rail-energy" onClick={() => openUpgradePrompt('energy')} aria-label="查看能量与会员权益">
-            <Sparkles size={16} aria-hidden="true" /><span className="tabular-nums">{testerActive ? '∞' : plusActive ? 'Plus' : energy}</span>
-          </button>
-          <button type="button" className="rail-icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="切换日夜模式" aria-pressed={theme === 'dark'}>
-            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
-          </button>
-          <button type="button" className="rail-icon-button" onClick={() => setShowWardrobe(true)} aria-label="打开衣柜"><Shirt size={19} /></button>
-        </div>
+        {conversationOpen ? (
+          <button type="button" className="min-h-11 rounded-xl px-2 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(false); setFollowUpReadingId(null); setShowComposerTools(false); setShowPetMenu(false); scrollRef.current?.scrollTo({ top: 0 }); }}>‹ 返回今日</button>
+        ) : <span className="font-serif text-xl font-medium">今日星轨</span>}
+        <button type="button" onClick={() => setShowReadingLog(true)} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover"><History size={17} aria-hidden="true" />牌迹</button>
       </header>
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className={clsx(
-          'relative z-10 h-full overflow-x-hidden overflow-y-auto px-4 pt-[100px] no-scrollbar sm:px-6',
-          visibleMessages.length > 0
-            ? showComposerTools || showComposerSuggestions
-              ? 'pb-[calc(var(--app-bottom-pad)+280px)]'
-              : 'pb-[calc(var(--app-bottom-pad)+220px)]'
-            : 'pb-[calc(var(--app-bottom-pad)+200px)]',
-        )}
-      >
-        <div
-          className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-3.5"
-        >
-          <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: 'spring', stiffness: 180, damping: 24 }}
-            className={clsx(
-              'rail-surface rail-today relative flex flex-col overflow-hidden',
-              visibleMessages.length > 0 ? 'rounded-[24px] p-3' : 'rounded-[34px] p-4',
-            )}
-          >
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.38),transparent_44%),linear-gradient(180deg,transparent,rgba(124,90,45,0.08))] dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%),linear-gradient(180deg,transparent,rgba(244,207,131,0.05))]" />
-            <DrawCardAnimation
-              active={isDrawingCards}
-              image={cardImage}
-              cards={drawingCards}
-              compact={visibleMessages.length > 0}
-            />
-            <div className="relative z-10 order-2 mt-4 flex min-w-0 items-center justify-between gap-2 border-t border-apple-border pt-3">
-              <button
-                onClick={() => setShowDailyPanel((value) => !value)}
-                className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-xl px-2 text-left text-apple-text-muted hover:bg-apple-surface-hover"
-                title={showDailyPanel ? '收起今日任务' : '展开今日任务'}
-                aria-expanded={showDailyPanel}
-              >
-                <CalendarCheck size={15} className="shrink-0 text-[#b97b28] dark:text-[#f4cf83]" />
-                <span className="truncate text-[13px] font-semibold text-[#4c3b29] dark:text-white/78">
-                  今日任务 · {missionCount}/3
-                </span>
-                <span className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-white/48 px-2 py-1 text-xs font-semibold text-[#7c674c] dark:bg-white/[0.08] dark:text-white/58">
-                  {showDailyPanel ? '收起' : '展开'}
-                  {showDailyPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                </span>
+      <div ref={scrollRef} onScroll={handleScroll} className={clsx('rail-home-scroll relative z-10 h-full overflow-x-hidden overflow-y-auto px-5 pt-[88px] sm:px-8', conversationOpen ? 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+180px)]' : 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+32px)]')}>
+        <div className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-5">
+          {!conversationOpen && (
+            <div className="rail-home-focus">
+              <p className="mb-3 text-center text-[13px] text-apple-text-muted">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
+              <h1 className="font-serif text-center text-[28px] font-medium leading-normal sm:text-[36px]">今天，从一张牌开始</h1>
+              <p className="mt-3 text-center text-[15px] text-apple-text-muted">留一点时间，听听自己的心事。</p>
+              <div data-pet-stage className="rail-ritual-art">
+                <div className="rail-card-pile" aria-hidden="true">
+                  <div className="rail-tarot-back">
+                    <span className="rail-card-star"><Sparkles size={30} /></span>
+                    <span className="text-xs font-medium">RAILSTAR</span>
+                  </div>
+                </div>
+                {companionPet(clsx('absolute z-30', petStageClass))}
+              </div>
+              <button type="button" className="rail-button mx-auto w-full max-w-[320px]" onClick={() => { setFollowUpReadingId(null); handleSend('今日运势', { mode: 'draw' }); }} disabled={isThinking}>
+                <Sparkles size={18} aria-hidden="true" />{isThinking ? '正在解读…' : '抽一张今日牌'}
               </button>
-              <button
-                onClick={handleDailyCheckIn}
-                disabled={hasCheckedInToday}
-                className={clsx(
-                  'min-h-11 shrink-0 rounded-xl px-3.5 text-[13px] font-medium transition-colors',
-                  hasCheckedInToday
-                    ? 'bg-[#f6eddf] text-[#877967] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:bg-white/[0.07] dark:text-white/52'
-                    : 'bg-apple-surface-hover text-apple-text hover:bg-apple-border/60',
+              {visibleMessages.length > 0 && <button type="button" className="mx-auto mt-2 block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(true); window.requestAnimationFrame(() => scrollConversationToBottom('auto')); }}>继续上次解读</button>}
+              <div className="mx-auto mt-6 w-full max-w-[480px]">
+                {!questionInputOpen && !inputText && !followUpReading ? (
+                  <button type="button" className="mx-auto block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setQuestionInputOpen(true); window.requestAnimationFrame(() => inputRef.current?.focus()); }}>有件事想问问 →</button>
+                ) : (
+                  <div>
+                    <label htmlFor="home-question" className="mb-2 block text-sm text-apple-text-muted">你想问什么？</label>
+                    {composerSuggestions}{composer}
+                  </div>
                 )}
-              >
-                {hasCheckedInToday ? '已签到' : '签到领能量'}
-              </button>
+              </div>
             </div>
-
-            <div className={clsx('relative z-10 order-1', visibleMessages.length > 0 ? 'min-h-[82px]' : 'min-h-[0px]')}>
-              {visibleMessages.length > 0 && (
-                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                  <div className="relative h-14 w-12">
-                    <div className="absolute left-0 top-1 h-12 w-8 -rotate-6 rounded-[10px] bg-[#111827] shadow-[0_10px_20px_rgba(18,14,9,0.18)]" />
-                    {(cardStackImages[0] || hasDrawnCard) && (
-                      <img
-                        src={cardStackImages[0] || cardImage}
-                        alt="当前牌面"
-                        className="absolute right-0 top-0 h-14 w-9 rotate-6 rounded-[10px] object-cover object-top shadow-[0_10px_20px_rgba(18,14,9,0.18)] ring-1 ring-black/5"
-                      />
-                    )}
-                  </div>
-                  <div className="min-w-0 rounded-[20px] border border-white/60 bg-white/56 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.045]">
-                    <p className="text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">当前牌面</p>
-                    <p className="mt-1 line-clamp-2 break-words text-sm font-medium leading-snug text-[#3b3024] dark:text-white/72">
-                      {isThinking ? '解读中...' : companionBubbleText}
-                    </p>
-                  </div>
-                  <div className="flex w-[58px] shrink-0 flex-col gap-1.5">
-                    <button
-                      onClick={() => setShowReadingLog(true)}
-                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] border border-[#f4cf83]/28 bg-[#f4cf83]/14 text-xs font-bold text-[#9b641e] shadow-[inset_0_1px_0_rgba(255,255,255,0.50)] dark:border-[#f4cf83]/18 dark:bg-[#f4cf83]/10 dark:text-[#f4cf83]"
-                      aria-label="打开牌迹档案"
-                      title="牌迹档案"
-                    >
-                      <BookOpen size={13} />
-                      牌迹
-                    </button>
-                    <button
-                      onClick={() => handleSend('解读当前牌面', { mode: 'current' })}
-                      disabled={isThinking}
-                      className="flex h-9 items-center justify-center gap-1 rounded-[16px] bg-[#17130f] text-xs font-bold text-[#f4cf83] shadow-[0_12px_26px_rgba(55,35,12,0.18)] disabled:opacity-45 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                      aria-label="解读当前牌面"
-                      title="解读当前牌面"
-                    >
-                      <Sparkles size={13} />
-                      解读
-                    </button>
-                  </div>
-                </div>
-              )}
-              {visibleMessages.length === 0 && (
-                <div className="rail-ritual">
-                  <p className="rail-eyebrow mt-3 text-center">今日塔罗 · 给自己一点时间</p>
-                  <h2 className="font-serif text-center text-2xl font-medium leading-relaxed text-apple-text">一张牌，听听自己的心事</h2>
-                  <div data-pet-stage className="rail-ritual-art">
-                    <div className="rail-card-pile">
-                      {cardStackImages.length > 0 ? cardStackImages.map((image, index) => (
-                        <img key={image} src={image} alt="抽到的塔罗牌" className="rail-ritual-card" style={{ transform: 'rotate(' + (-8 + index * 7) + 'deg)', left: index * 14 }} />
-                      )) : (
-                        <button type="button" className="rail-tarot-back" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking} aria-label="从牌堆抽取今日牌">
-                          <span className="rail-card-star"><Sparkles size={30} aria-hidden="true" /></span>
-                          <span className="text-xs font-medium">RAILSTAR</span>
-                          <span className="text-xs opacity-65">今日一张牌</span>
-                        </button>
-                      )}
-                    </div>
-                    {companionPet(clsx('absolute z-30', petStageClass))}
-                  </div>
-                  <p className="rail-ritual-note">{companionBubbleText}</p>
-                  <div className="mt-6 flex items-center gap-3">
-                    <button type="button" className="rail-button flex-1" onClick={() => handleSend('今日运势', { mode: 'draw' })} disabled={isThinking}>
-                      <Sparkles size={17} aria-hidden="true" />开始今日塔罗
-                    </button>
-                    <button type="button" className="rail-button-secondary" onClick={() => setShowReadingLog(true)} aria-label="打开牌迹"><BookOpen size={18} aria-hidden="true" />牌迹</button>
-                  </div>
-                  <p className="mt-3 text-center text-[13px] leading-6 text-apple-text-muted">抽牌 → 阅读 → 追问。牌面与解读会自动留在牌迹里。</p>
-                </div>
-              )}
-
-              <AnimatePresence>
-                {isThinking && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/78 px-4 py-2 text-xs font-semibold text-[#b97b28] shadow-[0_12px_30px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:bg-white/[0.10] dark:text-[#f4cf83]"
-                  >
-                    <Loader2 className="animate-spin" size={14} />
-                    星轨解读中
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </motion.section>
-
-          {visibleMessages.length === 0 && !showDailyPanel && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.05, type: 'spring', stiffness: 220, damping: 24 }}
-              className="order-2 overflow-hidden rounded-[24px] border border-[#d9b56d]/42 bg-[#fff4df]/72 p-3 shadow-[0_16px_42px_rgba(88,60,28,0.10),inset_0_1px_0_rgba(255,255,255,0.70)] backdrop-blur-2xl dark:border-[#f4cf83]/16 dark:bg-[#f4cf83]/[0.055]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">
-                    <CalendarCheck size={13} />
-                    <span>今日先看</span>
-                    <span className="rounded-full bg-[#f1dfbd]/78 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
-                      {missionCount}/3
-                    </span>
-                  </div>
-                  <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
-                    {nextBestAction.title}
-                  </h3>
-                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
-                    {nextBestAction.desc}
-                  </p>
-                </div>
-                <button
-                  onClick={handleNextBestAction}
-                  disabled={isThinking}
-                  className="shrink-0 whitespace-nowrap rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                >
-                  {nextBestAction.cta}
-                </button>
-              </div>
-              <div className="mt-3 rounded-[18px] bg-[#f3e5ce]/58 px-3 py-2 text-xs leading-relaxed text-[#746653] dark:bg-white/[0.05] dark:text-white/50">
-                做完这一步，再写心情或做选择，今天的回访就会更像接着你的故事往下说。
-              </div>
-            </motion.section>
           )}
 
-          {visibleMessages.length === 0 && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.08, type: 'spring', stiffness: 220, damping: 24 }}
-              className="order-2 overflow-hidden rounded-[24px] border border-[#eadcc8]/72 bg-[#fff8ee]/64 p-3 shadow-[0_16px_42px_rgba(88,60,28,0.10),inset_0_1px_0_rgba(255,255,255,0.70)] backdrop-blur-2xl dark:border-white/[0.07] dark:bg-white/[0.052] dark:shadow-[0_18px_44px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#a06b22] dark:text-[#f4cf83]">
-                    <Sparkles size={13} />
-                    <span>星轨记得你</span>
-                    <span className="rounded-full bg-[#f3e5ce]/72 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/50">
-                      {memoryRecall.meta}
-                    </span>
-                  </div>
-                  <h2 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-[#2a2118] dark:text-white/86">
-                    {memoryRecall.title}
-                  </h2>
-                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
-                    {memoryRecall.desc}
-                  </p>
-                  <div className="mt-3 grid gap-1.5">
-                    {visibleMemoryInsights.map((insight) => (
-                      <div
-                        key={`${insight.label}-${insight.text}`}
-                        className="grid gap-0.5 rounded-[16px] border border-[#eadcc8]/64 bg-white/42 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.56)] dark:border-white/[0.06] dark:bg-white/[0.045]"
-                      >
-                        <span className="text-xs font-semibold text-[#a06b22] dark:text-[#f4cf83]">
-                          {insight.label}
-                        </span>
-                        <span className="line-clamp-2 text-xs leading-relaxed text-[#746653] dark:text-white/52">
-                          {insight.text}
-                        </span>
-                      </div>
-                    ))}
-                    {!plusActive && memoryRecall.insights.length > visibleMemoryInsights.length && (
-                      <button
-                        type="button"
-                        onClick={() => openUpgradePrompt('history')}
-                        className="h-8 rounded-[16px] border border-[#eadcc8]/64 bg-[#f8ecd7]/52 px-3 text-xs font-semibold text-[#9b641e] transition-colors hover:bg-[#f2dfbf]/70 dark:border-white/[0.06] dark:bg-white/[0.05] dark:text-[#f4cf83]"
-                      >
-                        解锁完整 3 条记忆线索
-                      </button>
-                    )}
-                  </div>
+          {!conversationOpen && (
+            <details ref={homeToolsRef} className="rail-home-tools" open={showDailyPanel} onToggle={event => setShowDailyPanel(event.currentTarget.open)}>
+              <summary className="cursor-pointer py-4 text-center text-[13px] text-apple-text-muted">签到与更多</summary>
+              <div className="space-y-6 border-t border-apple-border py-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button type="button" onClick={() => openUpgradePrompt('energy')} className="min-h-11 rounded-xl px-2 text-sm text-apple-text-muted">能量 {testerActive ? '∞' : energy} · 查看权益</button>
+                  <button type="button" onClick={handleDailyCheckIn} disabled={hasCheckedInToday} className="rail-button-secondary">{hasCheckedInToday ? '今日已签到' : '签到领能量'}</button>
                 </div>
-                <button
-                  onClick={handleMemoryRecallAction}
-                  disabled={isThinking}
-                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] transition-transform active:scale-[0.98] disabled:opacity-50 dark:bg-[#f4cf83] dark:text-[#17130f]"
-                >
-                  {memoryRecall.cta}
-                </button>
-              </div>
-            </motion.section>
-          )}
-
-          {visibleMessages.length === 0 && weeklyReviewReady && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.12, type: 'spring', stiffness: 220, damping: 24 }}
-              className="order-2 rounded-[24px] border border-[#d9b56d]/34 bg-[#fff4df]/70 p-3 shadow-[0_14px_34px_rgba(120,82,24,0.10)] dark:border-[#f4cf83]/16 dark:bg-[#f4cf83]/[0.055]"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#9b641e] dark:text-[#f4cf83]">
-                    <CalendarCheck size={13} />
-                    <span>7 日星轨复盘</span>
-                    <span className="rounded-full bg-[#f1dfbd]/80 px-2 py-0.5 text-xs text-[#83613a] dark:bg-white/[0.07] dark:text-white/55">
-                      {weeklyMaterialCount} 条材料
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/54">
-                    {plusActive ? '完整趋势、证据和行动建议已经可看。' : '你已经有材料做复盘了，免费版先看摘要，Plus 解锁完整报告。'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowReadingLog(true)}
-                  className="shrink-0 rounded-[17px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.16)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
-                >
-                  查看复盘
-                </button>
-              </div>
-            </motion.section>
-          )}
-
-          {visibleMessages.length === 0 && softConversionTrigger && (
-            <motion.section
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.16, type: 'spring', stiffness: 220, damping: 24 }}
-              className="order-2 rounded-[24px] border border-[#2347d9]/18 bg-[#f5f7ff]/72 p-3 shadow-[0_14px_34px_rgba(48,73,160,0.08)] dark:border-[#7c9cff]/16 dark:bg-[#7c9cff]/[0.055]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#3558d4] dark:text-[#b8c7ff]">
-                    <Crown size={13} />
-                    <span>Plus 时机到了</span>
-                  </div>
-                  <h3 className="mt-1 line-clamp-1 text-[14px] font-semibold text-[#241c14] dark:text-white/86">
-                    {softConversionTrigger.title}
-                  </h3>
-                  <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#746653] dark:text-white/52">
-                    {softConversionTrigger.desc}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={dismissSoftConversion}
-                    className="rounded-full p-2 text-[#83715c] hover:bg-black/[0.04] dark:text-white/45 dark:hover:bg-white/[0.07]"
-                    aria-label="稍后再看"
-                  >
-                    <X size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSoftConversion}
-                    className="rounded-[16px] bg-[#17130f] px-3 py-2 text-[13px] font-semibold text-[#f4cf83] shadow-[0_12px_28px_rgba(55,35,12,0.14)] active:scale-[0.98] dark:bg-[#f4cf83] dark:text-[#17130f]"
-                  >
-                    {softConversionTrigger.cta}
-                  </button>
-                </div>
-              </div>
-            </motion.section>
-          )}
-
-          {visibleMessages.length === 0 && !showDailyPanel && (
-          <section className="order-2 space-y-2">
-            <p className="px-1 text-[13px] leading-6 text-apple-text-muted">也可以从一件具体的事开始</p>
-            <div className="grid grid-cols-2 gap-2">
-              {QUICK_PROMPTS.filter((item) => item.prompt !== '今日运势').map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => handleSend(item.prompt, { mode: 'draw' })}
-                  disabled={isThinking}
-                  className="flex min-h-11 min-w-0 items-center justify-center rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-apple-text disabled:opacity-50"
-                >
-                  <span className="truncate">{item.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setShowSpreadTools((value) => !value)}
-                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
-                aria-expanded={showSpreadTools}
-              >
-                <Sparkles size={14} />
-                选择牌阵
-              </button>
-              <button
-                onClick={() => setShowReadingLog(true)}
-                className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text-muted hover:bg-apple-surface-hover"
-              >
-                <History size={14} />
-                查看牌迹
-              </button>
-              {showSpreadTools &&
-                SPREADS.map((spread) => (
-                  <button
-                    key={spread.name}
-                    onClick={() => handleSend(spread.prompt, { mode: 'draw' })}
-                    disabled={isThinking}
-                    className="min-h-11 min-w-0 truncate rounded-xl border border-apple-border bg-apple-surface px-3 text-[13px] font-medium text-apple-text-muted disabled:opacity-50"
-                  >
-                    {spread.name}
-                  </button>
-                ))}
-            </div>
-          </section>
-          )}
-          <AnimatePresence initial={false}>
-            {showDailyPanel && (
-              <motion.section
-                initial={{ opacity: 0, y: -8, height: 0 }}
-                animate={{ opacity: 1, y: 0, height: 'auto' }}
-                exit={{ opacity: 0, y: -8, height: 0 }}
-                className="order-1 overflow-hidden"
-              >
-                <div className="rounded-[28px] border border-[#eadcc8]/72 bg-[#fff8ee]/68 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.64)] backdrop-blur-2xl dark:border-white/[0.07] dark:bg-white/[0.055]">
+                <div>
+                  <h2 className="mb-3 text-sm font-medium">今日任务 · {missionCount}/3</h2>
                   <div className="grid grid-cols-3 gap-2">
-                    <DailyMission icon={<Sparkles size={13} />} done={askedToday} title={'\u95ee\u4e00\u4ef6\u4e8b'} onClick={() => handleDailyMissionShortcut('ask')} />
-                    <DailyMission icon={<Gift size={13} />} done={wroteDiaryToday} title={'\u5199\u5fc3\u60c5'} onClick={() => handleDailyMissionShortcut('diary')} />
-                    <DailyMission icon={<Crown size={13} />} done={simulatedToday} title={'\u505a\u9009\u62e9'} onClick={() => handleDailyMissionShortcut('simulator')} />
+                    <DailyMission icon={<Sparkles size={14} />} done={askedToday} title="问一件事" onClick={() => handleDailyMissionShortcut('ask')} />
+                    <DailyMission icon={<Gift size={14} />} done={wroteDiaryToday} title="写心情" onClick={() => handleDailyMissionShortcut('diary')} />
+                    <DailyMission icon={<Crown size={14} />} done={simulatedToday} title="做选择" onClick={() => handleDailyMissionShortcut('simulator')} />
                   </div>
-                  <div className="mt-3 rounded-[22px] bg-[#f5eadb]/72 p-4 dark:bg-white/[0.055]">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold">{nextBestAction.title}</p>
-                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#736554] dark:text-white/48">
-                          {nextBestAction.desc}
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleNextBestAction}
-                        className="shrink-0 rounded-[16px] bg-[#17130f] px-3 py-2 text-xs font-semibold text-[#f4cf83] dark:bg-[#f4cf83] dark:text-[#17130f]"
-                      >
-                        {nextBestAction.cta}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    {canClaimReturnReward && (
-                      <button
-                        onClick={handleClaimReturnReward}
-                        className="flex-1 rounded-[18px] bg-[#2347d9]/10 px-3 py-3 text-xs font-semibold text-[#3558d4] dark:bg-[#7c9cff]/12 dark:text-[#b8c7ff]"
-                      >
-                        {'\u56de\u8bbf'} +{plusActive ? 3 : 2} {'\u80fd\u91cf'}
-                      </button>
-                    )}
-                    <button
-                      onClick={handleClaimDailyReward}
-                      disabled={!canClaimDailyReward}
-                      className={clsx(
-                        'flex-1 rounded-[18px] px-3 py-3 text-xs font-semibold transition-all',
-                        canClaimDailyReward
-                          ? 'bg-[#17130f] text-[#f4cf83] dark:bg-[#f4cf83] dark:text-[#17130f]'
-                          : 'bg-[#f6eddf] text-[#83715c] dark:bg-white/[0.05] dark:text-white/46',
-                      )}
-                    >
-                      {hasClaimedDailyReward ? '\u4eca\u65e5\u5df2\u9886' : `\u4efb\u52a1 +${dailyMissionEnergy} \u80fd\u91cf`}
-                    </button>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {canClaimReturnReward && <button type="button" onClick={handleClaimReturnReward} className="rail-button-secondary">领取回访能量 +{plusActive ? 3 : 2}</button>}
+                    <button type="button" onClick={handleClaimDailyReward} disabled={!canClaimDailyReward} className="rail-button-secondary">{hasClaimedDailyReward ? '任务奖励已领取' : `领取任务能量 +${dailyMissionEnergy}`}</button>
                   </div>
                 </div>
-              </motion.section>
-            )}
-          </AnimatePresence>
+                <details>
+                  <summary className="cursor-pointer py-2 text-sm font-medium">选择牌阵与提问灵感</summary>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {SPREADS.map(spread => <button type="button" key={spread.name} onClick={() => handleSend(spread.prompt, { mode: 'draw' })} disabled={isThinking} className="rail-button-secondary">{spread.name}</button>)}
+                    {QUICK_PROMPTS.filter(item => item.prompt !== '今日运势').map(item => <button type="button" key={item.label} onClick={() => { setInputText(item.prompt); setQuestionInputOpen(true); window.requestAnimationFrame(() => inputRef.current?.focus()); }} className="min-h-11 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">{item.label}</button>)}
+                  </div>
+                </details>
+                {memoryRecall.contextLines.length > 0 && <details>
+                  <summary className="cursor-pointer py-2 text-sm font-medium">回看最近的线索</summary>
+                  <div className="mt-2 space-y-3">
+                    {visibleMemoryInsights.map(insight => <p key={insight.label} className="text-sm leading-7 text-apple-text-muted"><span className="mr-2 text-apple-text">{insight.label}</span>{insight.text}</p>)}
+                    <button type="button" onClick={handleMemoryRecallAction} disabled={isThinking} className="rail-button-secondary">{memoryRecall.cta}</button>
+                    {weeklyReviewReady && <button type="button" onClick={() => setShowReadingLog(true)} className="rail-button-secondary">查看 7 日复盘</button>}
+                  </div>
+                </details>}
+                <div className="flex flex-wrap gap-3 border-t border-apple-border pt-4">
+                  <button type="button" onClick={() => setShowWardrobe(true)} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover"><Shirt size={17} aria-hidden="true" />角色衣柜</button>
+                  <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">{theme === 'dark' ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}{theme === 'dark' ? '浅色模式' : '深色模式'}</button>
+                </div>
+              </div>
+            </details>
+          )}
+
+          {conversationOpen && <div className="relative">
+            <DrawCardAnimation active={isDrawingCards} image={cardImage} cards={drawingCards} compact />
+            {isThinking && <p role="status" className="flex items-center justify-center gap-2 py-3 text-sm text-apple-text-muted"><Loader2 size={16} className="animate-spin" aria-hidden="true" />星轨正在解读…</p>}
+          </div>}
 
           {historyQuotaNotice && (
             <section role="status" className="order-2 rounded-2xl border border-apple-border bg-apple-surface p-4">
@@ -3643,15 +3130,8 @@ export default function Home() {
             </section>
           )}
 
-          {visibleMessages.length > 0 && (
+          {conversationOpen && (
             <section className="rail-conversation order-2 flex flex-col gap-3 pt-1">
-              <div data-pet-stage className="flex min-h-28 items-center gap-3 overflow-hidden border-b border-apple-border px-2 py-2">
-                {companionPet('relative h-24 w-24 shrink-0')}
-                <div className="min-w-0">
-                  <p className="text-[15px] font-medium text-apple-text">星轨在这里</p>
-                  <p className="mt-1 text-[13px] leading-6 text-apple-text-muted">读完以后，也可以继续问我。</p>
-                </div>
-              </div>
               {visibleMessages.map((message, index) => {
                 const source = message.role === 'ai' ? getRegenerationSource(messages, tarotReadings, message.id) : null;
                 const canRegenerate = Boolean(source && (message.model !== DEEPSEEK_TAROT_DEEP_MODEL || source.reading));
@@ -3724,9 +3204,17 @@ export default function Home() {
                       })()}
                     {message.role === 'ai' ? (
                       <div className="rail-reader space-y-5">
-                        {cleanTarotAnswer(message.text).split(/\n\s*\n/).filter(Boolean).map((paragraph, paragraphIndex) => (
-                          <p key={paragraphIndex} className="whitespace-pre-wrap">{paragraph}</p>
-                        ))}
+                        {(() => {
+                          const paragraphs = cleanTarotAnswer(message.text).split(/\n\s*\n/).filter(Boolean);
+                          const preview = paragraphs.length > 4 ? paragraphs.slice(0, 2) : paragraphs;
+                          return <>
+                            {preview.map((paragraph, paragraphIndex) => <p key={paragraphIndex} className="whitespace-pre-wrap">{paragraph}</p>)}
+                            {paragraphs.length > 4 && <details>
+                              <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-apple-gold">展开完整解读</summary>
+                              <div className="mt-3 space-y-5">{paragraphs.slice(2).map((paragraph, paragraphIndex) => <p key={paragraphIndex} className="whitespace-pre-wrap">{paragraph}</p>)}</div>
+                            </details>}
+                          </>;
+                        })()}
                       </div>
                     ) : message.text}
                   </div>
@@ -3736,26 +3224,19 @@ export default function Home() {
                       <button type="button" onClick={() => handleContinueReading(message.id)} disabled={isThinking || !source} title={source ? '继续追问这条解读' : '对应牌迹已移除；已存对话仍可阅读'} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-apple-text hover:bg-apple-surface-hover disabled:opacity-40">
                         <Send size={14} aria-hidden="true" />继续追问
                       </button>
-                      <button type="button" onClick={() => navigate('/app/diary')} className="flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] text-apple-text-muted hover:bg-apple-surface-hover">
-                        <BookOpen size={14} aria-hidden="true" />写下感受
-                      </button>
-                      <button type="button" onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover" title="复制" aria-label="复制这条解读">
-                        <Copy size={16} />
-                      </button>
-                      <button type="button" onClick={() => handleRegenerate(message.id)} disabled={isThinking || !canRegenerate} className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted hover:bg-apple-surface-hover disabled:opacity-30" title={canRegenerate ? '重新生成这条解读，保留原牌面' : '对应牌迹已移除；已存对话仍可阅读'} aria-label="重新生成这条解读">
-                        <RefreshCw size={16} />
-                      </button>
                       </>
                     )}
-                    <button
-                      onClick={() => handleDeleteMessage(message.id)}
-                      disabled={isThinking}
-                      className="flex size-11 items-center justify-center rounded-xl text-apple-text-muted transition-colors hover:bg-apple-surface-hover hover:text-[#b94a28] disabled:opacity-30"
-                      title="删除这一条"
-                      aria-label="删除这一条消息"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <details className="rail-message-options">
+                      <summary className="cursor-pointer rounded-xl px-3 py-3 text-[13px] text-apple-text-muted hover:bg-apple-surface-hover">更多</summary>
+                      <div className="flex flex-wrap gap-1 py-2">
+                        {message.role === 'ai' && <>
+                          <button type="button" onClick={() => navigate('/app/diary')} className="rail-button-secondary">写下感受</button>
+                          <button type="button" onClick={() => handleCopy(cleanTarotAnswer(message.text))} className="rail-button-secondary">复制解读</button>
+                          <button type="button" onClick={() => handleRegenerate(message.id)} disabled={isThinking || !canRegenerate} className="rail-button-secondary">重新生成</button>
+                        </>}
+                        <button type="button" onClick={() => handleDeleteMessage(message.id)} disabled={isThinking} className="rail-button-secondary">删除这条消息</button>
+                      </div>
+                    </details>
                   </div>
                   {renderDailyDeepCta(message, index, visibleMessages)}
                 </motion.div>
@@ -3769,7 +3250,7 @@ export default function Home() {
 
       {petMenu}
 
-      <div className="rail-composer-position">
+      {conversationOpen && <div className="rail-composer-position">
         {followUpReading && (
           <div className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 rounded-xl border border-apple-border bg-apple-surface px-3 py-2">
             <p className="min-w-0 flex-1 truncate text-[13px] leading-6 text-apple-text-muted">正在追问：{followUpReading.question} · 保留原牌面</p>
@@ -3778,10 +3259,10 @@ export default function Home() {
         )}
         {composerSuggestions}
         {composer}
-      </div>
+      </div>}
 
       <AnimatePresence>
-        {visibleMessages.length > 0 && showScrollBottom && !showPetMenu && (
+        {conversationOpen && visibleMessages.length > 0 && showScrollBottom && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
@@ -3810,7 +3291,7 @@ export default function Home() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showScrollTop && !showPetMenu && (
+        {conversationOpen && showScrollTop && !showPetMenu && (
           <motion.button
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: scrollControlOpacity, y: 0, scale: 1 }}
@@ -3863,6 +3344,7 @@ export default function Home() {
         }}
         onSelectReading={(readingId) => {
           closeReadingLog();
+          setConversationOpen(true);
           setFollowUpReadingId(readingId);
           window.setTimeout(() => inputRef.current?.focus(), 80);
         }}

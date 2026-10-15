@@ -444,34 +444,28 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
   return (
     <div className="rail-page">
-      <PageHeader eyebrow="心情与记录" title="命运日记" description="把今天写下来，让每一次情绪与选择都有迹可循。" action={<button onClick={openNewEntry} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
+      <PageHeader title="日记" description="写一句今天的心情。" action={<button onClick={openNewEntry} className="rail-button"><Plus size={18} aria-hidden="true" />写日记</button>} />
       <div className="rail-page-content space-y-6">
         {entryNotice && <p role="status" className="rounded-xl border border-apple-border bg-apple-surface p-3 text-[14px] text-apple-text-muted">{entryNotice}</p>}
         <section className="relative overflow-hidden rounded-[20px] border border-apple-gold/22 bg-apple-gold/[0.07] p-4">
 
-          <div className="relative z-10 flex items-start justify-between gap-3">
+          <div className="relative z-10">
             <div>
               <div className="flex items-center gap-2 text-apple-gold">
                 <Sparkles size={16} />
-                <span className="text-[15px] font-medium">今日记录灵感</span>
+                <span className="text-[15px] font-medium">今天可以写</span>
               </div>
               <p className="rail-body mt-2">{todayPrompt}</p>
             </div>
-            <button
-              onClick={openNewEntry}
-              className="rail-button-secondary shrink-0 px-4"
-            >
-              去写
-            </button>
           </div>
-          <div className="relative z-10 mt-4 grid grid-cols-2 gap-2">
-            <DiaryStat label="近 7 日记录" value={`${thisWeekCount} 篇`} />
-            <DiaryStat label="最近心情" value={latestMoodLabel} />
-          </div>
+          <p className="rail-muted mt-3">近 7 天写了 {thisWeekCount} 篇 · 最近心情：{latestMoodLabel}</p>
         </section>
 
+        <details className="border-y border-apple-border py-1">
+          <summary className="min-h-12 cursor-pointer py-3 text-[15px] font-medium text-apple-text">回顾与复盘</summary>
+          <div className="space-y-5 pb-4 pt-2">
         {diaryEntries.length >= 3 && diaryThemeTrends.length > 0 && (
-          <section className="rounded-[20px] border border-apple-border bg-apple-surface p-4">
+          <section>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[15px] font-medium text-apple-text">
@@ -479,7 +473,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
                   情绪关键词趋势
                 </div>
                 <div className="mt-0.5 text-[13px] leading-relaxed text-apple-text-muted">
-                  根据近 30 天日记提取，后续复盘会优先引用这些线索。
+                  近 30 天常出现的心情与话题
                 </div>
               </div>
               <div className="shrink-0 rounded-full bg-apple-gold/12 px-2.5 py-1 text-[13px] font-medium text-apple-gold">
@@ -488,7 +482,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             </div>
             <div className="grid gap-2">
               {diaryThemeTrends.map((trend) => (
-                <div key={trend.id} className="rounded-[20px] border border-apple-border bg-apple-bg px-3 py-2">
+                <div key={trend.id} className="border-b border-apple-border py-3 last:border-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 text-[15px] font-semibold text-apple-text">{trend.label}</div>
                     <div className="shrink-0 text-[13px] font-medium text-apple-gold">{trend.entryCount} 次</div>
@@ -504,7 +498,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
         {/* Actions */}
         <div className="grid grid-cols-2 gap-4">
-          <section className="col-span-2 rounded-[20px] border border-apple-border bg-apple-surface p-3">
+          <section className="col-span-2">
             <div className="mb-3 flex items-center justify-between gap-3 px-1">
               <div className="min-w-0">
                 <div className="text-[15px] font-medium text-apple-text">选择复盘范围</div>
@@ -579,6 +573,8 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <span className="font-medium text-[15px]">复盘记录</span>
           </button>
         </div>
+          </div>
+        </details>
 
         {/* Review Result */}
         <AnimatePresence>
@@ -606,7 +602,9 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
             <Calendar size={18} className="text-apple-text-muted" />
             过往记录
           </h2>
-          <div className="rail-panel space-y-3">
+          {diaryEntries.length > 0 && <details className="border-b border-apple-border pb-3">
+            <summary className="min-h-12 cursor-pointer py-3 text-[15px] text-apple-text-muted">搜索与筛选{hasFilters ? ` · 找到 ${filteredEntries.length} 篇` : ` · ${diaryEntries.length} 篇日记`}</summary>
+            <div className="space-y-3 pt-2">
             <label htmlFor="diary-search" className="flex items-center gap-2 text-[15px] font-medium"><Search size={16} aria-hidden="true" />找一篇日记</label>
             <input id="diary-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索正文、日期或标签" className="rail-field" />
             <div className="grid grid-cols-2 gap-3">
@@ -629,7 +627,8 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               <span role="status">找到 {filteredEntries.length} 篇 · 共 {diaryEntries.length} 篇</span>
               {hasFilters && <button onClick={clearFilters} className="min-h-10 px-2 font-medium text-apple-accent">清空筛选</button>}
             </div>
-          </div>
+            </div>
+          </details>}
 
           {diaryEntries.length === 0 ? (
             <div className="rail-empty">
@@ -982,15 +981,6 @@ function DiaryReviewArchiveCard({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-function DiaryStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-apple-border bg-apple-surface p-3">
-      <div className="text-[13px] text-apple-text-muted">{label}</div>
-      <div className="mt-1 text-base font-medium text-apple-text">{value}</div>
     </div>
   );
 }

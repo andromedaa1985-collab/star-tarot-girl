@@ -327,7 +327,7 @@ export default function Profile() {
   return (
     <div className="rail-page">
       <div className="rail-page-content">
-      <PageHeader eyebrow="你的星轨" title="我的" description="在这里查看你的成长、记录与陪伴权益。" action={<button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary"><Settings size={17} />设置</button>} />
+      <PageHeader title="我的" action={<button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary"><Settings size={17} />设置</button>} />
 
       <section className="rail-panel mb-6 flex flex-wrap items-center gap-5">
         <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-apple-border bg-apple-surface-hover">
@@ -335,7 +335,7 @@ export default function Profile() {
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="text-2xl font-semibold text-apple-text break-words">{userName}</h2>
-          <p className="rail-muted mt-1">{preferredAddress ? `她会叫你：${preferredAddress}` : '可以设置一个专属称呼'}</p>
+          {preferredAddress && <p className="rail-muted mt-1">{preferredAddress}</p>}
           <p className="rail-muted mt-1 break-all">{getStoredAccountSession()?.user.email || '本机账户 · 登录后可同步云端存档'}</p>
         </div>
         <button type="button" onClick={() => { setEditName(userName); setEditPreferredAddress(preferredAddress); setEditAvatar(userAvatar); setIsEditing(true); }} className="rail-button-secondary w-full sm:w-auto"><Edit2 size={16} />编辑资料</button>
@@ -344,23 +344,25 @@ export default function Profile() {
       <section className="mb-8" aria-labelledby="my-records-heading">
         <h2 id="my-records-heading" className="rail-section-title mb-4">我的记录</h2>
         <div className="rail-surface divide-y divide-apple-border overflow-hidden">
-          {[{ label: '牌迹', count: tarotReadings.length, description: '查找问题与牌面，沿原解读追问', href: '/app?history=1' }, { label: '日记', count: diaryEntries.length, description: '查找、编辑与回看心情', href: '/app/diary' }, { label: '沙盘', count: simulationHistory.length, description: '回看选择与比较标准', href: '/app/simulator' }].map(item => (
-            <button key={item.label} type="button" onClick={() => navigate(item.href)} className="flex min-h-20 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-apple-surface-hover">
-              <span className="min-w-0"><span className="block text-base font-medium">{item.label} · {item.count} 条</span><span className="rail-muted mt-1 block">{item.description}</span></span><ChevronRight size={18} aria-hidden="true" className="shrink-0 text-apple-text-muted" />
+          {[{ label: '塔罗记录', count: tarotReadings.length, href: '/app?history=1' }, { label: '日记', count: diaryEntries.length, href: '/app/diary' }, { label: '沙盘记录', count: simulationHistory.length, href: '/app/simulator' }].map(item => (
+            <button key={item.label} type="button" onClick={() => navigate(item.href)} className="flex min-h-14 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-apple-surface-hover">
+              <span className="min-w-0 text-base font-medium">{item.label}</span><span className="ml-auto text-sm tabular-nums text-apple-text-muted">{item.count}</span><ChevronRight size={18} aria-hidden="true" className="shrink-0 text-apple-text-muted" />
             </button>
           ))}
         </div>
-        <h3 className="mt-6 mb-3 text-base font-medium">最近留下的记录</h3>
+        {recentRecords.length > 0 && <h3 className="mt-6 mb-3 text-base font-medium">最近记录</h3>}
         {recentRecords.length ? (
           <ol className="divide-y divide-apple-border">
             {recentRecords.map(record => <li key={`${record.kind}:${record.id}`}><button type="button" onClick={() => navigate(record.href)} className="flex w-full items-start justify-between gap-3 rounded-xl px-2 py-4 text-left hover:bg-apple-surface-hover"><span className="min-w-0"><span className="rail-muted block">{record.label} · {formatRecordDate(record.date)}</span><span className="mt-1 block line-clamp-2 break-words text-base leading-7">{record.title}</span></span><ChevronRight size={17} aria-hidden="true" className="mt-1 shrink-0 text-apple-text-muted" /></button></li>)}
           </ol>
-        ) : <div className="rail-empty"><p>还没有留下记录</p><p className="rail-muted mt-2">先抽一张今日牌，或写下一句今天的心情。</p><div className="mt-4 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => navigate('/app')} className="rail-button-secondary">开始今日塔罗</button><button type="button" onClick={() => navigate('/app/diary')} className="rail-button-secondary">写一句心情</button></div></div>}
+        ) : <p className="rail-muted mt-4">完成一次塔罗或日记后，会保存在这里。</p>}
       </section>
 
-      <section className="rail-panel mb-8" aria-labelledby="archive-status-heading">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="archive-status-heading" className="rail-section-title">账户与存档</h2><button type="button" onClick={refreshArchiveStatus} className="min-h-11 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">刷新状态</button></div>
-        <dl className="mt-4 space-y-3 text-sm leading-6">
+      <section className="mb-8 border-y border-apple-border py-4" aria-labelledby="archive-status-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="archive-status-heading" className="text-base font-medium">账户与存档</h2><button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary">{session ? '备份与同步' : '登录或备份'}<ChevronRight size={16} aria-hidden="true" /></button></div>
+        <details className="mt-2">
+          <summary className="min-h-11 cursor-pointer py-3 text-sm text-apple-text-muted">查看存档状态</summary>
+        <dl className="space-y-3 text-sm leading-6">
           <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">当前账户</dt><dd className="min-w-0 break-all">{session?.user.email || '本机游客'}</dd></div>
           <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">服务端存档时间</dt><dd>{session ? formatArchiveTime(session.user.archiveUpdatedAt, '尚未确认云端存档') : '登录后可同步'}</dd></div>
           <div className="flex flex-wrap justify-between gap-x-4"><dt className="text-apple-text-muted">最近自动恢复点</dt><dd>{backupSummary ? formatArchiveTime(backupSummary.lastAutoRecoveryAt, '尚未生成') : '读取状态失败'}</dd></div>
@@ -368,7 +370,8 @@ export default function Profile() {
         </dl>
         <p className="rail-muted mt-4">云端时间是上次确认的存档时间，不代表当前输入已同步。手动存档操作包括导出或恢复，操作时间不能证明备份文件已经保存。</p>
         {archiveNotice && <p role="status" className="rail-muted mt-2">{archiveNotice}</p>}
-        <button type="button" onClick={() => navigate('/app/settings')} className="rail-button-secondary mt-4 w-full sm:w-auto">{session ? '备份与云端同步' : '登录或导出存档'}<ChevronRight size={16} aria-hidden="true" /></button>
+        <button type="button" onClick={refreshArchiveStatus} className="mt-2 min-h-11 rounded-xl px-3 text-sm text-apple-text-muted hover:bg-apple-surface-hover">刷新状态</button>
+        </details>
       </section>
 
       {/* Edit Profile Modal */}
@@ -406,7 +409,7 @@ export default function Profile() {
                   maxLength={16}
                 />
                 <p className="mt-2 text-[13px] leading-[1.8] text-apple-text-muted">
-                  留空则按昵称称呼。首次弹窗选择后，也可以回到这里重新调整。
+                  称呼可以随时在这里修改。
                 </p>
               </div>
 
@@ -567,21 +570,17 @@ export default function Profile() {
       <section className="rail-panel mb-8" aria-labelledby="membership-heading">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0 max-w-[56ch]">
-            <p className="rail-muted mb-2 flex items-center gap-2"><Crown size={17} className="text-apple-gold" />陪伴权益</p>
-            <h2 id="membership-heading" className="rail-section-title">{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 还剩约 ${plusDaysLeft} 天` : '星轨 Plus'}</h2>
-            <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">{membershipLabel}。你留下的牌迹、日记和档案越多，星轨越能接住你的上下文；开通后不用每次重新解释自己。</p>
+            <h2 id="membership-heading" className="flex items-center gap-2 text-base font-medium"><Crown size={17} className="text-apple-gold" />{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 约 ${plusDaysLeft} 天` : '星轨 Plus'}</h2>
+            <p className="rail-muted mt-2">{membershipLabel}</p>
           </div>
           <button type="button" onClick={() => setShowMembershipModal(true)} className="rail-button-secondary shrink-0">{testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}<ChevronRight size={16} /></button>
         </div>
-        <p className="rail-muted mt-5 border-t border-apple-border pt-4">未成年人开通任何付费项前，应获得监护人同意。</p>
       </section>
 
-      <section className="mb-8" aria-labelledby="growth-heading">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <h2 id="growth-heading" className="rail-section-title">陪伴与成长</h2>
-          <span className="rail-muted">{userSegment}</span>
-        </div>
-        <div className="rail-panel">
+      <details className="mb-8 border-y border-apple-border py-1">
+        <summary className="min-h-12 cursor-pointer py-3 text-base font-medium">陪伴与成长 <span className="ml-2 text-sm font-normal text-apple-text-muted">LV.{bondLevel}</span></summary>
+        <div className="pb-5 pt-3">
+          <p className="rail-muted mb-4">{userSegment}</p>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="rail-muted mb-1">羁绊等级 · LV.{bondLevel}</p>
@@ -602,7 +601,7 @@ export default function Profile() {
             <p className="rail-muted mt-3">已陪伴 {engagement.activeDays} 天 · 已沉淀 {memorySeedCount} 份线索 · 上次签到 {lastCheckInLabel}</p>
           </div>
         </div>
-      </section>
+      </details>
 
       <section className="mb-8" aria-labelledby="archive-heading">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

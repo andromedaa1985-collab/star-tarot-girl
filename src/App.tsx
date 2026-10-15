@@ -23,6 +23,7 @@ const Bazi = lazyPage(() => import('./pages/Bazi'));
 const Simulator = lazyPage(() => import('./pages/Simulator'));
 const Diary = lazyPage(() => import('./pages/Diary'));
 const Guardian = lazyPage(() => import('./pages/Guardian'));
+const Explore = lazyPage(() => import('./pages/Explore'));
 const Analytics = lazyPage(() => import('./pages/Analytics'));
 
 function lazyPage(loadPage: () => Promise<{ default: React.ComponentType }>) {
@@ -63,6 +64,7 @@ function App() {
               <Route path="/app/auth" element={<RedirectLegacyAppAuth />} />
               <Route path="/app" element={<AppShell />}>
                 <Route index element={<Home />} />
+                <Route path="explore" element={<Explore />} />
                 <Route path="bazi" element={<Bazi />} />
                 <Route path="simulator" element={<Simulator />} />
                 <Route path="diary" element={<Diary />} />
