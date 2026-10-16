@@ -1,0 +1,11 @@
+.rail-deck-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px 16px; }
+.rail-deck-card { min-width:0; text-align:left; border-radius:18px; outline-offset:5px; }
+.rail-deck-card > img { width:100%; height:auto; aspect-ratio:2/3; object-fit:cover; border-radius:18px; border:1px solid rgb(220 232 239 / 24%); box-shadow:0 12px 26px rgb(15 23 31 / 14%); background:#10151b; }
+.rail-deck-caption { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 3px 0; }
+.rail-deck-overlay { position:fixed; inset:0; z-index:240; overflow:auto; display:flex; align-items:center; justify-content:center; padding:20px; background:rgb(7 12 18 / 78%); }
+.rail-deck-detail { width:100%; max-width:430px; max-height:calc(100dvh - 40px); overflow:auto; padding:16px; border:1px solid var(--rail-glass-border); border-radius:26px; background:var(--rail-reading-bg); color:var(--app-text); box-shadow:0 24px 80px rgb(0 0 0 / 25%); }
+.rail-deck-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.rail-deck-detail-image { width:100%; max-height:calc(100dvh - 240px); min-height:180px; object-fit:contain; border-radius:14px; background:#10151b; }
+@media (min-width:640px) { .rail-deck-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:28px 20px; } }
+@media (min-width:1200px) { .rail-deck-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference) { .rail-deck-card > img { transition:transform 220ms var(--rail-motion-ease); } .rail-deck-card:hover > img { transform:translateY(-4px); } }

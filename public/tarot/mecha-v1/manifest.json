@@ -1,0 +1,922 @@
+{
+  "version": "mecha-v1",
+  "provenance": "User-provided Midjourney artwork generated through Lovart. No new image generation or composition edits.",
+  "processing": "EXIF orientation; RGB; proportional LANCZOS resize; metadata stripped; WebP method 6. Source files preserved.",
+  "summary": {
+    "count": 23,
+    "sourceBytes": 147592130,
+    "variants": {
+      "full": {
+        "bytes": 2719318,
+        "smallest": {
+          "bytes": 70438,
+          "filename": "12-hanged-man.webp"
+        },
+        "largest": {
+          "bytes": 186606,
+          "filename": "06-lovers.webp"
+        }
+      },
+      "medium": {
+        "bytes": 1224460,
+        "smallest": {
+          "bytes": 30618,
+          "filename": "12-hanged-man-640.webp"
+        },
+        "largest": {
+          "bytes": 85544,
+          "filename": "06-lovers-640.webp"
+        }
+      },
+      "thumbnail": {
+        "bytes": 356608,
+        "smallest": {
+          "bytes": 8766,
+          "filename": "12-hanged-man-320.webp"
+        },
+        "largest": {
+          "bytes": 23988,
+          "filename": "06-lovers-320.webp"
+        }
+      }
+    },
+    "allDerivativeBytes": 4300386,
+    "fullReductionPercent": 98.16
+  },
+  "cards": [
+    {
+      "number": 0,
+      "slug": "fool",
+      "name": "愚者",
+      "source": {
+        "filename": "图片 478.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 5877956,
+        "sha256": "84f9ac0935b3191e55379479430ce02f47da2d22d81bbd1404bc073dd63d08c4"
+      },
+      "variants": {
+        "full": {
+          "filename": "00-fool.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 91774,
+          "quality": 82,
+          "sha256": "491a153018ae3fd158e80e782515dd9e64922d85331435d4d02de04ddee16d48"
+        },
+        "medium": {
+          "filename": "00-fool-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 39896,
+          "quality": 80,
+          "sha256": "81d3a8a41d66f4b8b1c2876ddcfc9099b67850133b3dafdc82a050bdb64ae56b"
+        },
+        "thumbnail": {
+          "filename": "00-fool-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 11680,
+          "quality": 76,
+          "sha256": "bf22931eaba013f14fd7ff02b11f76544407429f979811579312a3e185962e9c"
+        }
+      }
+    },
+    {
+      "number": 1,
+      "slug": "magician",
+      "name": "魔术师",
+      "source": {
+        "filename": "图片 549.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 5688372,
+        "sha256": "40295e5fc8d04ebe1d1bc932f3db4f7ac6212a1e0d1ae5ebb42903a4e5dd38b9"
+      },
+      "variants": {
+        "full": {
+          "filename": "01-magician.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 108006,
+          "quality": 82,
+          "sha256": "ed7dadff0daf2ec9b7ebcbc4f31b1b6cbadaa1ede4e7dc2352caa19a09b93dce"
+        },
+        "medium": {
+          "filename": "01-magician-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 49934,
+          "quality": 80,
+          "sha256": "86f5a4a733973fb96fa56e5a7c9a17020127595e613de9ee3ff2694431248851"
+        },
+        "thumbnail": {
+          "filename": "01-magician-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 15172,
+          "quality": 76,
+          "sha256": "315695f7ff3571b4c0aeb589a32316e13dba97a8a8976a3a8f926965ac6958b4"
+        }
+      }
+    },
+    {
+      "number": 2,
+      "slug": "high-priestess",
+      "name": "女祭司",
+      "source": {
+        "filename": "图片 506.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6689004,
+        "sha256": "61724b409a278773091ad9c1c1d3f983b82ecb793451539b8ff24596363a0a7c"
+      },
+      "variants": {
+        "full": {
+          "filename": "02-high-priestess.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 102182,
+          "quality": 82,
+          "sha256": "32823426f4b4b3af85c811fcbfb17078b50db63e22b8fc2e680de22bd2c8d438"
+        },
+        "medium": {
+          "filename": "02-high-priestess-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 45392,
+          "quality": 80,
+          "sha256": "e7a1ec8cb59e41a28ccf8d46f3a34d1830f2bea49aa68745bec7c8ca2743bc4d"
+        },
+        "thumbnail": {
+          "filename": "02-high-priestess-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 12922,
+          "quality": 76,
+          "sha256": "31b6d68f053dfc0ea0f0af95178237329f190772767d1607b1139b08bc8ac553"
+        }
+      }
+    },
+    {
+      "number": 3,
+      "slug": "empress",
+      "name": "女皇",
+      "source": {
+        "filename": "图片 482.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 5950152,
+        "sha256": "879a4468e4a900c943926a375b1d10aed2ef0e7dcee5bce6a7c19c6e69170ff1"
+      },
+      "variants": {
+        "full": {
+          "filename": "03-empress.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 102558,
+          "quality": 82,
+          "sha256": "0e44015c9fd59217dbf808e26b018de8231c4b8d47918cca7bdec845721cc2fc"
+        },
+        "medium": {
+          "filename": "03-empress-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 46132,
+          "quality": 80,
+          "sha256": "1676f3888862c1e17843ef83a99383574a4e5813bafb1e43f8ac35ddbcb1d64b"
+        },
+        "thumbnail": {
+          "filename": "03-empress-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 13714,
+          "quality": 76,
+          "sha256": "31f82590a6991e32a55b4631bd31cec26cfb2223a2d02f1516cc0185598bd0c3"
+        }
+      }
+    },
+    {
+      "number": 4,
+      "slug": "emperor",
+      "name": "皇帝",
+      "source": {
+        "filename": "图片 497.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6636550,
+        "sha256": "92493914c0195ad37fe9433a48bea8fb314472d68184a0ceb0417b4e69da1d94"
+      },
+      "variants": {
+        "full": {
+          "filename": "04-emperor.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 152924,
+          "quality": 82,
+          "sha256": "01d53511d3e2f9aa73ef045a33dff4b66bb0a93101a52c8a475d90969abd48f0"
+        },
+        "medium": {
+          "filename": "04-emperor-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 68362,
+          "quality": 80,
+          "sha256": "4af344ed469724390022f7728ef64fe1a002d205ed3e1921f46f359938e1c3cf"
+        },
+        "thumbnail": {
+          "filename": "04-emperor-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 19676,
+          "quality": 76,
+          "sha256": "87b77ec4d8f391b6785db7f5aa4e69de010993914e32e868f6980fbd43cb9e18"
+        }
+      }
+    },
+    {
+      "number": 5,
+      "slug": "hierophant",
+      "name": "教皇",
+      "source": {
+        "filename": "图片 494.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 5901367,
+        "sha256": "02612c8f21bb41c1c3704231c94090371f652a249683e68dde9632da765dd4ff"
+      },
+      "variants": {
+        "full": {
+          "filename": "05-hierophant.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 114146,
+          "quality": 82,
+          "sha256": "7132f91a7a70b80fbfc8e1216e51cf262dcff93caea89d598fb746b1c14867fe"
+        },
+        "medium": {
+          "filename": "05-hierophant-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 50712,
+          "quality": 80,
+          "sha256": "9b12af1134f7c4ef5fefcf738fcca0c291ba5fcf4a459ae9472c959ea306a30a"
+        },
+        "thumbnail": {
+          "filename": "05-hierophant-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 14720,
+          "quality": 76,
+          "sha256": "65413871247845afa8e74f0d4258e334865e1e58650c487adda3a9cecb1fa9e7"
+        }
+      }
+    },
+    {
+      "number": 6,
+      "slug": "lovers",
+      "name": "恋人",
+      "source": {
+        "filename": "图片 486.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 7298106,
+        "sha256": "627afc61b6b5170e9481b1b4604efae3d3adc74b63a962ab8776d3bda7a10d57"
+      },
+      "variants": {
+        "full": {
+          "filename": "06-lovers.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 186606,
+          "quality": 82,
+          "sha256": "11c8839fbbb4c7e3484ff4a2b5071cd7ae86c9077052965365139bc478c6d2fb"
+        },
+        "medium": {
+          "filename": "06-lovers-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 85544,
+          "quality": 80,
+          "sha256": "4106d0f8fd0c711a4f4007d1e2dcb2cdee39e61ed74ef24a775a5e6608317c1f"
+        },
+        "thumbnail": {
+          "filename": "06-lovers-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 23988,
+          "quality": 76,
+          "sha256": "0eda2dd646353ec22e6ec198a71583cf59a9ba57a703e03d4a093af8fac4ef91"
+        }
+      }
+    },
+    {
+      "number": 7,
+      "slug": "chariot",
+      "name": "战车",
+      "source": {
+        "filename": "图片 489.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6694139,
+        "sha256": "332a065f29e7208f64276cfa4182716a73a918e3dbe6adf09d199b5855cd2f54"
+      },
+      "variants": {
+        "full": {
+          "filename": "07-chariot.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 130674,
+          "quality": 82,
+          "sha256": "69c228f152c6fa519856be893b04b4bc5d400ba242d60d78098c105200f0d517"
+        },
+        "medium": {
+          "filename": "07-chariot-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 58638,
+          "quality": 80,
+          "sha256": "5a38c0d73ed264fb2daaaf977dd2d9c1525077a30646c6225da580be9d8076d4"
+        },
+        "thumbnail": {
+          "filename": "07-chariot-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 16522,
+          "quality": 76,
+          "sha256": "258f9078c46205250142ab512e1f842c462bce9e9e6d2f175f321355b8d352ec"
+        }
+      }
+    },
+    {
+      "number": 8,
+      "slug": "strength",
+      "name": "力量",
+      "source": {
+        "filename": "图片 502.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6662521,
+        "sha256": "e11208c9eb9aac0c6d8008d27cce025884cb710de285f0cbbd422f847fd82234"
+      },
+      "variants": {
+        "full": {
+          "filename": "08-strength.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 173998,
+          "quality": 82,
+          "sha256": "f3c59099fbd800b3d7f816d6c2b5d6c9c2570df19eabeb7ceeaaae993a629fae"
+        },
+        "medium": {
+          "filename": "08-strength-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 78508,
+          "quality": 80,
+          "sha256": "a3b58d39f09d93880039c12b12477ede71e1334c346bd35832f21a1bf179b3bf"
+        },
+        "thumbnail": {
+          "filename": "08-strength-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 22898,
+          "quality": 76,
+          "sha256": "e363b725a05b14de224a6d736154f8caf13a13e78851b9273293be4f7d91fec5"
+        }
+      }
+    },
+    {
+      "number": 9,
+      "slug": "hermit",
+      "name": "隐士",
+      "source": {
+        "filename": "图片 509.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6004799,
+        "sha256": "59dd9afcb55b5cc49b7700650be9ddd061961a940b896f82a704a26dafd115ae"
+      },
+      "variants": {
+        "full": {
+          "filename": "09-hermit.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 91436,
+          "quality": 82,
+          "sha256": "ec59d20e8c77ac3732c7e400ea2690c3ea44ac87fbe44eafda8be5b5f7381236"
+        },
+        "medium": {
+          "filename": "09-hermit-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 46038,
+          "quality": 80,
+          "sha256": "308540f51bb5d887551db946218163cede97075cb660f25beee4cc0d441ea2aa"
+        },
+        "thumbnail": {
+          "filename": "09-hermit-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 15650,
+          "quality": 76,
+          "sha256": "f28289543c90e86000f42eda78f6479b09295419c022a6dcad5c735569d7685e"
+        }
+      }
+    },
+    {
+      "number": 10,
+      "slug": "wheel-of-fortune",
+      "name": "命运之轮",
+      "source": {
+        "filename": "图片 515.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6495822,
+        "sha256": "22d4e4effdb56c15a2de5583a4dc59f8ee19ca4a28daba66558a4dabd2b68e50"
+      },
+      "variants": {
+        "full": {
+          "filename": "10-wheel-of-fortune.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 134230,
+          "quality": 82,
+          "sha256": "25b26fcbb587783bde49e4f2915bcdd7c4bf2f3c5cfa11bf0a00507de56751b9"
+        },
+        "medium": {
+          "filename": "10-wheel-of-fortune-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 60176,
+          "quality": 80,
+          "sha256": "25940ca8ba0ccb014f824115d23cdf6e86111f6250c6d0f66d0797fe824af2c1"
+        },
+        "thumbnail": {
+          "filename": "10-wheel-of-fortune-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 17316,
+          "quality": 76,
+          "sha256": "90c3a489f6ae5dcdcf4e0f91cb118edb3f58f517ab7ee89baa66dd9727f47146"
+        }
+      }
+    },
+    {
+      "number": 11,
+      "slug": "justice",
+      "name": "正义",
+      "source": {
+        "filename": "图片 552.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6841929,
+        "sha256": "7b1ef0b46b09b92bcbbae356149943ef4c5d38c0b5c6ea439f2e56bcb27cb7ee"
+      },
+      "variants": {
+        "full": {
+          "filename": "11-justice.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 135246,
+          "quality": 82,
+          "sha256": "8efdb2e79b231106beb746058c741d6c8475fe26de37c41f7b0bed282be50fa4"
+        },
+        "medium": {
+          "filename": "11-justice-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 62154,
+          "quality": 80,
+          "sha256": "b004c591eba959c09933297be1250d9655f019b777f49596d2cee652135c0712"
+        },
+        "thumbnail": {
+          "filename": "11-justice-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 18070,
+          "quality": 76,
+          "sha256": "37f75df533f69c718d83afbe0572d1e9069a38d4d2c5fc66b8f1150e1694ac74"
+        }
+      }
+    },
+    {
+      "number": 12,
+      "slug": "hanged-man",
+      "name": "倒吊人",
+      "source": {
+        "filename": "图片 554.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 5560855,
+        "sha256": "0065a50d8f865cc2a74d9b3f82c5844fa5574a6a61f90d5015b3be2e23e83a48"
+      },
+      "variants": {
+        "full": {
+          "filename": "12-hanged-man.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 70438,
+          "quality": 82,
+          "sha256": "7feed763edf4dfb7ae5b00e9c029d27a822c4708bf08513796a814828bd3f3c0"
+        },
+        "medium": {
+          "filename": "12-hanged-man-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 30618,
+          "quality": 80,
+          "sha256": "6b17ef971d6524fb6985a951fca0173e2e3fd67080defd77576174f8dbd9b99e"
+        },
+        "thumbnail": {
+          "filename": "12-hanged-man-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 8766,
+          "quality": 76,
+          "sha256": "b4b09086182b1f4138afbcb2bd7188b6a453ccb554ee9f07349fa2cc6341ebf1"
+        }
+      }
+    },
+    {
+      "number": 13,
+      "slug": "death",
+      "name": "死神",
+      "source": {
+        "filename": "图片 564.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 7200139,
+        "sha256": "db44e4c39ced72401221cb35b3342262cac56d086e50087957443da85c5087e4"
+      },
+      "variants": {
+        "full": {
+          "filename": "13-death.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 107862,
+          "quality": 82,
+          "sha256": "dc984ff6eab486c2a1c3c389dfc80cdc02ad47e57dd6ba36902a746c96e6cdd3"
+        },
+        "medium": {
+          "filename": "13-death-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 46724,
+          "quality": 80,
+          "sha256": "0b1fae4651d2acd2afa4847bce7cac6827794abeb7972f223b26a2cc43924944"
+        },
+        "thumbnail": {
+          "filename": "13-death-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 13484,
+          "quality": 76,
+          "sha256": "5c5fa1c9e10d8a872020a6a9e07b73e78e9baa04fcc5283f4a5b395873536959"
+        }
+      }
+    },
+    {
+      "number": 14,
+      "slug": "temperance",
+      "name": "节制",
+      "source": {
+        "filename": "图片 514.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6584163,
+        "sha256": "f166410f6c02d217fb62e2b914130360a18cb1c9cd964204d7149530855a76e5"
+      },
+      "variants": {
+        "full": {
+          "filename": "14-temperance.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 122376,
+          "quality": 82,
+          "sha256": "2520493fcd53254f7db4a7300b9f6285a1f2c743013baaebf1cb7c88c35e9b89"
+        },
+        "medium": {
+          "filename": "14-temperance-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 55162,
+          "quality": 80,
+          "sha256": "6fe1d3b0686bfc8a203b9dcaaf959d6d9e3782f20a4b299a89b2354a6dd06f9b"
+        },
+        "thumbnail": {
+          "filename": "14-temperance-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 15798,
+          "quality": 76,
+          "sha256": "a47f12c57b5fe76c6a5cab6c5cb58d8b7d13c8cfc52b9d2d378add9d31f120f6"
+        }
+      }
+    },
+    {
+      "number": 15,
+      "slug": "devil",
+      "name": "恶魔",
+      "source": {
+        "filename": "图片 559.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6770545,
+        "sha256": "f5e6e23569a31b4f426e3373aa07a4686daf197f4d15bbef0a5e2fea647a0302"
+      },
+      "variants": {
+        "full": {
+          "filename": "15-devil.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 156408,
+          "quality": 82,
+          "sha256": "1ce0eeaae9cdc8cb3e5019b3e5c80d0fcda193ff58628c438447c06b8e2fe05e"
+        },
+        "medium": {
+          "filename": "15-devil-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 70654,
+          "quality": 80,
+          "sha256": "8da4db1e599949939fe97b8f26c6cb4ef2ba1bdb5d2090ab379284ba5bdb87b5"
+        },
+        "thumbnail": {
+          "filename": "15-devil-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 20362,
+          "quality": 76,
+          "sha256": "622b91b23407b4a3b66ce30a695a679f53c8b2682b8224e2d0e5ff051f2a8a11"
+        }
+      }
+    },
+    {
+      "number": 16,
+      "slug": "tower",
+      "name": "高塔",
+      "source": {
+        "filename": "图片 519.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6134749,
+        "sha256": "ddcc7b0aaf67a8f5ed8bd855675b4ae6f9f17e0aba116b9528bcacf47ec4f232"
+      },
+      "variants": {
+        "full": {
+          "filename": "16-tower.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 75494,
+          "quality": 82,
+          "sha256": "b2c70b433677613478d9c11c00bf9b4e4799c97ec1403478f9593ec34b010ec3"
+        },
+        "medium": {
+          "filename": "16-tower-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 32870,
+          "quality": 80,
+          "sha256": "251cb7da4bab4a21a1c336e95fee6657fe00dbf3bee9a8430886f8309ca1b075"
+        },
+        "thumbnail": {
+          "filename": "16-tower-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 9418,
+          "quality": 76,
+          "sha256": "38c66ff4b9dc7ee34b5236a2e95a06b843ac96b0b1e93490a36d8509f9b25904"
+        }
+      }
+    },
+    {
+      "number": 17,
+      "slug": "star",
+      "name": "星星",
+      "source": {
+        "filename": "图片 532.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6407174,
+        "sha256": "92a24ae95f7af5574849393e79f4582cf3485bfa7fdf2205fa6c9f5efa1747da"
+      },
+      "variants": {
+        "full": {
+          "filename": "17-star.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 104982,
+          "quality": 82,
+          "sha256": "2f9f045c38c4e3c0b32ac37feeb066ec03e4f13288eeca5f36462e2138e412bd"
+        },
+        "medium": {
+          "filename": "17-star-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 46442,
+          "quality": 80,
+          "sha256": "1cd3b3af8a232c987cf64633b248ba1b3473fe1e029faa686a629ecf475859cc"
+        },
+        "thumbnail": {
+          "filename": "17-star-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 13740,
+          "quality": 76,
+          "sha256": "f0364ba1da42994d784a92994460d5964c5889d273a015bedb5d80c2d6f4e886"
+        }
+      }
+    },
+    {
+      "number": 18,
+      "slug": "moon",
+      "name": "月亮",
+      "source": {
+        "filename": "图片 540.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6139497,
+        "sha256": "20f7ab9d189cace76d71ec89627254354c65e96a74c56e67f0bcfb90c102a45f"
+      },
+      "variants": {
+        "full": {
+          "filename": "18-moon.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 98212,
+          "quality": 82,
+          "sha256": "e9aa95f571c955b5e7d8a56bb1a30b463c3196d05c0303ae2658b484947f6abe"
+        },
+        "medium": {
+          "filename": "18-moon-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 43752,
+          "quality": 80,
+          "sha256": "886f9e71045f95dc1ca95567c965665d07d36b41451674a8835a0333c2cd1ce8"
+        },
+        "thumbnail": {
+          "filename": "18-moon-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 12934,
+          "quality": 76,
+          "sha256": "5d99bff12dfbcd5158160fe3b3e2a75550a32ee18bfc44b43d7c2e82649151ff"
+        }
+      }
+    },
+    {
+      "number": 19,
+      "slug": "sun",
+      "name": "太阳",
+      "source": {
+        "filename": "图片 528.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6665446,
+        "sha256": "7f125fc75ecc80cb8f7cad3bcb24aee75c53af0f4583197da5eb23d17b751d8c"
+      },
+      "variants": {
+        "full": {
+          "filename": "19-sun.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 151100,
+          "quality": 82,
+          "sha256": "79a88b9b72f6c74306f50b81481268b409ac7fdee7d65c05888930b1cce64c06"
+        },
+        "medium": {
+          "filename": "19-sun-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 68062,
+          "quality": 80,
+          "sha256": "4fa86ea9fb160ab66ab29d87ba6c5764eb04a40659316f7f4cedc4f616305786"
+        },
+        "thumbnail": {
+          "filename": "19-sun-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 19772,
+          "quality": 76,
+          "sha256": "dd7f698612f163d3091da239dc87d0b5a10391d11d2ce22d47cfc51b305a57db"
+        }
+      }
+    },
+    {
+      "number": 20,
+      "slug": "judgement",
+      "name": "审判",
+      "source": {
+        "filename": "图片 524.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6246425,
+        "sha256": "217775ac164243a762466affdd4ca3aed537cebee49a7817c5eb41e21c73856a"
+      },
+      "variants": {
+        "full": {
+          "filename": "20-judgement.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 105852,
+          "quality": 82,
+          "sha256": "0c5ca7beb15325d1167ab2be21678c365d7767bcac882e38d5d044a4037908ee"
+        },
+        "medium": {
+          "filename": "20-judgement-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 48212,
+          "quality": 80,
+          "sha256": "5215065ab6dcf47e799f561ecedc327f4ea36917e5acb1da54e534018e0cb127"
+        },
+        "thumbnail": {
+          "filename": "20-judgement-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 13958,
+          "quality": 76,
+          "sha256": "1e9713b54f24731b8708bbc2b4be5d27697765c9ada4a4607712c3cb547c3478"
+        }
+      }
+    },
+    {
+      "number": 21,
+      "slug": "world",
+      "name": "世界",
+      "source": {
+        "filename": "图片 536.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 6098539,
+        "sha256": "428ceb5b7301a066bd2032ece73b35fa171b8e56f62e306c9dc33934713a6f87"
+      },
+      "variants": {
+        "full": {
+          "filename": "21-world.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 125490,
+          "quality": 82,
+          "sha256": "f9e2f22e0ce44b3545ec73547b94559f5c6946459c9b6086fd2a61084b9e222b"
+        },
+        "medium": {
+          "filename": "21-world-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 56828,
+          "quality": 80,
+          "sha256": "1dce77c5cc7166d05f4df97f99b591cca2dc5b6267215947b425fa3479550cda"
+        },
+        "thumbnail": {
+          "filename": "21-world-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 16738,
+          "quality": 76,
+          "sha256": "4c54b8131bead84e592d06917de8298ff43450102f1feab4823498eb4dc09033"
+        }
+      }
+    },
+    {
+      "number": null,
+      "slug": "back",
+      "name": "统一牌背",
+      "source": {
+        "filename": "图片 568.png",
+        "width": 1792,
+        "height": 2688,
+        "bytes": 7043881,
+        "sha256": "192756c7f3c38ecb4df26d0e1601ec354bfefb27b868432e29429112a2ed6442"
+      },
+      "variants": {
+        "full": {
+          "filename": "back.webp",
+          "width": 1024,
+          "height": 1536,
+          "bytes": 77324,
+          "quality": 82,
+          "sha256": "d31644948010125ce5ccf88750137e3476031e6c67ab56ac35f29713eea0469d"
+        },
+        "medium": {
+          "filename": "back-640.webp",
+          "width": 640,
+          "height": 960,
+          "bytes": 33650,
+          "quality": 80,
+          "sha256": "1cdfbcda58c483f8747c1f718f73d9c80e696e1ce483026ffa2cc6e0f2b7e054"
+        },
+        "thumbnail": {
+          "filename": "back-320.webp",
+          "width": 320,
+          "height": 480,
+          "bytes": 9310,
+          "quality": 76,
+          "sha256": "c437ab59905484778937f34e13e8b796eed95cf522c39edb9c10e82134d66082"
+        }
+      }
+    }
+  ]
+}

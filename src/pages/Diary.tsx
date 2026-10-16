@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { Book, Plus, Calendar, Sparkles, X, Smile, Meh, Frown, CloudRain, Sun, Loader2, BrainCircuit, History, Lock, Crown, FileText, MessageCircle, Tags, Pencil, Search } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppContext, DiaryEntry, ReviewEntry } from '../store';
@@ -21,6 +21,7 @@ import { getStoredAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 import { filterDiaryEntries, getDiarySourceSignature, isDiaryReviewCurrent, parseDiaryTags, updateDiaryEntry } from '../lib/diaryRecords';
 import { getBaziResultStatus } from '../lib/baziProfiles';
+import { MOTION_DURATION, MOTION_EASE } from '../lib/uiMotion';
 
 const MOODS = [
   { value: 'great', icon: <Sun size={24} />, label: '极佳', color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -161,6 +162,9 @@ function buildDiaryReviewArchive(content: string, meta: DiaryReviewMeta | null, 
 }
 
 export default function Diary() {
+  const reduceMotion = useReducedMotion();
+  const enterTransition = { duration: reduceMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE };
+  const exitTransition = { duration: reduceMotion ? 0 : MOTION_DURATION.exit, ease: MOTION_EASE };
   const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   useTrustedTime();
   const navigate = useNavigate();
@@ -579,9 +583,10 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         <AnimatePresence>
           {reviewResult && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: reduceMotion ? 0 : 8, transition: exitTransition }}
+              transition={enterTransition}
               className="overflow-hidden"
             >
               {reviewFailed ? <div role="status" className="rail-panel"><p className="rail-body">{reviewResult}</p><button onClick={handleReview} disabled={isReviewing} className="rail-button-secondary mt-3">重试复盘</button></div> : <DiaryReviewArchiveCard
@@ -642,8 +647,9 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
               return (
                 <motion.div
                   key={entry.id}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={enterTransition}
                   className="rail-panel rail-diary-record relative group"
                 >
                   <div className="absolute right-3 top-3 flex gap-1">
@@ -695,15 +701,18 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         {isAdding && (
           <div className="rail-diary-dialog-position fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: exitTransition }}
+              transition={{ duration: reduceMotion ? 0 : MOTION_DURATION.fast }}
               className="rail-glass-backdrop absolute inset-0 bg-black/60"
               onClick={closeEntryDialog}
             />
             <motion.div
-              initial={{ opacity: 0, y: "100%" }}
+              initial={reduceMotion ? false : { opacity: 0, y: 22 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              exit={{ opacity: 0, y: reduceMotion ? 0 : 12, transition: exitTransition }}
+              transition={enterTransition}
               ref={entryDialogRef}
               role="dialog" aria-modal="true" aria-labelledby="diary-entry-title" tabIndex={-1}
               className="rail-glass-dialog relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[28px] border border-apple-border bg-apple-surface p-5 no-scrollbar touch-pan-y [-webkit-overflow-scrolling:touch] sm:p-6"
@@ -788,15 +797,18 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
         {showHistoryModal && (
           <div className="rail-diary-dialog-position fixed inset-0 z-[160] flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center sm:p-6">
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: exitTransition }}
+              transition={{ duration: reduceMotion ? 0 : MOTION_DURATION.fast }}
               className="rail-glass-backdrop absolute inset-0 bg-black/60"
               onClick={() => setShowHistoryModal(false)}
             />
             <motion.div
-              initial={{ opacity: 0, y: "100%" }}
+              initial={reduceMotion ? false : { opacity: 0, y: 22 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              exit={{ opacity: 0, y: reduceMotion ? 0 : 12, transition: exitTransition }}
+              transition={enterTransition}
               ref={historyDialogRef}
               role="dialog" aria-modal="true" aria-labelledby="diary-history-title" tabIndex={-1}
               className="rail-glass-dialog w-full max-w-2xl bg-apple-surface border border-apple-border rounded-[28px] p-5 sm:p-6 relative z-10 max-h-[90dvh] flex flex-col"

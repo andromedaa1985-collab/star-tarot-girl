@@ -8,6 +8,7 @@ import { AccountAutoSync } from './components/AccountAutoSync';
 import { AccountSessionChangeGuard } from './components/AccountSessionChangeGuard';
 import { getStoredAccountSession } from './lib/accountClient';
 import { hasSeenLandingIntro } from './lib/landingIntro';
+import { MOTION_DURATION, MOTION_EASE } from './lib/uiMotion';
 
 const Home = lazyPage(() => import('./pages/Home'));
 const Landing = lazyPage(() => import('./pages/Landing'));
@@ -24,6 +25,7 @@ const Simulator = lazyPage(() => import('./pages/Simulator'));
 const Diary = lazyPage(() => import('./pages/Diary'));
 const Guardian = lazyPage(() => import('./pages/Guardian'));
 const Explore = lazyPage(() => import('./pages/Explore'));
+const Deck = lazyPage(() => import('./pages/Deck'));
 const Analytics = lazyPage(() => import('./pages/Analytics'));
 
 function lazyPage(loadPage: () => Promise<{ default: React.ComponentType }>) {
@@ -44,7 +46,7 @@ function PageLoading() {
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className="flex h-full min-h-[50vh] items-center justify-center bg-apple-bg px-6 text-apple-text-muted"
+      className="rail-page-loading flex h-full min-h-[50vh] items-center justify-center px-6 text-apple-text-muted"
     >
       <p className="text-sm leading-6">正在准备星轨页面…</p>
     </div>
@@ -56,7 +58,7 @@ function App() {
     <AppErrorBoundary>
       <AccountSessionChangeGuard>
       <AppProvider>
-        <MotionConfig reducedMotion="user">
+        <MotionConfig reducedMotion="user" transition={{ duration: MOTION_DURATION.standard, ease: MOTION_EASE }}>
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Landing />} />
@@ -65,6 +67,7 @@ function App() {
               <Route path="/app" element={<AppShell />}>
                 <Route index element={<Home />} />
                 <Route path="explore" element={<Explore />} />
+                <Route path="deck" element={<Deck />} />
                 <Route path="bazi" element={<Bazi />} />
                 <Route path="simulator" element={<Simulator />} />
                 <Route path="diary" element={<Diary />} />

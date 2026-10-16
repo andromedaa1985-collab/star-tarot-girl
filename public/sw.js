@@ -1,9 +1,9 @@
-const CACHE_NAME = "astro-rail-pwa-v3-20260702";
+const CACHE_NAME = "astro-rail-pwa-v4-20261016";
 const APP_SHELL = [
   "/manifest.webmanifest",
   "/railstar-app-icon-no-text.png",
   "/railstar-app-icon.png",
-  "/default-card.png",
+  "/tarot/mecha-v1/back-640.webp",
   "/default-pet.png",
 ];
 const NETWORK_FIRST_PATHS = new Set([
@@ -76,6 +76,20 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match(request).then((cached) => cached || Response.error())),
+    );
+    return;
+  }
+
+  // Versioned artwork is immutable. Cache only images the user actually views.
+  if (url.pathname.startsWith("/tarot/mecha-v1/")) {
+    event.respondWith(
+      caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+        if (response.ok && response.headers.get('content-type')?.startsWith('image/')) {
+          const copy = response.clone();
+          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
+        }
+        return response;
+      })),
     );
     return;
   }

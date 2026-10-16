@@ -1,4 +1,5 @@
 import React from 'react';
+import { TAROT_CARDS, resolveTarotArtwork } from '../lib/tarotDeck';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, BookOpen, Moon, Sparkles, Sun } from 'lucide-react';
 import { markLandingIntroSeen } from '../lib/landingIntro';
@@ -79,7 +80,7 @@ export default function Landing() {
             <h2 id="ritual-title" className="text-balance font-serif text-3xl font-medium leading-[1.5] sm:text-4xl">一张牌的时间，<br />听听自己的声音。</h2>
             <p className="rail-body mt-5 max-w-sm text-pretty text-apple-text-muted">星轨陪你整理感受、记录选择。每个答案，最终都回到你自己的生活里。</p>
             <div className="mt-8 flex items-start gap-4">
-              <img src="/tarot/17-星星_4.png" alt="星星塔罗牌" width="640" height="960" loading="lazy" className="w-24 shrink-0 rounded-lg border border-apple-border sm:w-28" />
+              <img src={resolveTarotArtwork(TAROT_CARDS[17].image, 320)} alt="星星塔罗牌" width="320" height="480" loading="lazy" decoding="async" className="w-24 shrink-0 rounded-lg border border-apple-border sm:w-28" />
               <div className="py-3">
                 <p className="rail-section-title font-serif font-medium">XVII · 星星</p>
                 <p className="rail-muted mt-2 max-w-[18ch]">希望不总是盛大的。有时，只是愿意再试一次。</p>

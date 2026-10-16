@@ -1,0 +1,30 @@
+/* Short, interruptible feedback; the glass itself remains static. */
+:root { --rail-motion-ease:cubic-bezier(.22,1,.36,1); }
+.rail-route-view { height:100%; min-width:0; }
+.rail-nav-item[data-animated-nav] { position:relative; isolation:isolate; }
+.rail-nav-item[data-animated-nav].active { background:transparent; box-shadow:none; }
+.rail-nav-indicator { position:absolute; inset:0; z-index:0; border-radius:inherit; background:var(--app-text); box-shadow:0 3px 8px rgb(20 30 40 / 8%); pointer-events:none; }
+.rail-nav-icon, .rail-nav-label { position:relative; z-index:1; }
+.rail-nav-icon { transition:transform 180ms var(--rail-motion-ease); }
+.rail-nav-item.active .rail-nav-icon { transform:translateY(-1px); }
+.rail-button, .rail-button-secondary, .rail-icon-button, .rail-history-button { transition:background 160ms, box-shadow 160ms, scale 140ms var(--rail-motion-ease); }
+.rail-button:active:not(:disabled), .rail-button-secondary:active:not(:disabled), .rail-icon-button:active, .rail-history-button:active { scale:.975; }
+.rail-home-tools > summary::after { transition:transform 180ms var(--rail-motion-ease); }
+.rail-home-tools[open] > summary::after { content:'＋'; transform:rotate(45deg); }
+.rail-explore-list a > svg:last-child { transition:transform 180ms var(--rail-motion-ease); }
+@media (hover:hover) and (pointer:fine) {
+  .rail-explore-list a:hover > svg:last-child { transform:translateX(3px); }
+}
+@media (prefers-reduced-motion:no-preference) {
+  .rail-home-tools[open] > div, .rail-diary-tools[open] > div, .rail-diary-filters[open] > div { animation:rail-disclosure-in 200ms var(--rail-motion-ease); }
+  dialog[open] { animation:rail-dialog-in 220ms var(--rail-motion-ease); }
+  dialog[open]::backdrop { animation:rail-backdrop-in 160ms ease-out; }
+}
+@keyframes rail-disclosure-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+@keyframes rail-dialog-in { from { opacity:0; transform:translateY(16px) scale(.985); } to { opacity:1; transform:none; } }
+@keyframes rail-backdrop-in { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion:reduce) {
+  .rail-nav-icon, .rail-button, .rail-button-secondary, .rail-icon-button, .rail-history-button, .rail-home-tools > summary::after, .rail-explore-list a > svg:last-child { transition:none; }
+  .rail-button:active:not(:disabled), .rail-button-secondary:active:not(:disabled), .rail-icon-button:active, .rail-history-button:active { scale:1; }
+  .rail-nav-item.active .rail-nav-icon, .rail-explore-list a:hover > svg:last-child { transform:none; }
+}

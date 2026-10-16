@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import TarotAtmosphere from '../components/TarotAtmosphere';
+import TarotAtmosphere from '../components/TarotDeckArtwork';
+import { TAROT_CARDS, TAROT_CARD_BACK, TAROT_CARD_INDEX_BY_IMAGE, resolveTarotArtwork } from '../lib/tarotDeck';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -24,7 +25,9 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { MOTION_DURATION, MOTION_EASE } from '../lib/uiMotion';
+import { useRouteMotionDirection } from '../components/ui/RouteTransition';
 import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { filterTarotArchive, getReadingSource, type ReadingSource } from '../lib/tarotArchiveSearch';
@@ -82,33 +85,6 @@ type DrawnCard = {
   position: TarotPosition;
   image: string;
 };
-
-const TAROT_CARDS = [
-  { name: '愚者', file: '0-愚者_3.png' },
-  { name: '魔术师', file: '1-魔术师_2.png' },
-  { name: '女祭司', file: '2-女祭司_2.png' },
-  { name: '女皇', file: '3-女皇_1.png' },
-  { name: '皇帝', file: '4-皇帝_1.png' },
-  { name: '教皇', file: '5-教皇_3.png' },
-  { name: '恋人', file: '6-恋人_4.png' },
-  { name: '战车', file: '7-战车_3.png' },
-  { name: '力量', file: '8-力量_1.png' },
-  { name: '隐士', file: '9-隐士_2.png' },
-  { name: '命运之轮', file: '10-命运之轮_3.png' },
-  { name: '正义', file: '11-正义_4.png' },
-  { name: '倒吊人', file: '12-倒吊人_1.png' },
-  { name: '死神', file: '13-死神_4.png' },
-  { name: '节制', file: '14-节制_2.png' },
-  { name: '恶魔', file: '15-恶魔_4.png' },
-  { name: '塔', file: '16-塔_3.png' },
-  { name: '星星', file: '17-星星_4.png' },
-  { name: '月亮', file: '18-月亮_4.png' },
-  { name: '太阳', file: '19-太阳_4.png' },
-  { name: '审判', file: '20-审判_4.png' },
-  { name: '世界', file: '21-世界_4.png' },
-];
-
-const TAROT_IMAGE_PATHS = TAROT_CARDS.map((card) => `/tarot/${card.file}`);
 
 const QUICK_PROMPTS = [
   { label: '今日运势', prompt: '今日运势' },
@@ -180,10 +156,9 @@ const COMPANION_OUTFITS: CompanionOutfit[] = [
 
 const PRELOAD_IMAGE_PATHS = Array.from(
   new Set([
-    '/default-card.png',
+    resolveTarotArtwork(TAROT_CARD_BACK, 640),
     '/default-pet.png',
     '/avatar.png',
-    ...TAROT_IMAGE_PATHS,
   ]),
 );
 
@@ -213,10 +188,6 @@ const getLocalDateKey = (date = new Date()) => {
   const day = `${date.getDate()}`.padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
-const TAROT_CARD_INDEX_BY_IMAGE = new Map<string, number>(
-  TAROT_CARDS.map((card, index) => [`/tarot/${card.file}`, index] as const),
-);
 
 const extractTarotPositions = (cardsText = '') =>
   (cardsText.match(/正位|逆位/g) || []) as TarotPosition[];
@@ -251,7 +222,7 @@ const drawCards = (
     return {
     name: card.name,
     position: positions[index],
-    image: `/tarot/${card.file}`,
+    image: card.image,
     };
   });
 };
@@ -1428,6 +1399,8 @@ const buildMemoryRecall = (input: {
 };
 
 export default function Home() {
+  const reducedMotion = useReducedMotion();
+  const routeDirection = useRouteMotionDirection();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const {
@@ -1702,12 +1675,13 @@ export default function Home() {
   }, [weekDiaries, weekGuardianMessages, weeklyMaterialCount, weeklyReviewReady, weeklyReportText, plusActive, activeProfile, baziResult]);
 
   const scrollConversationToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const scrollBehavior = reducedMotion ? 'auto' : behavior;
     const run = () => {
       if (!conversationOpenRef.current) return;
-      endRef.current?.scrollIntoView({ behavior, block: 'end' });
+      endRef.current?.scrollIntoView({ behavior: scrollBehavior, block: 'end' });
       const scrollNode = scrollRef.current;
       if (scrollNode) {
-        scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior });
+        scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: scrollBehavior });
       }
     };
 
@@ -2134,7 +2108,7 @@ export default function Home() {
     if (shouldDraw) setCardImage(image);
     if (!options.regeneration) setMessages((prev) => [...prev, userMessage]);
     if (shouldDraw) {
-      await preloadImages(images);
+      await preloadImages(images.map(source => resolveTarotArtwork(source, 640)));
       drawingStartedAt = Date.now();
       setIsDrawingCards(true);
     }
@@ -2439,7 +2413,7 @@ export default function Home() {
     const loaded = await new Promise<boolean>((resolve) => {
       image.onload = () => resolve(true);
       image.onerror = () => resolve(false);
-      image.src = shareReading.cardImage || '/default-card.png';
+      image.src = resolveTarotArtwork(shareReading.cardImage);
     });
 
     if (loaded) ctx.drawImage(image, 92, 230, 360, 560);
@@ -2771,7 +2745,7 @@ export default function Home() {
     setShowScrollTop(false);
     setShowScrollBottom(true);
     const scrollToDaily = () => {
-      homeToolsRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      homeToolsRef.current?.scrollIntoView({ block: 'start', behavior: reducedMotion ? 'auto' : 'smooth' });
     };
 
     window.requestAnimationFrame(scrollToDaily);
@@ -2887,7 +2861,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 12, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.96 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}
             className="fixed inset-x-4 bottom-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+140px)] z-[70] mx-auto w-auto max-w-[360px] rounded-[28px] border border-[#eadcc8]/80 bg-[#fff8ee]/98 p-3 shadow-[0_18px_56px_rgba(84,55,24,0.16),inset_0_1px_0_rgba(255,255,255,0.78)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[#111522]/98 dark:shadow-[0_20px_58px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.08)]"
           >
             <div className="mb-2 flex items-center justify-between gap-3 px-1">
@@ -3040,7 +3014,11 @@ export default function Home() {
       <div ref={scrollRef} onScroll={handleScroll} className={clsx('rail-home-scroll relative z-10 h-full overflow-x-hidden overflow-y-auto px-5 pt-[88px] sm:px-8', conversationOpen ? 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+180px)]' : 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+32px)]')}>
         <div className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-5">
           {!conversationOpen && (
-            <div className="rail-home-focus">
+            <motion.div className="rail-home-focus"
+              initial={reducedMotion ? false : { opacity: 0.65, x: routeDirection * 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}
+            >
               <div className="rail-ritual-stage">
                 <p className="rail-ritual-date">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
                 <h1 className="rail-ritual-title font-serif">今天，从一张牌开始</h1>
@@ -3060,13 +3038,13 @@ export default function Home() {
                 {!questionInputOpen && !inputText && !followUpReading ? (
                   <button type="button" className="mx-auto block min-h-11 rounded-xl px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setQuestionInputOpen(true); window.requestAnimationFrame(() => inputRef.current?.focus()); }}>有件事想问问 →</button>
                 ) : (
-                  <div>
+                  <motion.div initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}>
                     <label htmlFor="home-question" className="mb-2 block text-sm text-apple-text-muted">你想问什么？</label>
                     {composerSuggestions}{composer}
-                  </div>
+                  </motion.div>
                 )}
               </div>
-            </div>
+            </motion.div>
           )}
 
           {!conversationOpen && (
@@ -3131,15 +3109,16 @@ export default function Home() {
           )}
 
           {conversationOpen && (
-            <section className="rail-conversation order-2 flex flex-col gap-3 pt-1">
+            <motion.section className="rail-conversation order-2 flex flex-col gap-3 pt-1" initial={reducedMotion ? false : { opacity: 0.65 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.fast }}>
               {visibleMessages.map((message, index) => {
                 const source = message.role === 'ai' ? getRegenerationSource(messages, tarotReadings, message.id) : null;
                 const canRegenerate = Boolean(source && (message.model !== DEEPSEEK_TAROT_DEEP_MODEL || source.reading));
                 return (
                 <motion.div
                   key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={reducedMotion ? false : { opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}
                   className={clsx(
                     'flex max-w-full flex-col gap-2',
                     message.role === 'user' ? 'self-end items-end' : 'self-start items-start',
@@ -3189,7 +3168,8 @@ export default function Home() {
                             {messageCardImages.map((src, index) => (
                               <img
                                 key={`${src}-${index}`}
-                                src={src}
+                                src={resolveTarotArtwork(src, 320)}
+                                loading="lazy" decoding="async"
                                 alt="抽到的塔罗牌"
                                 className={clsx(
                                   'object-cover object-top shadow-[0_12px_28px_rgba(0,0,0,0.22)] ring-1 ring-black/5 dark:ring-white/10',
@@ -3243,14 +3223,14 @@ export default function Home() {
               );
               })}
               <div ref={endRef} className="h-8 shrink-0" />
-            </section>
+            </motion.section>
           )}
         </div>
       </div>
 
       {petMenu}
 
-      {conversationOpen && <div className="rail-composer-position">
+      {conversationOpen && <motion.div className="rail-composer-position" initial={reducedMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}>
         {followUpReading && (
           <div className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 rounded-xl border border-apple-border bg-apple-surface px-3 py-2">
             <p className="min-w-0 flex-1 truncate text-[13px] leading-6 text-apple-text-muted">正在追问：{followUpReading.question} · 保留原牌面</p>
@@ -3259,7 +3239,7 @@ export default function Home() {
         )}
         {composerSuggestions}
         {composer}
-      </div>}
+      </motion.div>}
 
       <AnimatePresence>
         {conversationOpen && visibleMessages.length > 0 && showScrollBottom && !showPetMenu && (
@@ -3303,7 +3283,7 @@ export default function Home() {
             onFocus={markScrollControlsActive}
             onClick={() => {
               markScrollControlsActive();
-              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+              scrollRef.current?.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
             }}
             className={clsx(
               'absolute right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-[#efe3cf]/76 bg-white/80 text-apple-text-muted shadow-[0_10px_26px_rgba(70,45,20,0.12)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.08] sm:right-[calc(50%_-_250px)]',
@@ -3610,10 +3590,7 @@ function DrawCardAnimation({
                   compact ? 'h-[150px] w-[96px] rounded-[20px]' : 'h-[172px] w-[110px] rounded-[22px]',
                 )}
               >
-                <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[#f4cf83]">
-                  <Sparkles size={compact ? 22 : 26} />
-                  <span className="text-xs font-semibold tracking-[0.24em]">TAROT</span>
-                </div>
+                <img src={resolveTarotArtwork(TAROT_CARD_BACK, 640)} alt="" decoding="async" className="h-full w-full rounded-[inherit] object-cover" />
               </motion.div>
             ))}
             {animatedCards.map((card, index) => {
@@ -3672,11 +3649,11 @@ function DrawCardAnimation({
                       cardSize,
                     )}
                   >
-                    <Sparkles size={compact ? 28 : 32} />
-                    <span className="text-xs font-semibold tracking-[0.24em]">TAROT</span>
+                    <img src={resolveTarotArtwork(TAROT_CARD_BACK, 640)} alt="" decoding="async" className="h-full w-full rounded-[inherit] object-cover" />
                   </motion.div>
                   <motion.img
-                    src={cardSrc}
+                    src={resolveTarotArtwork(cardSrc, 640)}
+                    decoding="async"
                     alt={`${card.name}${card.position}`}
                     animate={{ opacity: [0, 0, 1, 1], scaleX: [0.18, 0.18, 1, 1] }}
                     transition={{ duration: 2.9, delay: index * 0.14, times: [0, 0.38, 0.56, 1], ease: 'easeInOut' }}
@@ -4284,7 +4261,7 @@ function ReadingLog({
                       <div key={reading.id} id={`archive-reading-${reading.id}`} className={clsx('rounded-2xl border bg-apple-surface-hover p-3', initialReadingId === reading.id ? 'border-apple-gold' : 'border-apple-border')}>
                         <div className="flex gap-3">
                           {reading.cardImage && (
-                            <img src={reading.cardImage} alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
+                            <img src={resolveTarotArtwork(reading.cardImage, 320)} loading="lazy" decoding="async" alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">

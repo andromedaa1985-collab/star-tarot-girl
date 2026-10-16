@@ -6,6 +6,7 @@ import { useAppContext } from '../store';
 import { hasFeatureAccess } from '../lib/membership';
 
 const exploreItems = [
+  { to: '/app/deck', title: '塔罗牌册', description: '翻阅 22 张未来暗黑风格牌面。', icon: BookOpen },
   { to: '/app/bazi', title: '八字档案', description: '从出生信息出发，了解自己的性格与节奏。', icon: Compass },
   { to: '/app/simulator', title: '选择沙盘', description: '把两个选择摆在一起，理清利弊。', icon: GitBranch },
   { to: '/app/guardian', title: '星轨守护', description: '结合最近的记录，聊聊你的心事。', icon: Moon },
