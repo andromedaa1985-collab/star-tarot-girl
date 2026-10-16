@@ -1,17 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useReducedMotion } from 'motion/react';
 import {
-  AlertTriangle,
   ArrowRight,
-  CheckCircle2,
-  Clock3,
-  Compass,
-  GitMerge,
+  ChevronDown,
   History,
   Loader2,
   MessageCircle,
   RotateCcw,
-  Scale,
   Sparkles,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -19,7 +14,6 @@ import { getStoredAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 import { useAppContext, type SimulationHistoryEntry } from '../store';
 import { recordAppEvent } from '../lib/engagement';
-import { clsx } from 'clsx';
 import { buildUserAddressInstruction, parseAiJson, SIMULATOR_JSON_SYSTEM_PROMPT } from '../lib/aiPrompting';
 import { DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEXT_MODEL } from '../lib/aiModels';
 import { SERVICE_FALLBACK } from '../lib/serviceFeedback';
@@ -27,7 +21,7 @@ import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import { AI_CLIENT_TIMEOUT_MS } from '../lib/aiRequestBudget';
 import PageHeader from '../components/ui/PageHeader';
-import { appendSimulationHistory, calculateDecisionMatrix, createDefaultDecisionCriteria, createLocalComparisonEntry, decisionDraftSignature, getSimulationAction, hasDifferentDecisionDraft, normalizeSimulationResult, readDecisionCriteria, type DecisionCriterion, type DecisionDraft, type SimulationResult } from '../lib/decisionMatrix';
+import { appendSimulationHistory, calculateDecisionMatrix, createDefaultDecisionCriteria, createLocalComparisonEntry, decisionDraftSignature, getSimulationAction, hasDifferentDecisionDraft, normalizeSimulationResult, prepareSimulationDraft, readDecisionCriteria, type DecisionCriterion, type DecisionDraft, type SimulationResult } from '../lib/decisionMatrix';
 import { formatRecordDate, matchesRecordQuery } from '../lib/recordSearch';
 import { hasFeatureAccess } from '../lib/membership';
 
@@ -276,6 +270,12 @@ function buildSimulationArchive({
 }
 
 export default function Simulator() {
+  const reducedMotion = useReducedMotion();
+  const pageRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDetailsElement>(null);
+  const presetsRef = useRef<HTMLDetailsElement>(null);
+  const resultRef = useRef<HTMLElement>(null);
+  const returnFocusToDraftRef = useRef(false);
   const workspaceOwner = useRef(getStoredAccountSession()?.user.id || null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -297,18 +297,21 @@ export default function Simulator() {
   const dilemma = simulatorState.dilemma;
   const choiceA = simulatorState.choiceA;
   const choiceB = simulatorState.choiceB;
+  const precisionMode = simulatorState.precisionMode === true;
   const decisionCriteria = readDecisionCriteria(simulatorState.decisionCriteria) ?? createDefaultDecisionCriteria();
-  const draft: DecisionDraft = { dilemma, choiceA, choiceB, decisionCriteria };
+  const draft: DecisionDraft = { dilemma, choiceA, choiceB, decisionCriteria: precisionMode ? decisionCriteria : undefined };
+  const preparedDraft = prepareSimulationDraft(draft);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const selectedRecordId = searchParams.get('record');
   const selectedRecord = simulationHistory.find(item => item.id === selectedRecordId);
-  const draftRecord = simulatorState.result ? simulationHistory.find(item => item.dilemma === dilemma && item.choiceA === choiceA && item.choiceB === choiceB && JSON.stringify(item.result) === JSON.stringify(simulatorState.result)) : null;
-  const source = selectedRecord || (simulatorState.result ? { date: draftRecord?.date, dilemma, choiceA, choiceB, result: simulatorState.result, decisionCriteria: draftRecord?.decisionCriteria ?? simulatorState.decisionCriteria, usedFallback: draftRecord?.usedFallback, analysisKind: 'ai' as const } : null);
+  const draftRecord = simulatorState.result ? simulationHistory.find(item => item.dilemma === preparedDraft.dilemma && item.choiceA === preparedDraft.choiceA && item.choiceB === preparedDraft.choiceB && JSON.stringify(item.result) === JSON.stringify(simulatorState.result)) : null;
+  const source = selectedRecord || (simulatorState.result ? { date: draftRecord?.date, ...preparedDraft, result: simulatorState.result, decisionCriteria: draftRecord?.decisionCriteria ?? draft.decisionCriteria, usedFallback: draftRecord?.usedFallback, analysisKind: 'ai' as const } : null);
   const isComparison = source?.analysisKind === 'comparison';
   const result = source && !isComparison ? normalizeSimulationResult(source.result, source.choiceA, source.choiceB, source.usedFallback).result : null;
   const filteredHistory = simulationHistory.filter(item => matchesRecordQuery(historyQuery, item.dilemma, item.choiceA, item.choiceB, item.advice, item.date));
   const simulatorUnlocked = hasFeatureAccess(membership, 'simulator');
+  const showResult = Boolean(source && (result || isComparison) && (!isSimulating || selectedRecord));
 
   useEffect(() => {
     mountedRef.current = true;
@@ -316,16 +319,30 @@ export default function Simulator() {
   }, []);
   useEffect(() => { setHistoryLimit(6); }, [historyQuery]);
   useEffect(() => {
+    if (!showResult) {
+      if (returnFocusToDraftRef.current) {
+        pageRef.current?.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+        document.getElementById('simulation-choice-a')?.focus({ preventScroll: true });
+        returnFocusToDraftRef.current = false;
+      }
+      return;
+    }
+    returnFocusToDraftRef.current = false;
+    pageRef.current?.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+    resultRef.current?.focus({ preventScroll: true });
+  }, [showResult, selectedRecordId, reducedMotion]);
+  useEffect(() => {
     if (!pendingReuse || !reuseDialogRef.current) return;
     reuseDialogRef.current.showModal();
     reuseCancelRef.current?.focus();
   }, [pendingReuse]);
 
-  const updateDraft = (patch: Partial<DecisionDraft>) => {
-    draftRef.current = { ...draftRef.current, ...patch };
+  const updateDraft = (patch: Partial<DecisionDraft>, mode?: boolean) => {
+    const nextMode = mode ?? precisionMode;
+    draftRef.current = { ...draftRef.current, ...patch, decisionCriteria: nextMode ? (patch.decisionCriteria ?? decisionCriteria) : undefined };
     lastComparisonSignatureRef.current = null;
     setFormError(null);
-    setSimulatorState(prev => ({ ...prev, ...patch, result: null }));
+    setSimulatorState(prev => ({ ...prev, ...patch, ...(mode === undefined ? {} : { precisionMode: mode }), result: null }));
   };
 
   const setDilemma = (val: string) => {
@@ -346,14 +363,22 @@ export default function Simulator() {
 
   const applyPreset = (preset: SimulationPreset) => {
     updateDraft({ dilemma: preset.dilemma, choiceA: preset.choiceA, choiceB: preset.choiceB });
+    if (presetsRef.current) presetsRef.current.open = false;
+    pageRef.current?.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+    window.requestAnimationFrame(() => document.getElementById('simulation-choice-a')?.focus({ preventScroll: true }));
   };
 
-  const closeRecord = () => { const next = new URLSearchParams(searchParams); next.delete('record'); setSearchParams(next, { replace: true }); };
-  const openRecord = (id: string) => { const next = new URLSearchParams(searchParams); next.set('record', id); setSearchParams(next, { replace: true }); setHistoryNotice(null); };
+  const closeRecord = () => { returnFocusToDraftRef.current = true; const next = new URLSearchParams(searchParams); next.delete('record'); setSearchParams(next, { replace: true }); };
+  const openRecord = (id: string) => {
+    const next = new URLSearchParams(searchParams); next.set('record', id); setSearchParams(next, { replace: true }); setHistoryNotice(null);
+    if (historyRef.current) historyRef.current.open = false;
+    pageRef.current?.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+  };
+  const applyReusedDraft = (incoming: DecisionDraft) => { updateDraft(incoming, Boolean(incoming.decisionCriteria?.length)); closeRecord(); };
   const reuseRecord = (item: SimulationHistoryEntry) => {
-    const incoming: DecisionDraft = { dilemma: item.dilemma, choiceA: item.choiceA, choiceB: item.choiceB, decisionCriteria: readDecisionCriteria(item.decisionCriteria) ?? createDefaultDecisionCriteria() };
+    const incoming: DecisionDraft = { dilemma: item.dilemma, choiceA: item.choiceA, choiceB: item.choiceB, decisionCriteria: readDecisionCriteria(item.decisionCriteria) };
     if (hasDifferentDecisionDraft(draftRef.current, incoming)) setPendingReuse(incoming);
-    else { updateDraft(incoming); closeRecord(); }
+    else applyReusedDraft(incoming);
   };
 
   const saveLocalComparison = () => {
@@ -409,14 +434,14 @@ export default function Simulator() {
       return;
     }
     if (requestActiveRef.current) return;
-    const requestDraft: DecisionDraft = { ...draftRef.current, decisionCriteria: draftRef.current.decisionCriteria?.map(item => ({ ...item })) };
+    const requestSignature = decisionDraftSignature(draftRef.current);
+    const requestDraft = prepareSimulationDraft({ ...draftRef.current, decisionCriteria: draftRef.current.decisionCriteria?.map(item => ({ ...item })) });
     if (action.type === 'invalid') {
       setFormError(action.error);
       return;
     }
 
     requestActiveRef.current = true;
-    const requestSignature = decisionDraftSignature(requestDraft);
     const controller = new AbortController();
     requestAbortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
@@ -436,7 +461,7 @@ export default function Simulator() {
       };
       setSimulationHistory(prev => appendSimulationHistory(prev, entry));
       if (requestSignature === decisionDraftSignature(draftRef.current)) {
-        setSimulatorState(prev => requestSignature === decisionDraftSignature({ dilemma: prev.dilemma, choiceA: prev.choiceA, choiceB: prev.choiceB, decisionCriteria: readDecisionCriteria(prev.decisionCriteria) ?? createDefaultDecisionCriteria() }) ? { ...prev, decisionCriteria: entry.decisionCriteria, result: safeResult } : prev);
+        setSimulatorState(prev => requestSignature === decisionDraftSignature({ dilemma: prev.dilemma, choiceA: prev.choiceA, choiceB: prev.choiceB, decisionCriteria: prev.precisionMode === true ? readDecisionCriteria(prev.decisionCriteria) ?? createDefaultDecisionCriteria() : undefined }) ? { ...prev, result: safeResult } : prev);
         setFormError(usedFallback ? SERVICE_FALLBACK.simulator : null);
       } else {
         setHistoryNotice('推演已保存到沙盘档案，你修改后的草稿已保留。');
@@ -463,7 +488,7 @@ ${userAddressInstruction}
 困境描述：${requestDraft.dilemma}
 选择A：${requestDraft.choiceA}
 选择B：${requestDraft.choiceB}
-用户自己的比较标准（仅是主观偏好，不是预测概率）：${requestDraft.decisionCriteria?.map(item => `${item.label}：重要程度 ${item.weight}/5，A 自评 ${item.scoreA}/5，B 自评 ${item.scoreB}/5`).join('；')}
+${requestDraft.decisionCriteria?.length ? `用户补充的比较标准（仅是主观偏好，不是预测概率）：${requestDraft.decisionCriteria.map(item => `${item.label}：重要程度 ${item.weight}/5，A 自评 ${item.scoreA}/5，B 自评 ${item.scoreB}/5`).join('；')}` : '用户选择了简洁模式，未提供个人评分。请直接比较两个选择的利弊、现实代价和下一步可验证的行动，不要编造用户的偏好、分数或未提供的个人情况。'}
 
 请务必返回合法的JSON对象，严格遵循以下结构（不要包含任何Markdown标记，直接输出JSON）：
 {
@@ -536,239 +561,83 @@ ${userAddressInstruction}
   };
 
   return (
-    <div className="rail-page">
-      <PageHeader eyebrow="把选择想清楚" title="命运沙盘" description="把纠结拆成两条路，看看短期变化、长期代价，以及你愿意承担的风险。" />
-      <div className="rail-page-content space-y-6">
-        <section className="rail-surface p-4">
-          <div className="grid grid-cols-3 gap-3">
-            <SignalPill label="命主" value={currentBazi?.name || '未绑定'} active={Boolean(currentBazi?.name)} />
-            <SignalPill label="历史" value={`${simulationHistory.length} 次`} active={simulationHistory.length > 0} />
-            <SignalPill label="模式" value="A/B" active />
-          </div>
-        </section>
+    <div ref={pageRef} className="rail-page rail-simulator">
+      <div className="rail-page-content max-w-[720px]">
+        <PageHeader title="选择沙盘" description="写下两个选择，帮你理清利弊。" backTo="/app/explore" />
+        {historyNotice && <p role="status" className="rail-muted mb-4">{historyNotice}</p>}
+        {selectedRecordId && !selectedRecord && <div role="status" className="rail-panel mb-4"><p>这条记录已不在当前存档中。</p><button type="button" onClick={closeRecord} className="rail-button-secondary mt-3">返回当前草稿</button></div>}
 
-        {formError && <p role="alert" className="rounded-2xl border border-apple-gold/22 bg-apple-gold/10 p-4 text-[15px] leading-7 text-apple-text">{formError}</p>}
-        {historyNotice && <p role="status" className="rail-muted">{historyNotice}</p>}
-        {selectedRecordId && !selectedRecord && <div role="status" className="rail-panel"><p>这条沙盘记录已不在当前存档中。</p><button type="button" onClick={closeRecord} className="rail-button-secondary mt-3">返回当前草稿</button></div>}
-
-        {simulationHistory.length > 0 && (
-          <section className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
-                <History size={16} className="text-apple-gold" />
-                沙盘档案
-              </div>
-              <span className="text-[13px] text-apple-text-muted">共 {simulationHistory.length} 条</span>
+        {!source && <section aria-label="填写两个选择">
+          <form id="simulation-form" noValidate onSubmit={event => { event.preventDefault(); void handleSimulate(); }} className="rail-panel rail-simulator-form">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <ChoiceInput tone="a" label="选择 A" value={choiceA} onChange={setChoiceA} placeholder="比如：留在现在的公司" error={formError} />
+              <ChoiceInput tone="b" label="选择 B" value={choiceB} onChange={setChoiceB} placeholder="比如：试试新的工作机会" error={formError} />
             </div>
-            <label htmlFor="simulation-history-search" className="rail-muted mb-2 block">搜索沙盘档案</label>
-            <input id="simulation-history-search" type="search" value={historyQuery} onChange={event => setHistoryQuery(event.target.value)} placeholder="搜问题、选择或建议" className="rail-field mb-3" />
-            <div className="grid gap-2 sm:grid-cols-3">
-              {filteredHistory.slice(0, historyLimit).map((item) => (
-                <React.Fragment key={item.id}>
-                  <SimulationHistoryCard
-                    item={item}
-                    onOpen={() => openRecord(item.id)}
-                    onReuse={() => reuseRecord(item)}
-                    onContinue={() => askTarotFromSimulation({
-                      date: item.date,
-                      dilemma: item.dilemma,
-                      choiceA: item.choiceA,
-                      choiceB: item.choiceB,
-                      result: item.analysisKind === 'comparison' ? null : normalizeSimulationResult(item.result, item.choiceA, item.choiceB, item.usedFallback).result,
-                      decisionCriteria: readDecisionCriteria(item.decisionCriteria),
-                      advice: item.advice,
-                    })}
-                  />
-                </React.Fragment>
-              ))}
-            </div>
-            {filteredHistory.length === 0 && <p className="rail-muted py-5 text-center">没有找到匹配的沙盘记录，试试其他关键词。</p>}
-            {filteredHistory.length > historyLimit && <button type="button" onClick={() => setHistoryLimit(limit => limit + 6)} className="rail-button-secondary mt-3 w-full">加载更多（还有 {filteredHistory.length - historyLimit} 条）</button>}
-          </section>
-        )}
+            {formError && <p id="simulation-form-error" role="alert" className="rail-simulator-error">{formError}</p>}
+            <button type="submit" disabled={isSimulating} aria-describedby="simulation-form-hint" className="rail-button rail-simulator-primary mt-6 w-full">
+              {isSimulating ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+              {isSimulating ? '正在比较这两个选择…' : simulatorUnlocked ? '开始对比' : '解锁对比 · Plus'}
+            </button>
+            <p id="simulation-form-hint" className="rail-muted mt-3 text-center">{simulatorUnlocked ? '先看利弊，再看下一步怎么做。无需评分。' : '生成分析需要 Plus，已填写的内容会保留。'}</p>
 
-        <AnimatePresence mode="wait">
-          {!source && (
-            <motion.section
-              key="input"
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -18 }}
-              className="space-y-4"
-            >
-              <div className="rail-panel">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="rail-section-title">不知道怎么问，先选方向</div>
-                    <p className="mt-1 text-[13px] text-apple-text-muted">适合只有大概烦恼、还没组织好问题的时候。</p>
-                  </div>
-                </div>
-                <div className="mb-3 grid grid-cols-4 gap-2 sm:grid-cols-8">
-                  {PRESET_CATEGORIES.map((category) => (
-                    <button
-                      key={category}
-                      type="button"
-                      aria-pressed={selectedPresetCategory === category}
-                      onClick={() => setSelectedPresetCategory(category)}
-                      className={clsx(
-                        'rounded-full border px-2 py-2 text-[13px] font-medium transition-transform active:scale-[0.98]',
-                        selectedPresetCategory === category
-                          ? 'border-apple-gold/42 bg-apple-text text-apple-bg'
-                          : 'border-apple-border bg-apple-surface text-apple-text-muted',
-                      )}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  {visiblePresets.map((preset) => (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => applyPreset(preset)}
-                      className="group rounded-[20px] border border-apple-border bg-apple-surface p-3 text-left transition-transform active:scale-[0.98]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[13px] font-semibold text-apple-text">{preset.label}</span>
-                        <span className="rounded-full bg-apple-gold/12 px-2 py-0.5 text-[13px] font-medium text-apple-gold group-active:bg-apple-gold group-active:text-[#17130f]">
-                          填入
-                        </span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-apple-text-muted">{preset.hint}</p>
-                    </button>
-                  ))}
-                </div>
+            <details className="rail-simulator-background">
+              <summary className="rail-simulator-disclosure"><span>{dilemma.trim() ? '补充背景 · 已填写' : '补充背景（选填）'}</span><ChevronDown size={16} aria-hidden="true" /></summary>
+              <label htmlFor="simulation-dilemma" className="rail-muted mb-2 block">有什么现实情况需要考虑？</label>
+              <textarea id="simulation-dilemma" value={dilemma} onChange={event => setDilemma(event.target.value)} placeholder="比如：现在的工作很稳定，但我更想尝试新的方向。" rows={3} className="rail-field resize-y" />
+            </details>
+
+            <div className="rail-simulator-precision">
+              <div className="flex items-center justify-between gap-5">
+                <div><p id="simulation-precision-label" className="text-sm font-medium">精确模式</p><p id="simulation-precision-hint" className="rail-muted mt-1">想补充个人偏好时再打开</p></div>
+                <button type="button" role="switch" aria-labelledby="simulation-precision-label" aria-describedby="simulation-precision-hint" aria-checked={precisionMode} aria-controls="simulation-precision-fields" onClick={() => updateDraft({}, !precisionMode)} className="rail-simulator-switch"><span aria-hidden="true" /></button>
               </div>
-
-              <div className="rail-panel">
-                <div className="space-y-3">
-                  <label htmlFor="simulation-dilemma" className="flex items-center gap-2 text-[15px] font-semibold text-apple-text">
-                    <Compass size={16} className="text-apple-gold" />
-                    当前岔路
-                  </label>
-                  <textarea id="simulation-dilemma" required
-                    aria-describedby="simulation-form-hint"
-                    value={dilemma}
-                    onChange={(e) => setDilemma(e.target.value)}
-                    placeholder="比如：现在工作稳定但消耗很大，另一个机会更有想象力，可风险也高。"
-                    className="rail-field min-h-32 resize-y"
-                  />
-                </div>
-
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ChoiceInput
-                    tone="a"
-                    label="A 线"
-                    value={choiceA}
-                    onChange={setChoiceA}
-                    placeholder="比如：继续留在现在的公司"
-                  />
-                  <ChoiceInput
-                    tone="b"
-                    label="B 线"
-                    value={choiceB}
-                    onChange={setChoiceB}
-                    placeholder="比如：辞职去新的机会"
-                  />
-                </div>
-
+              <div id="simulation-precision-fields" hidden={!precisionMode}>{precisionMode && <>
                 <DecisionMatrix criteria={decisionCriteria} choiceA={choiceA} choiceB={choiceB} onChange={criteria => updateDraft({ decisionCriteria: criteria })} />
-                <button type="button" onClick={saveLocalComparison} className="rail-button-secondary mt-5 w-full">保存这次本地比较</button>
+                <button type="button" onClick={saveLocalComparison} className="rail-button-secondary mt-5 w-full">只保存评分对比</button>
+                <p className="rail-muted mt-2">不生成分析，直接保存你的评分，无需 Plus。</p>
+              </>}</div>
+            </div>
+          </form>
 
-                <p id="simulation-form-hint" className="rail-muted mt-4">本地比较和旧记录回看可直接使用，不调用 AI。{simulatorUnlocked ? '你已拥有双线推演权限，填写不同的 A、B 选择后可以补充生成式分析。' : 'Plus 解锁额外的生成式双线分析。'}</p>
+          <details ref={presetsRef} className="rail-simulator-secondary">
+            <summary className="rail-simulator-disclosure"><span>不知道怎么写？用个例子</span><ChevronDown size={16} aria-hidden="true" /></summary>
+            <label htmlFor="simulation-preset-category" className="rail-muted mb-2 block">选择一个方向</label>
+            <select id="simulation-preset-category" value={selectedPresetCategory} onChange={event => setSelectedPresetCategory(event.target.value as SimulationPresetCategory)} className="rail-field mb-3">
+              {PRESET_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
+            <ul className="divide-y divide-apple-border">
+              {visiblePresets.map(preset => <li key={preset.label}><button type="button" onClick={() => applyPreset(preset)} className="rail-simulator-preset" aria-label={`使用${preset.label}示例`}><span><span className="block text-sm font-medium">{preset.label}</span><span className="rail-muted mt-1 block">{preset.hint}</span></span><ArrowRight size={17} aria-hidden="true" /></button></li>)}
+            </ul>
+          </details>
+        </section>}
 
-                <button
-                  onClick={handleSimulate}
-                  disabled={isSimulating} aria-describedby="simulation-form-hint"
-                  className="rail-button mt-5 w-full"
-                >
-                  <Sparkles size={18} />
-                  {isSimulating ? '分析中，仍可调整草稿' : simulatorUnlocked ? '开始双线推演' : '查看 Plus 双线推演'}
-                </button>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        {isSimulating && <div role="status" aria-label="正在比较这两个选择" className="rail-simulator-loading"><Loader2 size={20} className="animate-spin" aria-hidden="true" /><p>正在整理两种选择的利弊与下一步，草稿仍可修改。</p></div>}
 
-        <AnimatePresence>
-          {isSimulating && (
-            <motion.section role="status" aria-label="正在校准两条时间线"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              className="rounded-[20px] border border-apple-border bg-apple-surface p-8 text-center"
-            >
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[20px] border border-apple-gold/28 bg-apple-gold/12 text-apple-gold">
-                <Loader2 size={34} className="animate-spin" />
-              </div>
-              <div className="mt-5 text-base font-semibold text-apple-text">正在校准两条时间线</div>
-              <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed text-apple-text-muted">
-                星轨会拆解短期阻力、长期代价和命理契合度，给你一个更清醒的选择视角。
-              </p>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        {source && showResult && <section ref={resultRef} tabIndex={-1} className="space-y-5" aria-label="选择对比结果">
+          {selectedRecord && <div className="flex flex-wrap items-center justify-between gap-3"><p className="rail-muted">正在回看记录，当前草稿已保留。</p><button type="button" onClick={closeRecord} className="rail-button-secondary">返回草稿</button></div>}
+          {formError && <p role="alert" className="rail-simulator-error">{formError}</p>}
+          {isComparison ? <ComparisonArchivePanel date={source.date} dilemma={source.dilemma} choiceA={source.choiceA} choiceB={source.choiceB} advice={selectedRecord?.advice || ''} /> : <>
+            {source.usedFallback && <p role="status" className="rail-muted">分析服务暂时不可用，以下为参考提示，不代表已完成个性化分析。</p>}
+            <SimulationArchivePanel date={source.date} dilemma={source.dilemma} choiceA={source.choiceA} choiceB={source.choiceB} result={result!} onContinue={() => askTarotFromSimulation()} />
+            <div className="grid gap-4 md:grid-cols-2"><ResultBranch label="选择 A" result={result!.choiceA} /><ResultBranch label="选择 B" result={result!.choiceB} /></div>
+          </>}
+          {readDecisionCriteria(source.decisionCriteria) && <details className="rail-simulator-secondary"><summary className="rail-simulator-disclosure"><span>查看评分与比较依据</span><ChevronDown size={16} aria-hidden="true" /></summary><DecisionMatrix criteria={readDecisionCriteria(source.decisionCriteria)!} choiceA={source.choiceA} choiceB={source.choiceB} /></details>}
+          <button type="button" onClick={() => { if (selectedRecord) reuseRecord(selectedRecord); else { returnFocusToDraftRef.current = true; setResult(null); } }} className="rail-button-secondary w-full"><RotateCcw size={16} aria-hidden="true" />{selectedRecord ? '用这两个选择再比较' : '调整这两个选择'}</button>
+        </section>}
 
-        <AnimatePresence>
-          {source && (result || isComparison) && (!isSimulating || selectedRecord) && (
-            <motion.section
-              key="result"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-4"
-            >
-              {selectedRecord && <div className="flex flex-wrap items-center justify-between gap-3"><p className="rail-muted">正在回看旧记录，当前草稿已保留。</p><button type="button" onClick={closeRecord} className="rail-button-secondary">返回当前草稿</button></div>}
-              {isComparison ? <ComparisonArchivePanel date={source.date} dilemma={source.dilemma} choiceA={source.choiceA} choiceB={source.choiceB} advice={selectedRecord?.advice || ''} /> : <>
-              {source.usedFallback && <p role="status" className="rail-muted">这条记录包含服务兜底内容，可先参考你保存的本地比较。</p>}
-              <SimulationArchivePanel
-                date={source.date}
-                dilemma={source.dilemma}
-                choiceA={source.choiceA}
-                choiceB={source.choiceB}
-                result={result!}
-                onContinue={() => askTarotFromSimulation()}
-              />
-              </>}
-
-              {readDecisionCriteria(source.decisionCriteria) ? <DecisionMatrix criteria={readDecisionCriteria(source.decisionCriteria)!} choiceA={source.choiceA} choiceB={source.choiceB} /> : <p className="rail-muted">这条旧记录没有保存比较评分。复用输入后可以建立新的标准。</p>}
-
-              {result && <><div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <ResultBranch label="A 线" result={result.choiceA} tone="a" />
-                <ResultBranch label="B 线" result={result.choiceB} tone="b" />
-              </div>
-              <div className="rail-panel relative overflow-hidden">
-                <div className="pointer-events-none absolute right-4 top-4 text-apple-gold/10">
-                  <Scale size={108} />
-                </div>
-                <div className="relative z-10 mb-3 flex items-center gap-2 text-[15px] font-semibold text-apple-gold">
-                  <Sparkles size={16} />
-                  破局建议
-                </div>
-                <p className="rail-reader relative z-10">
-                  {result.advice}
-                </p>
-              </div>
-              </>}
-
-              <button
-                onClick={() => selectedRecord ? reuseRecord(selectedRecord) : setResult(null)}
-                className="rail-button-secondary w-full"
-              >
-                <RotateCcw size={16} />
-                {selectedRecord ? '复用这条记录的输入' : '调整输入与比较标准'}
-              </button>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        {simulationHistory.length > 0 && <details ref={historyRef} className="rail-simulator-secondary mt-6">
+          <summary className="rail-simulator-disclosure"><span className="flex items-center gap-2"><History size={16} aria-hidden="true" />历史记录<span className="rail-muted">{simulationHistory.length}</span></span><ChevronDown size={16} aria-hidden="true" /></summary>
+          <label htmlFor="simulation-history-search" className="sr-only">搜索历史记录</label>
+          <input id="simulation-history-search" type="search" value={historyQuery} onChange={event => setHistoryQuery(event.target.value)} placeholder="搜索问题或选择" className="rail-field mb-3" />
+          <ul className="divide-y divide-apple-border">{filteredHistory.slice(0, historyLimit).map(item => <li key={item.id}><SimulationHistoryCard item={item} onOpen={() => openRecord(item.id)} /></li>)}</ul>
+          {filteredHistory.length === 0 && <p className="rail-muted py-5">没有匹配的记录，试试其他关键词。</p>}
+          {filteredHistory.length > historyLimit && <button type="button" onClick={() => setHistoryLimit(limit => limit + 6)} className="rail-button-secondary mt-3 w-full">加载更多记录</button>}
+        </details>}
       </div>
       <dialog ref={reuseDialogRef} aria-labelledby="simulation-reuse-title" onCancel={() => setPendingReuse(null)} onClose={() => setPendingReuse(null)} className="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-2xl border border-apple-border bg-apple-surface p-6 text-apple-text backdrop:bg-black/45">
-        <h2 id="simulation-reuse-title" className="rail-section-title">替换当前沙盘草稿？</h2>
-        <p className="rail-body mt-3">当前输入或比较标准和这条记录不同。复用会替换草稿，已保存的历史记录仍会保留。</p>
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button ref={reuseCancelRef} type="button" onClick={() => reuseDialogRef.current?.close()} className="rail-button-secondary">取消</button>
-          <button type="button" onClick={() => { if (pendingReuse) { updateDraft(pendingReuse); closeRecord(); } reuseDialogRef.current?.close(); }} className="rail-button">替换草稿</button>
-        </div>
+        <h2 id="simulation-reuse-title" className="rail-section-title">替换当前草稿？</h2>
+        <p className="rail-body mt-3">当前输入和这条记录不同。复用会替换草稿，已保存的记录仍会保留。</p>
+        <div className="mt-6 flex flex-wrap justify-end gap-3"><button ref={reuseCancelRef} type="button" onClick={() => reuseDialogRef.current?.close()} className="rail-button-secondary">取消</button><button type="button" onClick={() => { if (pendingReuse) applyReusedDraft(pendingReuse); reuseDialogRef.current?.close(); }} className="rail-button">替换草稿</button></div>
       </dialog>
     </div>
   );
@@ -784,165 +653,38 @@ function ComparisonArchivePanel({ date, dilemma, choiceA, choiceB, advice }: { d
   </section>;
 }
 
-function SimulationArchivePanel({
-  date,
-  dilemma,
-  choiceA,
-  choiceB,
-  result,
-  onContinue,
-}: {
-  date?: string;
-  dilemma: string;
-  choiceA: string;
-  choiceB: string;
-  result: SimulationResult;
-  onContinue: () => void;
-}) {
-  const archive = buildSimulationArchive({ date, dilemma, choiceA, choiceB, result });
-
-  return (
-    <div className="rail-panel relative overflow-hidden">
-
-      <div className="relative z-10 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[13px] font-semibold uppercase text-apple-gold">
-            <Scale size={14} />
-            推演档案
-          </div>
-          <h2 className="mt-1 line-clamp-2 text-xl font-semibold text-apple-text">{archive.title}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-apple-text-muted">
-            <span className="inline-flex items-center gap-1">
-              <Clock3 size={12} />
-              {archive.dateLabel}
-            </span>
-            <span>{archive.saferLine}</span>
-            {archive.riskA != null && archive.riskB != null && <span>AI 风险提示分：A {archive.riskA} / B {archive.riskB}</span>}
-          </div>
-        </div>
-        <button
-          onClick={onContinue}
-          className="shrink-0 rounded-full bg-apple-text px-3 py-2 text-[13px] font-semibold text-apple-bg transition-transform active:scale-[0.98]"
-        >
-          继续问
-        </button>
-      </div>
-
-      <p className="rail-reader relative z-10 mt-5">
-        {archive.summary}
-      </p>
-
-      <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
-        {archive.keywords.map((keyword) => (
-          <span key={keyword} className="rounded-full border border-apple-gold/22 bg-apple-gold/10 px-2.5 py-1 text-[13px] font-medium text-apple-gold">
-            {keyword}
-          </span>
-        ))}
-      </div>
-
-      <div className="relative z-10 mt-4 grid gap-2 sm:grid-cols-3">
-        {archive.timeline.map((item) => (
-          <div key={item.label} className="rounded-[20px] border border-apple-border bg-apple-surface p-3">
-            <div className="text-[13px] font-semibold text-apple-text">{item.label}</div>
-            <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-apple-text-muted">{item.text}</p>
-          </div>
-        ))}
-      </div>
-
-      <button
-        onClick={onContinue}
-        className="rail-button-secondary relative z-10 mt-4 w-full"
-      >
-        <MessageCircle size={16} />
-        带着这次推演问塔罗
-      </button>
-    </div>
-  );
+function SimulationArchivePanel({ date, dilemma, choiceA, choiceB, result, onContinue }: { date?: string; dilemma: string; choiceA: string; choiceB: string; result: SimulationResult; onContinue: () => void }) {
+  return <section className="rail-panel" aria-labelledby="simulation-result-title">
+    <p className="rail-muted">{date ? formatRecordDate(date) : '本次对比'}</p>
+    <h2 id="simulation-result-title" className="rail-section-title mt-2">先看下一步怎么做</h2>
+    <p className="rail-reader mt-4">{result.advice}</p>
+    <button type="button" onClick={onContinue} className="rail-button rail-simulator-primary mt-5 w-full"><MessageCircle size={17} aria-hidden="true" />带着结果继续问</button>
+    <details className="mt-4"><summary className="rail-simulator-disclosure"><span>回看问题与选择</span><ChevronDown size={16} aria-hidden="true" /></summary><p className="rail-body">{dilemma}</p><dl className="mt-3 space-y-2 text-sm"><div><dt className="rail-muted">选择 A</dt><dd>{choiceA}</dd></div><div><dt className="rail-muted">选择 B</dt><dd>{choiceB}</dd></div></dl></details>
+  </section>;
 }
 
-function SimulationHistoryCard({
-  item,
-  onOpen,
-  onReuse,
-  onContinue,
-}: {
-  item: SimulationHistoryEntry;
-  onOpen: () => void;
-  onReuse: () => void;
-  onContinue: () => void;
-}) {
-  const archive = item.analysisKind === 'comparison' ? {
-    dateLabel: formatRecordDate(item.date), summary: compactSimulationText(item.dilemma, 92),
-    saferLine: '本地比较', keywords: readDecisionCriteria(item.decisionCriteria)?.map(criterion => criterion.label) || [],
-  } : buildSimulationArchive({
-    date: item.date,
-    dilemma: item.dilemma,
-    choiceA: item.choiceA,
-    choiceB: item.choiceB,
-    result: normalizeSimulationResult(item.result, item.choiceA, item.choiceB, item.usedFallback).result,
-  });
-
-  return (
-    <div className="min-w-0 rounded-[20px] border border-apple-border bg-apple-surface p-3 text-left">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-apple-gold">
-            <Scale size={12} />
-            {archive.dateLabel}
-          </div>
-          <div className="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-apple-text">{archive.summary}</div>
-        </div>
-        <div className="shrink-0 rounded-full bg-apple-gold/12 px-2 py-1 text-[13px] font-medium text-apple-gold">
-          {archive.saferLine}
-        </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-1">
-        {archive.keywords.slice(0, 3).map((keyword, index) => (
-          <span key={`${index}:${keyword}`} className="rounded-full bg-apple-bg px-2 py-0.5 text-[13px] text-apple-text-muted">
-            {keyword}
-          </span>
-        ))}
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="rounded-full border border-apple-border bg-apple-surface px-3 py-2 text-[13px] font-semibold text-apple-text-muted transition-transform active:scale-[0.98]"
-        >
-          回看
-        </button>
-        <button type="button" onClick={onReuse} className="rounded-full border border-apple-border bg-apple-surface px-2 py-2 text-[13px] font-semibold text-apple-text-muted">复用</button>
-        <button
-          type="button"
-          onClick={onContinue}
-          className="rounded-full bg-apple-text px-3 py-2 text-[13px] font-semibold text-apple-bg transition-transform active:scale-[0.98]"
-        >
-          继续问
-        </button>
-      </div>
-    </div>
-  );
+function SimulationHistoryCard({ item, onOpen }: { item: SimulationHistoryEntry; onOpen: () => void }) {
+  return <button type="button" onClick={onOpen} className="rail-simulator-history-row"><span className="min-w-0"><span className="block truncate text-sm font-medium">{compactSimulationText(item.choiceA,24)} / {compactSimulationText(item.choiceB,24)}</span><span className="rail-muted mt-1 block">{formatRecordDate(item.date)}{item.analysisKind === 'comparison' ? ' · 评分对比' : ''}</span></span><ArrowRight size={17} aria-hidden="true" /></button>;
 }
 
 function DecisionMatrix({ criteria, choiceA, choiceB, onChange }: { criteria: DecisionCriterion[]; choiceA: string; choiceB: string; onChange?: (criteria: DecisionCriterion[]) => void }) {
   const matrix = calculateDecisionMatrix(criteria);
   const update = (index: number, patch: Partial<DecisionCriterion>) => onChange?.(criteria.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : { ...item }));
-  const numberOptions = (start: number) => Array.from({ length: 6 - start }, (_, index) => start + index).map(value => <option key={value} value={value}>{value}</option>);
+  const importanceLabels = ['不考虑', '不太重要', '有些重要', '比较重要', '很重要', '最重要'];
+  const fitLabels = ['', '不符合', '较不符合', '一般', '比较符合', '很符合'];
 
   return (
-    <section className="mt-6 border-t border-apple-border pt-5" aria-label={onChange ? '本地选择比较' : '已保存的选择比较'}>
-      <h3 className="rail-section-title">{onChange ? '按你在意的标准比较' : '你当时的比较标准'}</h3>
-      <p className="rail-muted mt-2">重要程度 0–5，0 表示暂不考虑；自评分 1–5，分数越高表示越符合你的期待。</p>
+    <section className="mt-6 border-t border-apple-border pt-5" aria-label={onChange ? '个人偏好比较' : '已保存的选择比较'}>
+      <h2 className="rail-section-title">{onChange ? '补充你在意的标准' : '你当时的比较标准'}</h2>
+      <p className="rail-muted mt-2">按自己的感觉调整即可，只用于比较个人偏好。</p>
       {onChange ? <div className="mt-4 space-y-5">
         {criteria.map((item, index) => <fieldset key={item.id} className="min-w-0">
           <legend className="rail-muted mb-2">标准 {index + 1}</legend>
           <label className="block"><span className="sr-only">标准 {index + 1} 名称</span><input value={item.label} onChange={event => update(index, { label: event.target.value })} maxLength={30} className="rail-field" /></label>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <label className="rail-muted">重要程度<select aria-label={`${item.label || `标准 ${index + 1}`} 重要程度`} value={item.weight} onChange={event => update(index, { weight: Number(event.target.value) })} className="rail-field mt-1">{numberOptions(0)}</select></label>
-            <label className="rail-muted">A 线自评<select aria-label={`${item.label || `标准 ${index + 1}`} A 线自评分`} value={item.scoreA} onChange={event => update(index, { scoreA: Number(event.target.value) })} className="rail-field mt-1">{numberOptions(1)}</select></label>
-            <label className="rail-muted">B 线自评<select aria-label={`${item.label || `标准 ${index + 1}`} B 线自评分`} value={item.scoreB} onChange={event => update(index, { scoreB: Number(event.target.value) })} className="rail-field mt-1">{numberOptions(1)}</select></label>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <DecisionRange id={`${item.id}-weight`} label="有多重要" name={`${item.label || `标准 ${index + 1}`} 重要程度`} min={0} value={item.weight} valueText={importanceLabels[item.weight]} onChange={value => update(index, { weight: value })} />
+            <DecisionRange id={`${item.id}-a`} label="A 符合期待吗" name={`${item.label || `标准 ${index + 1}`} A 线自评分`} min={1} value={item.scoreA} valueText={fitLabels[item.scoreA]} onChange={value => update(index, { scoreA: value })} />
+            <DecisionRange id={`${item.id}-b`} label="B 符合期待吗" name={`${item.label || `标准 ${index + 1}`} B 线自评分`} min={1} value={item.scoreB} valueText={fitLabels[item.scoreB]} onChange={value => update(index, { scoreB: value })} />
           </div>
         </fieldset>)}
       </div> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">保存时的标准、权重和自评分</caption><thead><tr className="border-b border-apple-border"><th scope="col" className="py-2 pr-3">标准</th><th scope="col" className="py-2 pr-3">重要程度</th><th scope="col" className="py-2 pr-3">A</th><th scope="col" className="py-2">B</th></tr></thead><tbody>{criteria.map(item => <tr key={item.id} className="border-b border-apple-border"><th scope="row" className="py-3 pr-3 font-medium">{item.label}</th><td className="py-3 pr-3 tabular-nums">{item.weight}</td><td className="py-3 pr-3 tabular-nums">{item.scoreA}</td><td className="py-3 tabular-nums">{item.scoreB}</td></tr>)}</tbody></table></div>}
@@ -953,143 +695,30 @@ function DecisionMatrix({ criteria, choiceA, choiceB, onChange }: { criteria: De
           <p className="rail-muted mt-2">权重占比：{matrix.rows.map(item => `${item.label} ${(item.normalizedWeight * 100).toFixed(0)}%`).join(' · ')}</p>
         </>}
       </div>
-      <p className="rail-muted mt-3">计算方式：各项「重要程度 × 自评分」之和，除以总重要程度。结果只是你的偏好分，不是成功概率，也不代表未来会按分数发生。</p>
+      <details className="mt-3"><summary className="rail-simulator-disclosure"><span>分数是怎么算的？</span><ChevronDown size={16} aria-hidden="true" /></summary><p className="rail-muted">各项「重要程度 × 自评分」之和除以总重要程度。偏好分不是成功概率，也不代表未来会按分数发生。</p></details>
     </section>
   );
 }
 
-function SignalPill({ label, value, active }: { label: string; value: string; active?: boolean }) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-apple-border bg-apple-surface px-3 py-2">
-      <div className="text-[13px] font-medium text-apple-text-muted">{label}</div>
-      <div className={clsx('mt-0.5 truncate text-[15px] font-semibold', active ? 'text-apple-text' : 'text-apple-text-muted')}>
-        {value}
-      </div>
-    </div>
-  );
+function DecisionRange({ id, label, name, min, value, valueText, onChange }: { id: string; label: string; name: string; min: number; value: number; valueText: string; onChange: (value: number) => void }) {
+  return <div><label htmlFor={`simulation-${id}`} className="flex items-center justify-between gap-2 text-[13px]"><span>{label}</span><span className="text-apple-text-muted">{valueText}</span></label><input id={`simulation-${id}`} type="range" min={min} max={5} step={1} value={value} aria-label={name} aria-valuetext={valueText} onChange={event => onChange(Number(event.target.value))} className="rail-simulator-range" /></div>;
 }
 
-function ChoiceInput({
-  tone,
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  tone: 'a' | 'b';
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-}) {
-  const isA = tone === 'a';
-
-  return (
-    <div className="rounded-2xl border border-apple-border bg-apple-bg p-4">
-      <label htmlFor={`simulation-choice-${tone}`} className="mb-3 flex items-center gap-2 text-[15px] font-medium text-apple-text">
-        <span className={clsx(
-          'flex h-6 w-6 items-center justify-center rounded-full text-[13px]',
-          isA ? 'bg-apple-text text-apple-bg' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]',
-        )}>
-          {isA ? 'A' : 'B'}
-        </span>
-        {label}
-      </label>
-      <input id={`simulation-choice-${tone}`} required
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="rail-field"
-      />
-    </div>
-  );
+function ChoiceInput({ tone, label, value, onChange, placeholder, error }: { tone: 'a' | 'b'; label: string; value: string; onChange: (value: string) => void; placeholder: string; error: string | null }) {
+  return <div className="min-w-0"><label htmlFor={`simulation-choice-${tone}`} className="mb-2 block text-sm font-medium">{label}</label><input id={`simulation-choice-${tone}`} required type="text" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} aria-invalid={error && (!value.trim() || error.includes('不同')) ? true : undefined} aria-describedby={error ? 'simulation-form-error' : undefined} className="rail-field" /></div>;
 }
 
-function ResultBranch({
-  label,
-  result,
-  tone,
-}: {
-  label: string;
-  result: SimulationResult['choiceA'];
-  tone: 'a' | 'b';
-}) {
-  const risk = clampRisk(result.riskLevel);
-  const isA = tone === 'a';
-
-  return (
-    <div className={clsx(
-      'relative overflow-hidden rounded-[20px] border bg-apple-surface p-4',
-      isA ? 'border-apple-gold/28' : 'border-[#486B78]/30',
-    )}>
-
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={clsx('mb-2 inline-flex rounded-full px-2.5 py-1 text-[13px] font-semibold', isA ? 'bg-apple-text text-apple-bg' : 'bg-[#486B78] text-white dark:bg-[#8eb7c5] dark:text-[#071018]')}>
-            {label}
-          </div>
-          <h3 className="line-clamp-2 text-lg font-semibold leading-snug text-apple-text">{result.title}</h3>
-        </div>
-        {risk != null && <RiskDial value={risk} tone={tone} />}
-      </div>
-
-      <div className="space-y-3">
-        <ResultPoint icon={<Compass size={13} />} title="短期变化" content={result.shortTerm} tone={tone} />
-        <ResultPoint icon={<ArrowRight size={13} />} title="长期走向" content={result.longTerm} tone={tone} />
-        <ResultPoint icon={<CheckCircle2 size={13} />} title="命理契合" content={result.baziFit} tone={tone} />
-      </div>
-
-      <div className="mt-4 rounded-2xl border border-apple-border bg-apple-bg p-3">
-        <div className="mb-2 flex items-center justify-between text-[13px]">
-          <span className="flex items-center gap-1 font-medium text-apple-text-muted">
-            <AlertTriangle size={12} />
-            AI 风险提示
-          </span>
-          <span className={clsx('font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
-            {risk == null ? '信息不足，尚无提示分' : `${getRiskLabel(risk)} · ${risk} / 100`}
-          </span>
-        </div>
-        {risk != null && <div className="h-2 overflow-hidden rounded-full bg-apple-border/30">
-          <div
-            className={clsx('h-full rounded-full transition-all', isA ? 'bg-apple-gold' : 'bg-[#486B78] dark:bg-[#8eb7c5]')}
-            style={{ width: `${risk}%` }}
-          />
-        </div>}
-        <p className="rail-muted mt-2">生成内容仅供梳理，提示分不是概率，请核实费用、时间与退出条件。</p>
-      </div>
-    </div>
-  );
+function ResultBranch({ label, result }: { label: string; result: SimulationResult['choiceA'] }) {
+  const risk=clampRisk(result.riskLevel);
+  return <section className="rail-simulator-branch" aria-label={`${label}分析`}>
+    <p className="rail-muted">{label}</p><h3 className="mt-1 text-lg font-medium leading-7">{result.title}</h3>
+    <p className="rail-body mt-4">{result.shortTerm}</p>
+    <details className="mt-4"><summary className="rail-simulator-disclosure"><span>展开长期影响与注意点</span><ChevronDown size={16} aria-hidden="true" /></summary>
+      <div className="space-y-5 pb-2"><ResultPoint title="长期影响" content={result.longTerm} /><ResultPoint title="个人情况参考" content={result.baziFit} /><div><h4 className="text-sm font-medium">风险提示</h4><p className="rail-body mt-1">{risk == null ? '现有信息不足，先核实现实条件。' : `${getRiskLabel(risk)}，提示分 ${risk} / 100。`}</p><p className="rail-muted mt-2">提示分是主观参考，不是成功概率。</p></div></div>
+    </details>
+  </section>;
 }
 
-function ResultPoint({ icon, title, content, tone }: { icon: React.ReactNode; title: string; content: string; tone: 'a' | 'b' }) {
-  const isA = tone === 'a';
-  return (
-    <div className="rounded-2xl border border-apple-border bg-apple-bg p-3">
-      <div className={clsx('mb-1.5 flex items-center gap-1.5 text-[13px] font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
-        {icon}
-        {title}
-      </div>
-      <p className="rail-body">{content}</p>
-    </div>
-  );
-}
-
-function RiskDial({ value, tone }: { value: number; tone: 'a' | 'b' }) {
-  const isA = tone === 'a';
-  const color = isA ? 'var(--app-gold)' : '#486B78';
-
-  return (
-    <div
-      className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full p-[3px]"
-      style={{ background: `conic-gradient(${color} ${value * 3.6}deg, rgba(116,105,94,0.18) 0deg)` }}
-    >
-      <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-apple-surface text-center">
-        <span className="text-[13px] font-medium text-apple-text-muted">风险</span>
-        <span className={clsx('text-[15px] font-semibold', isA ? 'text-apple-gold' : 'text-[#486B78] dark:text-[#8eb7c5]')}>
-          {value}
-        </span>
-      </div>
-    </div>
-  );
+function ResultPoint({ title, content }: { title: string; content: string }) {
+  return <div><h4 className="text-sm font-medium">{title}</h4><p className="rail-body mt-1">{content}</p></div>;
 }

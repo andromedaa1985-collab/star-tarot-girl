@@ -27,6 +27,18 @@ export interface DecisionDraft {
   decisionCriteria?: DecisionCriterion[];
 }
 
+export function prepareSimulationDraft(input: DecisionDraft): DecisionDraft {
+  const choiceA = input.choiceA.trim();
+  const choiceB = input.choiceB.trim();
+  const dilemma = input.dilemma.trim() || (choiceA && choiceB ? `如何在「${choiceA}」与「${choiceB}」之间选择？` : '');
+  return {
+    dilemma,
+    choiceA,
+    choiceB,
+    ...(input.decisionCriteria !== undefined ? { decisionCriteria: input.decisionCriteria.map(item => ({ ...item })) } : {}),
+  };
+}
+
 export function createDefaultDecisionCriteria(): DecisionCriterion[] {
   return [
     { id: 'stability', label: '稳定性', weight: 3, scoreA: 3, scoreB: 3 },
@@ -65,7 +77,7 @@ export function calculateDecisionMatrix(criteria: DecisionCriterion[]) {
 }
 
 export function validateSimulationInput(input: DecisionDraft): string | null {
-  if (![input.dilemma, input.choiceA, input.choiceB].every(value => value.trim())) return '请填写当前岔路、选择 A 和选择 B。';
+  if (![input.choiceA, input.choiceB].every(value => value.trim())) return '请填写选择 A 和选择 B。';
   const comparable = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   if (comparable(input.choiceA) === comparable(input.choiceB)) return 'A、B 需要是不同的选择，才能进行比较。';
   return input.decisionCriteria ? getDecisionCriteriaError(input.decisionCriteria) : null;
@@ -81,6 +93,7 @@ export function createLocalComparisonEntry(input: DecisionDraft, metadata: { id:
   if (lastSavedSignature === decisionDraftSignature(input)) return { error: null, entry: null, duplicate: true };
   const error = validateSimulationInput(input) || (!input.decisionCriteria?.length ? '请填写比较标准后保存。' : null);
   if (error) return { error, entry: null, duplicate: false };
+  const prepared = prepareSimulationDraft(input);
   const matrix = calculateDecisionMatrix(input.decisionCriteria!);
   const conclusion = matrix.preference === 'tie' ? 'A、B 当前自评分相同。' : `${matrix.preference === 'a' ? 'A' : 'B'} 更符合当前填写的偏好。`;
   return {
@@ -88,7 +101,7 @@ export function createLocalComparisonEntry(input: DecisionDraft, metadata: { id:
     duplicate: false,
     entry: {
       ...metadata,
-      dilemma: input.dilemma.trim(), choiceA: input.choiceA.trim(), choiceB: input.choiceB.trim(),
+      dilemma: prepared.dilemma, choiceA: prepared.choiceA, choiceB: prepared.choiceB,
       decisionCriteria: input.decisionCriteria!.map(item => ({ ...item, label: item.label.trim() })),
       result: null,
       analysisKind: 'comparison' as const,

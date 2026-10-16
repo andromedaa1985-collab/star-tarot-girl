@@ -39,6 +39,8 @@
 
 新页面复用 `PageHeader` 和 `rail-page`、`rail-page-content`、`rail-panel`、`rail-field`、`rail-button`、`rail-button-secondary`。主要按钮和表单字段至少 48px 高；字段使用 16px 字号，避免 iPhone 聚焦自动放大。基础组件放在 Tailwind 的 components layer，允许页面 utility 调整布局，优先保证标题、说明与操作的顺序清楚。
 
+选择沙盘默认只要求填写 A、B 两个选择，主按钮紧接输入框，使用 `src/simulator.css` 中适配日夜主题的青绿色语义变量，保持至少 54px 高。背景选填并默认折叠；精确模式放在主按钮下方，默认关闭，开启后才展示标准、重要程度和符合程度滑块。关闭时保留已调的评分，但不把它们加入分析。示例与历史记录放在页面下方，按需展开。结果先显示下一步建议与 A/B 的简短对照，长期影响、风险和评分依据可完整展开；从结果返回时将焦点交回第一个选择。
+
 弹窗使用原生 `dialog`，或复用 `useDialogFocus` 管理焦点、Escape 与焦点恢复。表单用可见 label，图标按钮提供名称，选择按钮公开 `aria-pressed`。输入法确认候选字时不得触发提交。
 
 日记保留银色月牙、细轨道与烟灰玻璃书页的原生 SVG 图形。塔罗首页的 SVG 构图直接展示新版牌面与牌背，图形隐藏于辅助技术，SVG 定义按实例隔离，不使用持续动画。动效只服务于状态反馈，支持 `prefers-reduced-motion`；背景色洗与材质模糊保持静态。

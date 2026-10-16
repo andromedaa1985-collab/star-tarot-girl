@@ -3,6 +3,7 @@
 @import "./design-system.css";
 @import "./motion.css";
 @import "./deck.css";
+@import "./simulator.css";
 
 :focus-visible {
   outline: 2px solid var(--app-gold);

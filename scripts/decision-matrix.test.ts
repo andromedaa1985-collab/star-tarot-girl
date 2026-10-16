@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendSimulationHistory, calculateDecisionMatrix, createDefaultDecisionCriteria, createLocalComparisonEntry, decisionDraftSignature, getSimulationAction, hasDifferentDecisionDraft, normalizeSimulationResult, readDecisionCriteria, validateSimulationInput } from '../src/lib/decisionMatrix';
+import { appendSimulationHistory, calculateDecisionMatrix, createDefaultDecisionCriteria, createLocalComparisonEntry, decisionDraftSignature, getSimulationAction, hasDifferentDecisionDraft, normalizeSimulationResult, prepareSimulationDraft, readDecisionCriteria, validateSimulationInput } from '../src/lib/decisionMatrix';
 
 test('weighted preference reflects the users own importance and ratings', () => {
   const criteria = [
@@ -37,8 +37,34 @@ test('zero weight and invalid ratings produce actionable errors without NaN tota
 test('simulation rejects blank and equivalent options before any generation', () => {
   const base = { dilemma: '是否换工作', choiceA: '留在公司', choiceB: '换新工作', decisionCriteria: createDefaultDecisionCriteria() };
   assert.equal(validateSimulationInput(base), null);
-  assert.match(validateSimulationInput({ ...base, dilemma: '  ' })!, /填写/);
+  assert.equal(validateSimulationInput({ ...base, dilemma: '  ' }), null);
+  assert.match(validateSimulationInput({ ...base, choiceA: '  ' })!, /选择 A 和选择 B/);
+  assert.match(validateSimulationInput({ ...base, choiceB: '  ' })!, /选择 A 和选择 B/);
   assert.match(validateSimulationInput({ ...base, choiceA: 'Stay   Here', choiceB: ' stay here ' })!, /不同/);
+});
+
+test('two choices alone can generate without invented criteria or ratings', () => {
+  const input = { dilemma: '  ', choiceA: '  留在公司 ', choiceB: ' 换新工作  ' };
+  assert.equal(validateSimulationInput(input), null);
+  assert.deepEqual(getSimulationAction(true, input), { type: 'generate' });
+  assert.deepEqual(getSimulationAction(false, input), { type: 'upgrade' });
+  const prepared = prepareSimulationDraft(input);
+  assert.deepEqual(prepared, { dilemma: '如何在「留在公司」与「换新工作」之间选择？', choiceA: '留在公司', choiceB: '换新工作' });
+  assert.equal('decisionCriteria' in prepared, false);
+  assert.equal(input.dilemma, '  ');
+  assert.equal(input.choiceA, '  留在公司 ');
+});
+
+test('draft preparation trims supplied context and snapshots only explicitly supplied criteria', () => {
+  const input = { dilemma: '  是否换工作  ', choiceA: ' 留在公司 ', choiceB: ' 换新工作 ', decisionCriteria: createDefaultDecisionCriteria() };
+  const prepared = prepareSimulationDraft(input);
+  assert.equal(prepared.dilemma, '是否换工作');
+  assert.equal(prepared.choiceA, '留在公司');
+  assert.equal(prepared.choiceB, '换新工作');
+  assert.deepEqual(prepared.decisionCriteria, input.decisionCriteria);
+  input.decisionCriteria[0].scoreA = 5;
+  assert.equal(prepared.decisionCriteria![0].scoreA, 3);
+  assert.ok(validateSimulationInput({ ...input, decisionCriteria: [] }));
 });
 
 test('AI action preserves the paywall before validating free local-comparison input', () => {
@@ -57,6 +83,16 @@ test('request signature detects edits to both input and comparison settings', ()
   assert.equal(decisionDraftSignature({ ...draft, decisionCriteria: draft.decisionCriteria.map(item => ({ ...item })) }), captured);
   assert.notEqual(decisionDraftSignature({ ...draft, choiceB: 'C' }), captured);
   assert.notEqual(decisionDraftSignature({ ...draft, decisionCriteria: draft.decisionCriteria.map((item, index) => index === 1 ? { ...item, scoreA: 5 } : item) }), captured);
+});
+
+test('raw request signatures keep whitespace and optional context distinct after preparation', () => {
+  const input = { dilemma: '', choiceA: ' 留下 ', choiceB: ' 离开 ' };
+  const signature = decisionDraftSignature(input);
+  const prepared = prepareSimulationDraft(input);
+  assert.notEqual(decisionDraftSignature(prepared), signature);
+  assert.equal(decisionDraftSignature(input), signature);
+  assert.notEqual(decisionDraftSignature({ ...input, dilemma: ' ' }), signature);
+  assert.notEqual(decisionDraftSignature({ ...input, choiceA: '留下' }), signature);
 });
 
 test('reusing history distinguishes an empty form, equal input and meaningful changed drafts', () => {
@@ -141,11 +177,25 @@ test('saving tied local ratings states the tie without an AI forecast', () => {
 
 test('local save rejects missing input, duplicate choices, absent criteria and zero weights', () => {
   const base = { dilemma: '选择', choiceA: 'A', choiceB: 'B', decisionCriteria: createDefaultDecisionCriteria() };
-  for (const invalid of [{ ...base, dilemma: ' ' }, { ...base, choiceB: ' a ' }, { ...base, decisionCriteria: undefined }, { ...base, decisionCriteria: base.decisionCriteria.map(item => ({ ...item, weight: 0 })) }]) {
+  for (const invalid of [{ ...base, choiceA: ' ' }, { ...base, choiceB: ' ' }, { ...base, choiceB: ' a ' }, { ...base, decisionCriteria: undefined }, { ...base, decisionCriteria: base.decisionCriteria.map(item => ({ ...item, weight: 0 })) }]) {
     const saved = createLocalComparisonEntry(invalid, { id: 'invalid', date: '2024-01-01' });
     assert.ok(saved.error);
     assert.equal(saved.entry, null);
   }
+});
+
+test('local comparison with optional context saves an honest title and guards repeated raw drafts', () => {
+  const input = { dilemma: '  ', choiceA: ' 留下 ', choiceB: ' 离开 ', decisionCriteria: createDefaultDecisionCriteria() };
+  const signature = decisionDraftSignature(input);
+  const saved = createLocalComparisonEntry(input, { id: 'optional-context', date: '2024-01-01' });
+  assert.equal(saved.error, null);
+  assert.equal(saved.entry!.dilemma, '如何在「留下」与「离开」之间选择？');
+  assert.equal(saved.entry!.choiceA, '留下');
+  assert.equal(saved.entry!.choiceB, '离开');
+  assert.equal(saved.entry!.analysisKind, 'comparison');
+  const repeated = createLocalComparisonEntry(input, { id: 'repeat', date: '2024-01-01' }, signature);
+  assert.equal(repeated.duplicate, true);
+  assert.equal(repeated.entry, null);
 });
 
 test('synchronous signature guard saves one entry for repeated clicks and accepts a changed comparison', () => {

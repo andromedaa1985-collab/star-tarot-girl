@@ -69,6 +69,7 @@ export interface UserProfile {
 }
 
 export interface SimulatorState {
+  precisionMode?: boolean;
   dilemma: string;
   choiceA: string;
   choiceB: string;
