@@ -32,7 +32,7 @@ const privacyPoints = [
   {
     icon: <Cloud size={18} />,
     title: '登录后自动同步到你的账户',
-    desc: '登录并载入账户存档后，星轨会定期以及在页面离开时尝试上传当前存档，包括日记、牌迹和个人档案。你也可以在设置中手动同步或恢复。未登录时记录保存在本机。',
+    desc: '登录并载入账户存档后，塔罗少女会定期以及在页面离开时尝试上传当前存档，包括日记、牌迹和个人档案。你也可以在设置中手动同步或恢复。未登录时记录保存在本机。',
   },
   {
     icon: <Shield size={18} />,
@@ -78,7 +78,7 @@ export default function Privacy() {
             <div className="min-w-0">
               <div className="text-base font-semibold text-apple-text">你的记录不是用来打扰你的</div>
               <p className="mt-2 text-base leading-[1.85] text-apple-text-muted">
-                星轨塔罗少女会用你的历史记录生成更贴近你的复盘，但不会把模型密钥放在前端，也不会把本机存档默认公开。
+                塔罗少女会用你的历史记录生成更贴近你的复盘，但不会把模型密钥放在前端，也不会把本机存档默认公开。
               </p>
             </div>
           </div>

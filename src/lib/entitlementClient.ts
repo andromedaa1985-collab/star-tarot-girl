@@ -20,7 +20,7 @@ export interface ApplyOrderResult {
 function requireAccountToken() {
   const session = getStoredAccountSession();
   if (!session?.token) {
-    throw new Error('请先登录星轨账户，再领取会员、兑换码或付费权益。');
+    throw new Error('请先登录塔罗少女账户，再领取会员、兑换码或付费权益。');
   }
   return session.token;
 }

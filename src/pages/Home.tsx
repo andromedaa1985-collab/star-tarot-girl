@@ -519,7 +519,7 @@ const buildDailyFortunePrompt = (question: string, cards: DrawnCard[], isInterne
 用户原始输入：${question}
 今天抽到的塔罗牌：${formatCards(cards)}
 
-请写一份中文“今日运势”。它是星轨塔罗少女每天递给用户的一小段陪伴：温柔、安慰、细致，但仍然清醒。
+请写一份中文“今日运势”。它是塔罗少女每天递给用户的一小段陪伴：温柔、安慰、细致，但仍然清醒。
 ${DAILY_FORTUNE_VOICE_RULES}
 
 回答目标约 380 个中文字符，通常 320 到 430 字；牌意复杂时最多 470 字，不要为了显得丰满而硬加内容。分成 3 到 4 个自然短段落，不要使用 Markdown 星号、加粗符号、井号标题或编号清单。结尾必须是一句完整的话；如果快到长度上限，优先删掉中间细节，也不要把句子停在一半。
@@ -546,7 +546,7 @@ const buildDailyFortuneDeepPrompt = (
 今天牌面：${reading.cards}
 免费版解读：${sourceAnswer || reading.summary}
 
-请继续写一份更完整的“今日深解”。语气是星轨塔罗少女：温柔、会安慰人，但不空泛；像陪用户把一天慢慢铺开。
+请继续写一份更完整的“今日深解”。语气是塔罗少女：温柔、会安慰人，但不空泛；像陪用户把一天慢慢铺开。
 不要重复免费版，也不要重新抽牌。不要使用 Markdown 星号、加粗、井号标题或编号清单。
 ${DAILY_FORTUNE_VOICE_RULES}
 
@@ -662,7 +662,7 @@ const buildCurrentReadingPrompt = (
 ${currentContext}
 
 请不要重新抽牌，也不要假装出现了新牌。你现在是在和用户继续对话，不是在重新生成一份报告。
-语气像星轨塔罗少女：温柔、会接话、能安慰，但不要机械套模板。不要使用 Markdown 星号、加粗符号或井号标题。
+语气像塔罗少女：温柔、会接话、能安慰，但不要机械套模板。不要使用 Markdown 星号、加粗符号或井号标题。
 
 如果用户是在问刚才这张牌、牌意、为什么或怎么办，就沿着已有牌面继续解释。
 如果用户只是在表达情绪、闲聊、吐槽、感谢、补充近况，先像真人一样回应这句话，再轻轻把它和上一轮牌面或今天的小动作接起来；不要硬写“核心判断/牌面关系/今天先做”。
@@ -1389,7 +1389,7 @@ const buildMemoryRecall = (input: {
 
   return {
     title: '先留下一条属于你的线索',
-    desc: '抽一张今日牌、写一篇日记，或者建一份档案。之后星轨就能沿着你的上下文继续陪你看。',
+    desc: '抽一张今日牌、写一篇日记，或者建一份档案。之后塔罗少女就能沿着你的上下文继续陪你看。',
     cta: '抽今日牌',
     prompt: '今日运势',
     meta: '新档案',
@@ -1438,6 +1438,7 @@ export default function Home() {
     engagement,
     setEngagement,
     guardianMessages,
+    awardConversationCard,
     setAppEvents,
   } = useAppContext();
 
@@ -1625,7 +1626,7 @@ export default function Home() {
   const weeklyReportText = useMemo(() => {
     if (weekReadings.length === 0) return '本周还没有足够牌迹，先用今日牌留下第一条轨迹。';
     if (!plusActive && weekReadings.length >= 3) {
-      return `本周已有 ${weekReadings.length} 次牌迹。7 日轨迹报告会整理：最常出现的情绪、反复卡住的主题，以及星轨给你的本周关键词。`;
+      return `本周已有 ${weekReadings.length} 次牌迹。7 日轨迹报告会整理：最常出现的情绪、反复卡住的主题，以及塔罗少女给你的本周关键词。`;
     }
     const themeBuckets = [
       { label: '感情关系', keywords: ['感情', '恋爱', '喜欢', '关系', '复合', '桃花'] },
@@ -1664,7 +1665,7 @@ export default function Home() {
   const weeklyReviewText = useMemo(() => {
     if (weeklyMaterialCount === 0) return '本周还没有足够线索，先抽一张今日牌，留下第一条轨迹。';
     if (!plusActive && weeklyReviewReady) {
-      return `本周已经沉淀 ${weeklyMaterialCount} 条材料。Plus 会生成完整 7 日轨迹报告：你这一周最常出现的情绪、反复卡住的主题，以及星轨给你的本周关键词。`;
+      return `本周已经沉淀 ${weeklyMaterialCount} 条材料。Plus 会生成完整 7 日轨迹报告：你这一周最常出现的情绪、反复卡住的主题，以及塔罗少女给你的本周关键词。`;
     }
     const diaryLine = weekDiaries[0] ? `最近日记是${getMoodLabel(weekDiaries[0].mood)}` : '日记线索还在等待补充';
     const guardianLine = weekGuardianMessages[0] ? '守护回应已经纳入复盘' : '守护回应还未形成稳定线索';
@@ -1954,7 +1955,7 @@ export default function Home() {
       }
       if (isInvalidAccountSessionResponse(response.status, data?.error?.code)) {
         navigate('/auth?next=/app&reauth=1');
-        const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
+        const handled = new Error(data?.error?.message || '请先登录塔罗少女账户。') as Error & { handledEntitlementError?: boolean };
         handled.handledEntitlementError = true;
         throw handled;
       }
@@ -1967,7 +1968,7 @@ export default function Home() {
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '今日深解请求失败');
       const choice = data?.choices?.[0];
       const aiAnswer = choice?.message?.content;
-      if (!aiAnswer) throw new Error('今日深解返回为空');
+      if (typeof aiAnswer !== 'string' || !cleanTarotAnswer(aiAnswer)) throw new Error('今日深解返回为空');
       applyServerEntitlements(data?.entitlement);
       answer = choice?.finish_reason === 'length' ? completeTruncatedTarotAnswer(aiAnswer, true) : aiAnswer;
     } catch (error: any) {
@@ -2017,6 +2018,10 @@ export default function Home() {
       const next = new Set(current);
       next.add(sourceMessage.id);
       return next;
+    });
+    awardConversationCard({
+      turnId: userMessage.id, channel: 'daily-deep', text: answer,
+      usedFallback: usedFallbackAnswer, regeneration: Boolean(replaceMessageId), ownerId: accountSession.user.id,
     });
     addExp(12);
     setIsThinking(false);
@@ -2160,7 +2165,7 @@ export default function Home() {
       if (isInvalidAccountSessionResponse(response.status, data?.error?.code)) {
         if (accountSession?.token) {
           navigate('/auth?next=/app&reauth=1');
-          const handled = new Error(data?.error?.message || '请先登录星轨账户。') as Error & { handledEntitlementError?: boolean };
+          const handled = new Error(data?.error?.message || '请先登录塔罗少女账户。') as Error & { handledEntitlementError?: boolean };
           handled.handledEntitlementError = true;
           throw handled;
         }
@@ -2175,7 +2180,7 @@ export default function Home() {
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '塔罗解读请求失败');
       const choice = data?.choices?.[0];
       const aiAnswer = choice?.message?.content;
-      if (!aiAnswer) throw new Error('塔罗解读返回为空');
+      if (typeof aiAnswer !== 'string' || !cleanTarotAnswer(aiAnswer)) throw new Error('塔罗解读返回为空');
       applyServerEntitlements(data?.entitlement);
       answer = choice?.finish_reason === 'length' ? completeTruncatedTarotAnswer(aiAnswer, isDailyFortune) : aiAnswer;
     } catch (error: any) {
@@ -2225,6 +2230,10 @@ export default function Home() {
     setMessages((prev) => options.regeneration
       ? replaceTarotAnswer(prev, options.regeneration.message.id, aiMessage)
       : [...prev, aiMessage]);
+    awardConversationCard({
+      turnId: userMessage.id, channel: 'tarot', text: answer,
+      usedFallback: usedFallbackAnswer, regeneration: Boolean(options.regeneration), ownerId: accountSession?.user.id || null,
+    });
     if (shouldDraw) {
       setTarotReadings((prev) => appendTarotReading(prev,
           {
@@ -2403,7 +2412,7 @@ export default function Home() {
 
     ctx.fillStyle = '#F4CF83';
     ctx.font = '800 46px sans-serif';
-    ctx.fillText('星轨牌迹', 92, 120);
+    ctx.fillText('塔罗少女牌迹', 92, 120);
     ctx.fillStyle = 'rgba(255,255,255,0.72)';
     ctx.font = '600 30px sans-serif';
     ctx.fillText(new Date(shareReading.date).toLocaleDateString('zh-CN'), 92, 168);
@@ -2431,14 +2440,14 @@ export default function Home() {
     drawCanvasLines(ctx, cardLines, 500, questionBottom + 82, 44);
     ctx.fillStyle = '#F4CF83';
     ctx.font = '800 28px sans-serif';
-    ctx.fillText('星轨解读', 92, summaryTop - 44);
+    ctx.fillText('塔罗少女解读', 92, summaryTop - 44);
     ctx.fillStyle = 'rgba(255,255,255,0.78)';
     ctx.font = '500 30px sans-serif';
     drawCanvasLines(ctx, summaryLines, 92, summaryTop, 52);
 
     ctx.fillStyle = 'rgba(244,207,131,0.58)';
     ctx.font = '600 24px sans-serif';
-    ctx.fillText('星轨 AstroRail · 每一次牌迹都值得完整留下', 92, canvasHeight - 76);
+    ctx.fillText('塔罗少女 Tarot Girl · 每一次牌迹都值得完整留下', 92, canvasHeight - 76);
 
     try {
       const cardX = 86;
@@ -2607,7 +2616,7 @@ export default function Home() {
 
       ctx.fillStyle = '#F4CF83';
       ctx.font = '800 48px sans-serif';
-      ctx.fillText('星轨牌迹', 86, 122);
+      ctx.fillText('塔罗少女牌迹', 86, 122);
       ctx.fillStyle = 'rgba(255,255,255,0.70)';
       ctx.font = '600 28px sans-serif';
       ctx.fillText(new Date(shareReading.date).toLocaleDateString('zh-CN'), 86, 168);
@@ -2680,27 +2689,27 @@ export default function Home() {
 
       ctx.fillStyle = '#F4CF83';
       ctx.font = '800 28px sans-serif';
-      ctx.fillText('星轨解读', 92, posterSummaryTop - 44);
+      ctx.fillText('塔罗少女解读', 92, posterSummaryTop - 44);
       ctx.fillStyle = 'rgba(255,255,255,0.80)';
       ctx.font = '500 30px sans-serif';
       drawCanvasLines(ctx, posterSummaryLines, 92, posterSummaryTop, 52);
 
       ctx.fillStyle = 'rgba(244,207,131,0.62)';
       ctx.font = '700 24px sans-serif';
-      ctx.fillText('星轨 AstroRail · 每一次牌迹都值得完整留下', 86, posterHeight - 76);
+      ctx.fillText('塔罗少女 Tarot Girl · 每一次牌迹都值得完整留下', 86, posterHeight - 76);
       ctx.fillStyle = 'rgba(255,255,255,0.22)';
       ctx.font = '500 18px sans-serif';
-      ctx.fillText('生成于你的星轨档案', 86, posterHeight - 43);
+      ctx.fillText('生成于你的个人档案', 86, posterHeight - 43);
 
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('分享图生成失败');
-      const fileName = `astrorail-tarot-${Date.now()}.png`;
+      const fileName = `tarot-girl-tarot-${Date.now()}.png`;
       const sharedNatively = await shareImageWithNativeSheet({
         blob,
         fileName,
         title: shareHook.headline,
         text: `${shareHook.state}｜${shareHook.subtitle}`,
-        dialogTitle: '分享星轨牌迹',
+        dialogTitle: '分享塔罗少女牌迹',
       });
       if (sharedNatively) return;
 
@@ -2789,7 +2798,7 @@ export default function Home() {
           }}
           onKeyDown={handleComposerKeyDown}
           disabled={isThinking}
-          aria-label="想问星轨的问题"
+          aria-label="想问塔罗少女的问题"
           placeholder="说说你现在最想问的事"
           className="h-12 w-full rounded-xl bg-transparent pl-1 pr-14 text-base text-apple-text placeholder:text-apple-text-muted outline-none"
         />
@@ -2824,7 +2833,7 @@ export default function Home() {
           'relative h-full w-full cursor-grab touch-none active:cursor-grabbing',
           docked && 'drop-shadow-[0_18px_24px_rgba(0,0,0,0.22)]',
         )}
-        aria-label="星轨塔罗少女桌宠，点击打开快捷菜单，可拖动"
+        aria-label="塔罗少女桌宠，点击打开快捷菜单，可拖动"
         aria-expanded={showPetMenu}
         role="button"
         tabIndex={0}
@@ -2836,7 +2845,7 @@ export default function Home() {
             outfit={activeOutfitId}
             expression={activePetExpression}
             action={activePetAction}
-            label="星轨塔罗少女 Q 版桌宠"
+            label="塔罗少女 Q 版桌宠"
           />
         </motion.div>
       </div>
@@ -2849,7 +2858,7 @@ export default function Home() {
         <>
           <motion.button
             type="button"
-            aria-label="关闭星轨桌宠菜单"
+            aria-label="关闭塔罗少女桌宠菜单"
             className="fixed inset-0 z-[58] cursor-default bg-transparent"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2866,7 +2875,7 @@ export default function Home() {
           >
             <div className="mb-2 flex items-center justify-between gap-3 px-1">
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-[#8f5e1b] dark:text-[#f4cf83]">星轨桌宠</div>
+                <div className="text-[13px] font-semibold text-[#8f5e1b] dark:text-[#f4cf83]">塔罗少女桌宠</div>
                 <div className="mt-0.5 truncate text-xs text-apple-text-muted">点我就能去常用入口</div>
               </div>
               <button
@@ -3007,7 +3016,7 @@ export default function Home() {
       <header className="rail-home-header">
         {conversationOpen ? (
           <button type="button" className="min-h-11 rounded-xl px-2 text-sm text-apple-text-muted hover:bg-apple-surface-hover" onClick={() => { setConversationOpen(false); setFollowUpReadingId(null); setShowComposerTools(false); setShowPetMenu(false); scrollRef.current?.scrollTo({ top: 0 }); }}>‹ 返回今日</button>
-        ) : <span className="rail-home-label"><Sparkles size={15} aria-hidden="true" />今日星轨</span>}
+        ) : <span className="rail-home-label"><Sparkles size={15} aria-hidden="true" />今日塔罗</span>}
         <button type="button" onClick={() => setShowReadingLog(true)} className="rail-history-button flex min-h-11 items-center gap-2 px-4 text-sm text-apple-text-muted hover:bg-apple-surface-hover"><History size={17} aria-hidden="true" />牌迹</button>
       </header>
 
@@ -3092,7 +3101,7 @@ export default function Home() {
 
           {conversationOpen && <div className="relative">
             <DrawCardAnimation active={isDrawingCards} image={cardImage} cards={drawingCards} compact />
-            {isThinking && <p role="status" className="flex items-center justify-center gap-2 py-3 text-sm text-apple-text-muted"><Loader2 size={16} className="animate-spin" aria-hidden="true" />星轨正在解读…</p>}
+            {isThinking && <p role="status" className="flex items-center justify-center gap-2 py-3 text-sm text-apple-text-muted"><Loader2 size={16} className="animate-spin" aria-hidden="true" />塔罗少女正在解读…</p>}
           </div>}
 
           {historyQuotaNotice && (
@@ -3517,7 +3526,7 @@ function DrawCardAnimation({
     cards.length > 0
       ? cards.slice(0, 5)
       : (images.length > 0 ? images : [fallbackCard]).slice(0, 5).map((cardSrc, index) => ({
-          name: index === 0 ? '星轨牌面' : `第 ${index + 1} 张`,
+          name: index === 0 ? '塔罗少女牌面' : `第 ${index + 1} 张`,
           position: '正位' as const,
           image: cardSrc,
         }));
@@ -3775,7 +3784,7 @@ function UpgradePromptModal({
                   <div className="text-base font-black text-apple-text">{paidWhy.title}</div>
                   <p className="mt-1 text-sm leading-relaxed text-apple-text-muted">{paidWhy.desc}</p>
                   <p className="mt-2 text-xs leading-relaxed text-apple-text-muted">
-                    星轨不是只给一次答案，而是把你反复出现的情绪、问题和选择慢慢记下来。
+                    塔罗少女不是只给一次答案，而是把你反复出现的情绪、问题和选择慢慢记下来。
                   </p>
                 </div>
               </div>
@@ -3864,7 +3873,7 @@ function WardrobeModal({
           >
             <div className="flex items-center justify-between border-b border-apple-border px-5 py-4">
               <div>
-                <div className="text-lg font-black text-apple-text">星轨衣柜</div>
+                <div className="text-lg font-black text-apple-text">塔罗少女衣柜</div>
                 <div className="text-xs text-apple-text-muted">羁绊升级会自动解锁新形象，也可以手动换装。</div>
               </div>
               <button onClick={onClose} className="rounded-full bg-apple-surface-hover p-2 text-apple-text-muted">
@@ -4245,7 +4254,7 @@ function ReadingLog({
                   <Sparkles size={28} className="mx-auto mb-3 text-[#B97B28] dark:text-[#F4CF83]" />
                   <div className="font-bold text-apple-text">还没有牌迹</div>
                   <p className="mt-2 text-sm leading-relaxed text-apple-text-muted">
-                    抽一张今日牌，星轨会帮你把问题、牌面和解读都留住。
+                    抽一张今日牌，塔罗少女会帮你把问题、牌面和解读都留住。
                   </p>
                 </div>
               ) : filteredReadings.length === 0 ? (

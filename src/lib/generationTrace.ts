@@ -1,3 +1,5 @@
+import { normalizeCollectionDrops } from './collectionCards';
+
 export type GenerationKind =
   | 'tarot'
   | 'tarot_followup'
@@ -104,6 +106,8 @@ function normalizeArray(value: unknown, kind: GenerationKind, onlyAiMessages = f
 
 export function normalizeGeneratedStorageValue(key: string, value: unknown) {
   switch (key) {
+    case 'collectionDrops':
+      return normalizeCollectionDrops(value);
     case 'tarotReadings':
       return normalizeArray(value, 'tarot');
     case 'reviewHistory':

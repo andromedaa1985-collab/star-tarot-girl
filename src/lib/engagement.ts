@@ -361,7 +361,7 @@ export function getSoftConversionTrigger(input: {
   if (input.activeDays >= 4 && input.tarotReadings + input.diaryEntries > 0) {
     return {
       id: 'day_4',
-      title: '星轨已经陪你回访了几天',
+      title: '塔罗少女已经陪你回访了几天',
       desc: `连续沉淀到第 ${input.activeDays} 天后，长期记忆和守护回访会比单次占卜更有用。`,
       cta: '查看 Plus 价值',
       reason: 'history',

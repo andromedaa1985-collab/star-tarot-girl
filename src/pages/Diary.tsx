@@ -320,7 +320,7 @@ export default function Diary() {
 
     if (scopedDiaryEntries.length === 0) {
       setReviewFailed(false);
-      setReviewResult(`${reviewWindow.label}还没有日记可复盘。先写一篇，星轨才能看见这段时间真正发生了什么。`);
+      setReviewResult(`${reviewWindow.label}还没有日记可复盘。先写一篇，塔罗少女才能看见这段时间真正发生了什么。`);
       setReviewResultMeta({
         rangeLabel: reviewWindow.label,
         startDate: reviewWindow.startDate,

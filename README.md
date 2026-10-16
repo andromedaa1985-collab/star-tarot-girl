@@ -1,4 +1,4 @@
-# 星轨塔罗少女 · Railstar
+# 塔罗少女 · Tarot Girl
 
 中文塔罗陪伴应用，围绕每日运势、牌迹、日记复盘和个人档案展开。前端使用 React、TypeScript 和 Vite；Express 提供账户、AI、权益和支付接口。
 

@@ -22,7 +22,7 @@ const FEATURE_COPY: Record<PremiumFeature, { title: string; eyebrow: string; des
     gains: ['长期记忆', '多轮推演', '把分散记录串成一条线'],
   },
   guardian: {
-    title: '星轨守护',
+    title: '少女守护',
     eyebrow: '更像有人一直记得你',
     desc: '守护会持续读取你的日记、牌迹与命理档案，把零散情绪整理成更温柔的长期陪伴。',
     cta: '开通 Plus',
@@ -86,7 +86,7 @@ export function FeatureGate({
   const memoryCount = tarotReadings.length + diaryEntries.length + profiles.length + simulationHistory.length;
   const memoryHint =
     memoryCount > 0
-      ? `你已经留下 ${memoryCount} 份线索。解锁后，星轨会把它们接成更完整的上下文。`
+      ? `你已经留下 ${memoryCount} 份线索。解锁后，塔罗少女会把它们接成更完整的上下文。`
       : '先解锁一块长期底稿，之后每一次追问都不用重新铺垫。';
 
   return (

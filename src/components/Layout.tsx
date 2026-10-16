@@ -28,7 +28,7 @@ export default function Layout() {
       <motion.aside layoutScroll className="rail-sidebar">
         <NavLink to="/app" className="rail-sidebar-brand">
           <Sparkles size={26} className="text-apple-gold" aria-hidden="true" />
-          <span><strong>星轨</strong></span>
+          <span><strong>塔罗少女</strong></span>
         </NavLink>
         <LayoutGroup id="rail-desktop-navigation"><nav aria-label="主导航">
           {navItems.map(item => <React.Fragment key={item.to}><NavItem {...item} /></React.Fragment>)}

@@ -28,7 +28,7 @@ export function AccountSessionChangeGuard({ children }: { children: ReactNode })
     <dialog ref={dialogRef} aria-label="正在安全切换账户" onCancel={(event) => event.preventDefault()} className="m-auto w-[calc(100%_-_32px)] max-w-sm rounded-2xl border border-apple-border bg-apple-surface p-6 text-apple-text backdrop:bg-black/45">
       <div role="status" aria-live="polite" aria-busy="true">
         <p className="text-lg font-semibold">正在安全切换账户</p>
-        <p className="mt-3 text-[15px] leading-7 text-apple-text-muted">{recoveryError || '正在载入账户的记录，请稍候。若切换中断，星轨会恢复原来的存档。'}</p>
+        <p className="mt-3 text-[15px] leading-7 text-apple-text-muted">{recoveryError || '正在载入账户的记录，请稍候。若切换中断，塔罗少女会恢复原来的存档。'}</p>
       </div>
     </dialog>
   </>;

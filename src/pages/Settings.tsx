@@ -116,7 +116,7 @@ export default function Settings() {
     } catch (error: any) {
       setBackupNotice({
         type: 'error',
-        message: error?.message || '导入失败，请确认选择的是星轨存档文件。',
+        message: error?.message || '导入失败，请确认选择的是塔罗少女存档文件。',
       });
     } finally {
       if (!reloading) await releaseSync?.();
@@ -267,7 +267,7 @@ export default function Settings() {
   return (
     <div className="rail-page relative">
       <div className="rail-page-content">
-      <PageHeader eyebrow="你的星轨" title="设置" description="管理账号、云端同步与本机存档。" backTo="/app/profile" />
+      <PageHeader eyebrow="你的账户" title="设置" description="管理账号、云端同步与本机存档。" backTo="/app/profile" />
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
@@ -354,7 +354,7 @@ export default function Settings() {
                       icon={<UserRound size={15} />}
                       value={accountDisplayName}
                       onChange={setAccountDisplayName}
-                      placeholder="昵称，例如：星轨旅人"
+                      placeholder="昵称，例如：塔罗旅人"
                     />
                   )}
                   <AccountInput
@@ -403,7 +403,7 @@ export default function Settings() {
                   <Database size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-base font-semibold text-apple-text">星轨存档备份</div>
+                  <div className="text-base font-semibold text-apple-text">塔罗少女存档备份</div>
                   <p className="mt-2 text-[15px] leading-[1.8] text-apple-text-muted">
                     保存日记、塔罗记录、八字档案、沙盘推演、守护消息和权益状态。换设备前先导出，导入后会自动合并记录。
                   </p>

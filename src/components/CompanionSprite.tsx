@@ -118,7 +118,7 @@ export default function CompanionSprite({
   return (
     <div
       role="img"
-      aria-label={label || '星轨塔罗少女 Q 版桌宠'}
+      aria-label={label || '塔罗少女 Q 版桌宠'}
       data-expression={expression}
       data-action={resolvedAction}
       className={clsx('companion-sprite block h-full w-full overflow-visible', `companion-action-${resolvedAction}`, className)}

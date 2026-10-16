@@ -32,11 +32,11 @@ export default function Landing() {
     <main className="h-full overflow-y-auto bg-apple-bg pt-[var(--app-safe-top)] pb-[var(--app-safe-bottom)] font-sans text-apple-text">
       <div className="mx-auto w-full max-w-6xl px-5 sm:px-8 lg:px-12">
         <header className="flex items-center justify-between gap-4 border-b border-apple-border py-5 sm:py-7">
-          <a href="#top" aria-label="星轨首页" className="flex items-center gap-3">
+          <a href="#top" aria-label="塔罗少女首页" className="flex items-center gap-3">
             <Sparkles size={24} aria-hidden="true" className="text-apple-accent" />
             <span>
-              <span className="block font-serif text-2xl font-semibold leading-8">星轨</span>
-              <span className="rail-muted block">Railstar · 少女塔罗</span>
+              <span className="block font-serif text-2xl font-semibold leading-8">塔罗少女</span>
+              <span className="rail-muted block">Tarot Girl · 少女塔罗</span>
             </span>
           </a>
           <nav aria-label="首页导航" className="flex items-center gap-2 sm:gap-5">
@@ -55,21 +55,21 @@ export default function Landing() {
               给今天，<br />留一点星光。
             </h1>
             <p className="rail-body mt-6 max-w-[30rem] text-pretty text-apple-text-muted sm:mt-8">
-              抽一张牌，和星轨少女聊聊此刻的心情。<br className="hidden sm:block" />让散乱的思绪，慢慢变成今天可以走的一小步。
+              抽一张牌，和塔罗少女聊聊此刻的心情。<br className="hidden sm:block" />让散乱的思绪，慢慢变成今天可以走的一小步。
             </p>
             <div className="mt-8 flex flex-col items-start gap-4 sm:mt-10 sm:flex-row sm:items-center">
               <button type="button" onClick={enterApp} className="rail-button w-full sm:w-auto">抽一张今日牌<ArrowRight size={18} aria-hidden="true" /></button>
-              <a href="#ritual" className="inline-flex min-h-12 items-center gap-2 text-sm text-apple-text-muted hover:text-apple-text">认识星轨<ArrowRight size={16} aria-hidden="true" /></a>
+              <a href="#ritual" className="inline-flex min-h-12 items-center gap-2 text-sm text-apple-text-muted hover:text-apple-text">认识塔罗少女<ArrowRight size={16} aria-hidden="true" /></a>
             </div>
             <p className="rail-muted mt-4">今日单张牌可免费体验 · 无需先登录</p>
           </div>
           <figure className="mx-auto w-full max-w-[440px] lg:justify-self-end">
             <div className="overflow-hidden rounded-t-[44%] rounded-b-3xl border border-apple-border bg-apple-surface p-2 sm:p-3">
-              <img src="/detail-card-hero.png" alt="星轨少女站在星空与塔罗牌之间，等待与你相遇" width="1254" height="1254" fetchPriority="high" className="aspect-[4/5] w-full rounded-t-[44%] rounded-b-2xl object-cover object-center" />
+              <img src="/detail-card-hero.png" alt="塔罗少女站在星空与塔罗牌之间，等待与你相遇" width="1254" height="1254" fetchPriority="high" className="aspect-[4/5] w-full rounded-t-[44%] rounded-b-2xl object-cover object-center" />
             </div>
             <figcaption className="mt-4 flex items-center justify-between gap-4 px-1">
               <span className="font-serif text-base">有星光，也有你的答案。</span>
-              <span className="rail-muted shrink-0">星轨少女</span>
+              <span className="rail-muted shrink-0">塔罗少女</span>
             </figcaption>
           </figure>
         </section>
@@ -78,7 +78,7 @@ export default function Landing() {
           <div>
             <p className="rail-eyebrow">属于你的日常仪式</p>
             <h2 id="ritual-title" className="text-balance font-serif text-3xl font-medium leading-[1.5] sm:text-4xl">一张牌的时间，<br />听听自己的声音。</h2>
-            <p className="rail-body mt-5 max-w-sm text-pretty text-apple-text-muted">星轨陪你整理感受、记录选择。每个答案，最终都回到你自己的生活里。</p>
+            <p className="rail-body mt-5 max-w-sm text-pretty text-apple-text-muted">塔罗少女陪你整理感受、记录选择。每个答案，最终都回到你自己的生活里。</p>
             <div className="mt-8 flex items-start gap-4">
               <img src={resolveTarotArtwork(TAROT_CARDS[17].image, 320)} alt="星星塔罗牌" width="320" height="480" loading="lazy" decoding="async" className="w-24 shrink-0 rounded-lg border border-apple-border sm:w-28" />
               <div className="py-3">
@@ -102,15 +102,15 @@ export default function Landing() {
 
         <section aria-labelledby="landing-notes-title" className="rail-panel mb-14 grid gap-7 sm:mb-20 sm:p-8 md:grid-cols-[1fr_auto] md:items-center">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-apple-accent"><BookOpen size={19} aria-hidden="true" /><span className="text-sm font-medium">把每一天，收进你的星轨</span></div>
+            <div className="mb-3 flex items-center gap-2 text-apple-accent"><BookOpen size={19} aria-hidden="true" /><span className="text-sm font-medium">把每一天，留在这里</span></div>
             <h2 id="landing-notes-title" className="text-balance font-serif text-2xl font-medium leading-relaxed sm:text-3xl">今天的感受，值得被记住。</h2>
             <p className="rail-body mt-3 max-w-2xl text-pretty text-apple-text-muted">保留牌迹，写下日记。登录后可同步云端存档，换一台设备，也能接着聊。</p>
           </div>
-          <button type="button" onClick={enterApp} className="rail-button whitespace-nowrap">开始今天的星轨<ArrowRight size={18} aria-hidden="true" /></button>
+          <button type="button" onClick={enterApp} className="rail-button whitespace-nowrap">开始今天的塔罗<ArrowRight size={18} aria-hidden="true" /></button>
         </section>
 
         <footer className="flex flex-col gap-4 border-t border-apple-border py-7 sm:flex-row sm:items-center sm:justify-between">
-          <p className="rail-muted">星轨 Railstar · 陪你看清今天</p>
+          <p className="rail-muted">塔罗少女 Tarot Girl · 陪你看清今天</p>
           <p className="rail-muted max-w-xl text-pretty">塔罗是整理思绪的参考。相信你的判断，也允许自己慢慢来。</p>
         </footer>
       </div>

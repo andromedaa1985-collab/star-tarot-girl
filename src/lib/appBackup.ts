@@ -22,6 +22,7 @@ export const APP_STORAGE_KEYS = [
   'bondLevel',
   'energy',
   'fragments',
+  'collectionDrops',
   'messages',
   'cardImage',
   'communityPosts',
@@ -65,6 +66,7 @@ export const APP_STORAGE_KEYS = [
 const RAW_STRING_KEYS = new Set<string>(['theme', 'trustedTimeOffsetMs']);
 const MERGE_ARRAY_KEYS = new Set<string>([
   'fragments',
+  'collectionDrops',
   'messages',
   'communityPosts',
   'baziMessages',
@@ -77,6 +79,7 @@ const MERGE_ARRAY_KEYS = new Set<string>([
   'appEvents',
 ]);
 const NEWEST_FIRST_KEYS = new Set<string>([
+  'collectionDrops',
   'tarotReadings',
   'simulationHistory',
   'diaryEntries',
@@ -306,7 +309,7 @@ export function createAppBackup(): AppBackup {
 
 export function createBackupFileName(date = new Date()) {
   const stamp = date.toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  return `astrorail-backup-${stamp}.json`;
+  return `tarot-girl-backup-${stamp}.json`;
 }
 
 export function downloadAppBackup() {
@@ -377,7 +380,7 @@ export async function parseBackupFile(file: File): Promise<AppBackup> {
   const parsed = JSON.parse(text) as Partial<AppBackup>;
 
   if (parsed.format !== BACKUP_FORMAT || !parsed.data || typeof parsed.data !== 'object') {
-    throw new Error('这不是有效的星轨存档文件。');
+    throw new Error('这不是有效的塔罗少女存档文件。');
   }
 
   return parsed as AppBackup;
@@ -409,7 +412,11 @@ export function importAppBackup(backup: AppBackup): ImportResult {
     const incomingArray = asArray(incoming);
 
     if (MERGE_ARRAY_KEYS.has(key) && currentArray && incomingArray) {
-      writeValue(key, mergeArrays(key, currentArray, incomingArray));
+      // A conversation's original draw (including no card) is immutable.
+      // Importing an older/overlapping archive must never reroll that turn.
+      writeValue(key, key === 'collectionDrops'
+        ? normalizeGeneratedStorageValue(key, [...currentArray, ...incomingArray])
+        : mergeArrays(key, currentArray, incomingArray));
       mergedKeys += 1;
     } else {
       writeValue(key, incoming);

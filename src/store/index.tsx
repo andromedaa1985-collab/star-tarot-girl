@@ -18,10 +18,11 @@ import { trackAnalyticsEvent } from '../lib/analyticsClient';
 import { fetchCurrentEntitlements } from '../lib/entitlementClient';
 import { getStoredAccountSession } from '../lib/accountClient';
 import { canPersistWorkspace, writeWorkspaceStorage } from '../lib/workspacePersistence';
+import { appendConversationCardDrop, normalizeCollectionDrops, type CollectionDropEvent, type ConversationCardCompletion, type NewCollectionCardDrop } from '../lib/collectionCards';
 
 // --- Constants & Data ---
 export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2500, 4000];
-export const LEVEL_TITLES = ["萍水相逢", "星轨交汇", "灵魂共振", "命运羁绊", "星辰之主", "时空旅者", "造物之音", "永恒守护"];
+export const LEVEL_TITLES = ["萍水相逢", "星光交汇", "灵魂共振", "命运羁绊", "星辰之主", "时空旅者", "造物之音", "永恒守护"];
 
 export const FRAGMENTS_POOL = [
   { id: 'f1', name: '破碎的星光', rarity: 'N', icon: '✨', desc: '微弱的星光，似乎在诉说着什么。' },
@@ -166,6 +167,10 @@ interface AppState {
   setEnergy: React.Dispatch<React.SetStateAction<number>>;
   fragments: any[];
   setFragments: React.Dispatch<React.SetStateAction<any[]>>;
+  collectionDrops: CollectionDropEvent[];
+  awardConversationCard: (input: ConversationCardCompletion & { ownerId: string | null }) => void;
+  latestCardDrop: NewCollectionCardDrop | null;
+  dismissCardDrop: () => void;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   cardImage: string;
@@ -248,13 +253,31 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [bondLevel, setBondLevel] = useState(() => readStoredJson('bondLevel', 1));
   const [energy, setEnergy] = useState(() => readStoredJson('energy', 5));
   const [fragments, setFragments] = useState<any[]>(() => readStoredJson('fragments', []));
+  const [collectionDrops, setCollectionDrops] = useState<CollectionDropEvent[]>(() => normalizeCollectionDrops(readStoredJson('collectionDrops', [])));
+  const collectionDropsRef = React.useRef(collectionDrops);
+  const [latestCardDrop, setLatestCardDrop] = useState<NewCollectionCardDrop | null>(null);
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const awardConversationCard = React.useCallback((input: ConversationCardCompletion & { ownerId: string | null }) => {
+    if (!mountedRef.current || input.ownerId !== workspaceOwner.current || !canPersistWorkspace(workspaceOwner.current)) return;
+    // Calculate once outside a React state updater: Strict Mode may repeat updaters.
+    const award = appendConversationCardDrop(collectionDropsRef.current, input);
+    if (!award.event) return;
+    collectionDropsRef.current = award.events;
+    setCollectionDrops(award.events);
+    if (award.event.cardId) setLatestCardDrop(award.event as NewCollectionCardDrop);
+  }, []);
+  const dismissCardDrop = React.useCallback(() => setLatestCardDrop(null), []);
   const [messages, setMessages] = useState<Message[]>(() => {
     return readStoredJson<Message[]>('messages', [
-      { 
-        id: 'init', 
-        role: 'ai', 
-        text: '你好呀，我是星轨的引路人。初次见面，让我为你指引前方的道路吧。✨\n\n在这里，你可以向我倾诉任何烦恼，我会为你抽取塔罗牌进行占卜。目前我掌握了以下几种占卜模式：\n1. **单张指引**：快速解答你当下的疑惑或提供今日运势。\n2. **圣三角**：通过三张牌分别解读你的过去、现在和未来。\n3. **爱情十字**：专门为你解析感情状况与发展趋势。\n4. **事业岔路**：当你面临选择时，帮你分析不同选择的走向。\n\n你可以直接点击下方的快捷按钮，或者在输入框告诉我你想占卜什么内容哦~', 
-        timestamp: Date.now() 
+      {
+        id: 'init',
+        role: 'ai',
+        text: '你好呀，我是塔罗少女。初次见面，让我为你指引前方的道路吧。✨\n\n在这里，你可以向我倾诉任何烦恼，我会为你抽取塔罗牌进行占卜。目前我掌握了以下几种占卜模式：\n1. **单张指引**：快速解答你当下的疑惑或提供今日运势。\n2. **圣三角**：通过三张牌分别解读你的过去、现在和未来。\n3. **爱情十字**：专门为你解析感情状况与发展趋势。\n4. **事业岔路**：当你面临选择时，帮你分析不同选择的走向。\n\n你可以直接点击下方的快捷按钮，或者在输入框告诉我你想占卜什么内容哦~',
+        timestamp: Date.now()
       }
     ]);
   });
@@ -267,7 +290,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       bgmEnabled: false
     });
   });
-  const [userName, setUserName] = useState(() => readStoredJson('userName', '星轨旅人'));
+  const [userName, setUserName] = useState(() => readStoredJson('userName', '塔罗旅人'));
   const [preferredAddress, setPreferredAddress] = useState(() => readStoredJson('preferredAddress', ''));
   const [preferredAddressPromptDismissed, setPreferredAddressPromptDismissed] = useState(() => {
     const saved = localStorage.getItem('preferredAddressPromptDismissed');
@@ -385,6 +408,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   React.useEffect(() => {
     persistWorkspaceValue('fragments', JSON.stringify(fragments));
   }, [fragments]);
+
+  React.useEffect(() => {
+    persistWorkspaceValue('collectionDrops', JSON.stringify(collectionDrops));
+  }, [collectionDrops]);
 
   React.useEffect(() => {
     persistWorkspaceValue('messages', JSON.stringify(messages));
@@ -506,6 +533,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return () => window.clearTimeout(handle);
   }, [
     messages,
+    collectionDrops,
     baziResult,
     baziMessages,
     profiles,
@@ -524,6 +552,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       bondLevel, setBondLevel,
       energy, setEnergy,
       fragments, setFragments,
+      collectionDrops, awardConversationCard, latestCardDrop, dismissCardDrop,
       messages, setMessages,
       cardImage, setCardImage,
       communityPosts, setCommunityPosts,

@@ -41,7 +41,7 @@ export async function shareImageWithNativeSheet(options: NativeImageShareOptions
   const canShare = await Share.canShare().catch(() => ({ value: true }));
   if (!canShare.value) return false;
 
-  const fileName = sanitizeFileName(options.fileName || `astrorail-share-${Date.now()}.png`);
+  const fileName = sanitizeFileName(options.fileName || `tarot-girl-share-${Date.now()}.png`);
   const path = `shares/${fileName.endsWith('.png') ? fileName : `${fileName}.png`}`;
   const data = await blobToBase64(options.blob);
 

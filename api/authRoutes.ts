@@ -258,7 +258,7 @@ export function registerAuthRoutes(app: Express) {
       const user: UserRecord = {
         id: userId,
         email,
-        displayName: normalizeDisplayName(req.body?.displayName, email.split("@")[0] || "星轨旅人"),
+        displayName: normalizeDisplayName(req.body?.displayName, email.split("@")[0] || "塔罗旅人"),
         passwordHash,
         salt,
         createdAt: now,

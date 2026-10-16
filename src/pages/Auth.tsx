@@ -54,9 +54,9 @@ export default function Auth() {
   }, [reauth, verificationAttempt]);
 
   const recoveringSession = authState.status === 'reauth';
-  const title = mode === 'register' ? '创建星轨账户' : recoveringSession ? '重新登录星轨' : '欢迎回来';
+  const title = mode === 'register' ? '创建塔罗少女账户' : recoveringSession ? '重新登录塔罗少女' : '欢迎回来';
   const subtitle = mode === 'register'
-    ? '用邮箱和密码，为你的星轨留一个位置。'
+    ? '用邮箱和密码，为你的记录留一个位置。'
     : recoveringSession
       ? '请重新登录，继续你的牌迹与日记。本机记录已保留。'
       : '登录，继续你的牌迹与日记。';
@@ -119,18 +119,18 @@ export default function Auth() {
 
         <div className="grid flex-1 gap-8 py-8 sm:py-12 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-16">
           <aside className="mx-auto w-full max-w-[440px] lg:max-w-none">
-            <div className="mb-5 flex items-center gap-3"><Sparkles size={25} className="text-apple-accent" aria-hidden="true" /><p className="font-serif text-3xl font-semibold">星轨</p><span className="rail-muted">Railstar</span></div>
+            <div className="mb-5 flex items-center gap-3"><Sparkles size={25} className="text-apple-accent" aria-hidden="true" /><p className="font-serif text-3xl font-semibold">塔罗少女</p><span className="rail-muted">Tarot Girl</span></div>
             <h1 className="text-balance font-serif text-3xl font-medium leading-[1.5] sm:text-4xl">每一段心情，<br className="hidden lg:block" />都可以有迹可循。</h1>
             <p className="rail-body mt-4 max-w-sm text-pretty text-apple-text-muted">让牌迹、日记和那些细小的变化，留在属于你的账户里。</p>
             <img src="/detail-card-hero.png" alt="" width="1254" height="1254" className="mt-8 hidden aspect-square w-64 rounded-t-[44%] rounded-b-2xl object-cover lg:block" />
           </aside>
 
-          <section aria-label={authState.status === 'anonymous' || authState.status === 'reauth' ? '邮箱账户登录与注册' : '当前星轨账户'} className="rail-panel mx-auto w-full max-w-[440px] sm:p-8">
+          <section aria-label={authState.status === 'anonymous' || authState.status === 'reauth' ? '邮箱账户登录与注册' : '当前塔罗少女账户'} className="rail-panel mx-auto w-full max-w-[440px] sm:p-8">
             {authState.status === 'verifying' ? (
               <div role="status" aria-live="polite" aria-busy="true">
                 <Loader2 size={32} className="mb-5 animate-spin text-apple-accent" aria-hidden="true" />
                 <p className="rail-eyebrow">正在确认登录状态</p>
-                <h2 className="text-balance font-serif text-3xl font-medium leading-relaxed">接回你的星轨</h2>
+                <h2 className="text-balance font-serif text-3xl font-medium leading-relaxed">接回你的记录</h2>
                 <p className="rail-body mt-6 text-pretty text-apple-text-muted">正在验证当前账户。本机记录会保留，请稍候。</p>
               </div>
             ) : authState.status === 'unavailable' ? (
@@ -172,14 +172,14 @@ export default function Auth() {
                 {recoveringSession && session && <p role="status" className="rail-muted mt-3 break-words">重新登录 {session.user.email} 可继续使用原来的本机存档；登录其他账户会载入对应账户的记录。</p>}
 
                 <div className="mt-7 space-y-5">
-                  {mode === 'register' && <AuthInput icon={<UserRound size={18} />} label="昵称" value={displayName} onChange={setDisplayName} placeholder="例如：星轨旅人" autoComplete="nickname" disabled={busy} />}
+                  {mode === 'register' && <AuthInput icon={<UserRound size={18} />} label="昵称" value={displayName} onChange={setDisplayName} placeholder="例如：塔罗旅人" autoComplete="nickname" disabled={busy} />}
                   <AuthInput icon={<Mail size={18} />} label="邮箱" value={email} onChange={setEmail} placeholder="you@example.com" type="email" autoComplete="email" required disabled={busy} />
                   <AuthInput icon={<KeyRound size={18} />} label="密码" value={password} onChange={setPassword} placeholder={mode === 'register' ? '至少 8 位' : '输入原来的密码'} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : 1} disabled={busy} describedBy="auth-requirements" />
                 </div>
                 <p id="auth-requirements" className="rail-muted mt-3">{mode === 'register' ? '请填写有效邮箱，密码至少 8 位。' : '请填写注册时使用的邮箱和密码。'}</p>
                 {notice && <NoticeMessage notice={notice} />}
                 <button type="submit" disabled={busy || !email.trim() || password.length < (mode === 'register' ? 8 : 1)} className="rail-button mt-7 w-full">
-                  {busy ? <><Loader2 size={18} className="animate-spin" aria-hidden="true" />正在处理…</> : <>{mode === 'login' ? '登录进入星轨' : '创建并进入星轨'}<ArrowRight size={18} aria-hidden="true" /></>}
+                  {busy ? <><Loader2 size={18} className="animate-spin" aria-hidden="true" />正在处理…</> : <>{mode === 'login' ? '登录进入塔罗少女' : '创建并进入塔罗少女'}<ArrowRight size={18} aria-hidden="true" /></>}
                 </button>
                 <p className="rail-muted mt-4 text-center">目前支持邮箱账户登录</p>
               </form>
@@ -201,8 +201,8 @@ function getActivationMessage(mode: AuthMode, source: string) {
   if (source === 'cloud') return '已登录，并为你恢复云端存档。';
   if (source === 'local') return '已切换到这个账户的本机存档。';
   if (source === 'claimed-local') return '账户已准备好，当前本机记录会归到这个账户下。';
-  if (mode === 'register') return '账户创建成功，正在进入星轨。';
-  return '登录成功，正在进入星轨。';
+  if (mode === 'register') return '账户创建成功，正在进入塔罗少女。';
+  return '登录成功，正在进入塔罗少女。';
 }
 
 function normalizeNextPath(value: string | null) {

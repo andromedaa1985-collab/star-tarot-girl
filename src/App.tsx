@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Routes, Route, useLocation } from 'react-route
 import { MotionConfig } from 'motion/react';
 import { AppProvider } from './store';
 import Layout from './components/Layout';
+import CollectionDropNotice from './components/CollectionDropNotice';
 import { FeatureGate } from './components/FeatureGate';
 import { AccountAutoSync } from './components/AccountAutoSync';
 import { AccountSessionChangeGuard } from './components/AccountSessionChangeGuard';
@@ -48,7 +49,7 @@ function PageLoading() {
       aria-atomic="true"
       className="rail-page-loading flex h-full min-h-[50vh] items-center justify-center px-6 text-apple-text-muted"
     >
-      <p className="text-sm leading-6">正在准备星轨页面…</p>
+      <p className="text-sm leading-6">正在准备塔罗少女页面…</p>
     </div>
   );
 }
@@ -114,7 +115,7 @@ class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, { hasError
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#07080d] px-6 text-[#fff9ed]">
         <div className="w-full max-w-sm rounded-[30px] border border-white/12 bg-[#111520]/86 p-6 text-center shadow-[0_28px_90px_rgba(0,0,0,0.34)]">
-          <div className="text-xl font-black">星轨刚刚走神了</div>
+          <div className="text-xl font-black">塔罗少女刚刚走神了</div>
           <p className="mt-3 text-sm leading-6 text-[#cfc6b5]">
             页面暂时没有顺利打开。请检查网络后重新进入；刷新不会清空已经保存的记录。
           </p>
@@ -148,6 +149,7 @@ function AppShell() {
     <>
       {session?.token ? <AccountAutoSync /> : null}
       <Layout />
+      <CollectionDropNotice />
     </>
   );
 }

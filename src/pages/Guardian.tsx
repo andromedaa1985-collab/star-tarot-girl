@@ -24,6 +24,7 @@ import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
 import { getAppDateKey, getTrustedNow, getTrustedTimestamp, useTrustedTime } from '../lib/trustedTime';
 import { appendGuardianStarter, getGuardianLetterState, shouldRewardGuardianLetter } from '../lib/guardianLetter';
 import { getBaziResultStatus } from '../lib/baziProfiles';
+import { getStoredAccountSession, isAccountTransitioning, isCurrentAccountSession } from '../lib/accountClient';
 
 const MEMORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const GUARDIAN_STARTERS = [
@@ -59,7 +60,7 @@ export default function Guardian() {
     guardianMessages, setGuardianMessages,
     dailyLetter, setDailyLetter,
     dailyLetterDate, setDailyLetterDate,
-    setAppEvents, settings, setSettings
+    setAppEvents, settings, setSettings, awardConversationCard
   } = useAppContext();
 
   const [input, setInput, clearInputDraft] = usePersistentDraft('draft:guardian:input', '');
@@ -112,7 +113,7 @@ export default function Guardian() {
     .filter((message) => (
       message.role === 'ai' &&
       getTrustedTimestamp() - message.timestamp <= MEMORY_WINDOW_MS &&
-      !message.text.includes('我是你的星轨守护灵')
+      !message.text.includes('我是你的星轨守护灵') && !message.text.includes('我是你的少女守护灵')
     ))
     .sort((a, b) => b.timestamp - a.timestamp);
   const guardianContextLines = [
@@ -133,7 +134,7 @@ export default function Guardian() {
   // Initial greeting if empty
   useEffect(() => {
     if (guardianMessages.length === 0) {
-      const greeting = `你好，${userAddress}。我是你的星轨守护灵，会参考你留下的日记、牌迹和档案，陪你把近况慢慢说清楚。也可以先从今天的一件小事开始。`;
+      const greeting = `你好，${userAddress}。我是你的少女守护灵，会参考你留下的日记、牌迹和档案，陪你把近况慢慢说清楚。也可以先从今天的一件小事开始。`;
       setGuardianMessages([{
         id: createRecordId('guardian'),
         role: 'ai',
@@ -169,7 +170,7 @@ export default function Guardian() {
         baziContext = `用户的八字格局是【${baziResult.pattern.name}】，五行喜用神是【${baziResult.wuxing.favorable.join('、')}】，性格特质是【${baziResult.personality}】。`;
       }
 
-      const prompt = `作为用户的【星轨守护灵】，请为ta写一封今天的【今日守护回访】。
+      const prompt = `作为用户的【少女守护灵】，请为ta写一封今天的【今日守护回访】。
 【上下文信息】：
 - 用户姓名：${userName}
 - 用户希望被称呼：${userAddress}
@@ -195,7 +196,7 @@ export default function Guardian() {
             temperature: 0.7,
             max_tokens: DEEPSEEK_MAX_TOKENS.guardianLetter,
             messages: [
-              { role: 'system', content: '你是用户的星轨守护灵。' },
+              { role: 'system', content: '你是用户的少女守护灵。' },
               {
                 role: 'user',
                 content: [
@@ -203,8 +204,8 @@ export default function Guardian() {
                   userAddressInstruction,
                   '这封来信必须像今日回访，而不是泛泛寄语。',
                   guardianContextLines.length
-                    ? `星轨近期记得：\n${guardianContextLines.join('\n')}`
-                    : '星轨近期还没有足够线索，请引导用户先留下牌迹或日记。',
+                    ? `塔罗少女近期记得：\n${guardianContextLines.join('\n')}`
+                    : '塔罗少女近期还没有足够线索，请引导用户先留下牌迹或日记。',
                   ACTIONABLE_MEMORY_RULES,
                   prompt,
                 ].join('\n\n'),
@@ -253,6 +254,7 @@ export default function Guardian() {
     if (isTyping || chatRequestRef.current || !input.trim()) return;
 
     chatRequestRef.current = true;
+    const accountSession = getStoredAccountSession();
     const userText = input.trim();
     const newUserMsg = {
       id: createRecordId('guardian'),
@@ -274,7 +276,7 @@ export default function Guardian() {
         baziContext = `用户的八字格局是【${baziResult.pattern.name}】，五行喜用神是【${baziResult.wuxing.favorable.join('、')}】，性格特质是【${baziResult.personality}】。`;
       }
 
-      const systemPrompt = `你是一个名为“星轨守护灵”的AI伴侣。你的核心目标是提供【基于命理的情绪价值】和【深度陪伴】。
+      const systemPrompt = `你是一个名为“少女守护灵”的AI伴侣。你的核心目标是提供【基于命理的情绪价值】和【深度陪伴】。
 
 【当前用户状态】：
 - 姓名：${userName}
@@ -327,6 +329,8 @@ export default function Guardian() {
 
       const cleanedText = cleanAiText(aiText);
 
+      if (!mountedRef.current || !isCurrentAccountSession(accountSession) || isAccountTransitioning()) return;
+
       setGuardianMessages(prev => [...prev, {
         id: createRecordId('guardian'),
         role: 'ai',
@@ -338,8 +342,14 @@ export default function Guardian() {
         }),
       }]);
 
+      awardConversationCard({
+        turnId: newUserMsg.id, channel: 'guardian', text: cleanedText,
+        usedFallback: usedFallbackChat, ownerId: accountSession?.user.id || null,
+      });
+
     } catch (error) {
       console.error("Guardian Chat Error:", error);
+      if (!mountedRef.current || !isCurrentAccountSession(accountSession) || isAccountTransitioning()) return;
       setGuardianMessages(prev => [...prev, {
         id: createRecordId('guardian'),
         role: 'ai',
@@ -359,7 +369,7 @@ export default function Guardian() {
   return (
     <div className="relative h-full w-full overflow-hidden text-apple-text">
       <div className="rail-page pb-[calc(180px+var(--rail-nav-height)+var(--app-safe-bottom))]">
-        <PageHeader eyebrow="陪伴与回访" title="星轨守护" description="从你的近况里找一点线索，也留一个可以安心说话的地方。" />
+        <PageHeader eyebrow="陪伴与回访" title="少女守护" description="从你的近况里找一点线索，也留一个可以安心说话的地方。" />
         <div className="rail-page-content pb-8">
         {/* Daily Letter Trigger */}
         <div className="grid gap-4 md:grid-cols-2">

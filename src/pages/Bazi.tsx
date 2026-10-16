@@ -18,7 +18,7 @@ import { apiFetch } from '../lib/apiClient';
 import PageHeader from '../components/ui/PageHeader';
 import { validateBaziProfile, type BaziProfileField } from '../lib/baziProfileValidation';
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
-import { getStoredAccountSession } from '../lib/accountClient';
+import { getStoredAccountSession, isAccountTransitioning, isCurrentAccountSession } from '../lib/accountClient';
 import { writeWorkspaceStorage } from '../lib/workspacePersistence';
 import { createBaziRequestSnapshot, filterBaziProfiles, getBaziBirthFingerprint, getBaziResultStatus, isBaziRequestCurrent, restoreBaziEditor, saveBaziProfile, type BaziEditorState, type BaziResultOwner } from '../lib/baziProfiles';
 
@@ -535,7 +535,7 @@ export default function Bazi() {
   useTrustedTime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { energy, setEnergy, membership, settings, setSettings, baziResult: storedBaziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId, userName, preferredAddress } = useAppContext();
+  const { energy, setEnergy, membership, settings, setSettings, baziResult: storedBaziResult, setBaziResult, baziFormData, setBaziFormData, baziMessages, setBaziMessages, profiles, setProfiles, activeProfileId, setActiveProfileId, userName, preferredAddress, awardConversationCard } = useAppContext();
   const plusActive = isPlusActive(membership);
   const baziUnlocked = hasFeatureAccess(membership, 'bazi');
   const relationshipUnlocked = hasFeatureAccess(membership, 'relationship_report');
@@ -1162,7 +1162,9 @@ ${exactBaziStr}
     const chatProfile = currentProfileRef.current;
     if (!chatProfile) { chatRequestRef.current = false; return; }
     const chatRequest = createBaziRequestSnapshot(chatProfile, requestRevisionRef.current);
-    const chatIsCurrent = () => mountedRef.current && isBaziRequestCurrent(chatRequest, currentProfileRef.current, requestRevisionRef.current);
+    const accountSession = getStoredAccountSession();
+    const chatIsCurrent = () => mountedRef.current && isCurrentAccountSession(accountSession) && !isAccountTransitioning()
+      && isBaziRequestCurrent(chatRequest, currentProfileRef.current, requestRevisionRef.current);
     const newUserMsg = {
       id: createRecordId('bazi'),
       role: 'user' as const,
@@ -1239,6 +1241,11 @@ ${recentFortuneContext}
           usedFallback: usedFallbackChat,
         }),
       }]);
+
+      awardConversationCard({
+        turnId: newUserMsg.id, channel: 'bazi', text: aiText,
+        usedFallback: usedFallbackChat, ownerId: accountSession?.user.id || null,
+      });
 
     } catch (error) {
       console.error("Chat Error:", error);
@@ -1860,7 +1867,7 @@ ${recentFortuneContext}
         )}
 
         {isCalculating && (
-          <motion.div role="status" aria-label="正在推演星轨与命理"
+          <motion.div role="status" aria-label="正在推演命理"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="rail-panel flex flex-col items-center justify-center py-20"
@@ -1869,7 +1876,7 @@ ${recentFortuneContext}
               <div className="absolute inset-0 bg-apple-gold/20 rounded-full blur-xl animate-pulse"></div>
               <Compass className="w-16 h-16 text-apple-gold animate-spin-slow relative z-10" />
             </div>
-            <p className="mt-6 text-apple-gold font-sans animate-pulse">正在推演星轨与命理...</p>
+            <p className="mt-6 text-apple-gold font-sans animate-pulse">正在推演命理...</p>
           </motion.div>
         )}
 

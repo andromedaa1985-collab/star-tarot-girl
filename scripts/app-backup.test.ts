@@ -102,3 +102,16 @@ test('profiles and collection items keep their established order after merging',
     assert.deepEqual(storedRecords(key).map((record) => record.id), ['first', 'second'], key);
   }
 });
+
+test('collection draw archives merge by original turn while preserving the first drop outcome and old fragments', () => {
+  const event = { id: 'tarot:turn-one', turnId: 'turn-one', channel: 'tarot', cardId: null, createdAt: '2026-10-16T04:00:00.000Z' };
+  localStorage.setItem('collectionDrops', JSON.stringify([event]));
+  localStorage.setItem('fragments', JSON.stringify([{ id: 'f7', count: 0 }]));
+  importAppBackup(archive({ collectionDrops: [
+    { ...event, cardId: 'ssr-moon-oracle' },
+    { ...event, id: 'guardian:turn-two', turnId: 'turn-two', channel: 'guardian', cardId: 'n-stillness' },
+  ] }));
+  assert.equal(storedRecords('collectionDrops').length, 2);
+  assert.equal(storedRecords('collectionDrops')[0].cardId, null);
+  assert.deepEqual(storedRecords('fragments'), [{ id: 'f7', count: 0 }]);
+});

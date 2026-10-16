@@ -1,6 +1,7 @@
 import PageHeader from '../components/ui/PageHeader';
 import React, { useEffect, useState, useRef } from 'react';
-import { useAppContext, LEVEL_THRESHOLDS, LEVEL_TITLES, FRAGMENTS_POOL } from '../store';
+import { useAppContext, LEVEL_THRESHOLDS, LEVEL_TITLES } from '../store';
+import { COLLECTION_CARDS, getOwnedCollectionCards } from '../lib/collectionCards';
 import { User, Sparkles, Settings, ChevronRight, Moon, Vibrate, Edit2, X, Check, Upload, Compass, Crown, CalendarCheck, Gift, ShieldCheck, WalletCards, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -51,7 +52,7 @@ const PLAN_REDIRECTS: Record<string, string> = {
 };
 
 export default function Profile() {
-  const { bondExp, bondLevel, energy, setEnergy, fragments, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, setBaziFormData, setBaziMessages, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
+  const { bondExp, bondLevel, energy, setEnergy, collectionDrops, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, setBaziFormData, setBaziMessages, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -562,15 +563,15 @@ export default function Profile() {
           <p className="mt-3 text-3xl font-medium tabular-nums">{testerActive ? '∞' : energy}</p>
         </div>
         <button type="button" onClick={() => navigate('/app/collection')} className="rail-panel text-left hover:bg-apple-surface-hover">
-          <p className="rail-muted flex items-center gap-2"><LibraryIcon width={16} height={16} className="text-apple-gold" />收集进度</p>
-          <p className="mt-3 text-3xl font-medium tabular-nums">{fragments.length}<span className="ml-2 text-base text-apple-text-muted">/ {FRAGMENTS_POOL.length}</span></p>
+          <p className="rail-muted flex items-center gap-2"><LibraryIcon width={16} height={16} className="text-apple-gold" />收藏图鉴</p>
+          <p className="mt-3 text-3xl font-medium tabular-nums">{getOwnedCollectionCards(collectionDrops).length}<span className="ml-2 text-base text-apple-text-muted">/ {COLLECTION_CARDS.length}</span></p>
         </button>
       </section>
 
       <section className="rail-panel mb-8" aria-labelledby="membership-heading">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0 max-w-[56ch]">
-            <h2 id="membership-heading" className="flex items-center gap-2 text-base font-medium"><Crown size={17} className="text-apple-gold" />{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 约 ${plusDaysLeft} 天` : '星轨 Plus'}</h2>
+            <h2 id="membership-heading" className="flex items-center gap-2 text-base font-medium"><Crown size={17} className="text-apple-gold" />{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 约 ${plusDaysLeft} 天` : '塔罗少女 Plus'}</h2>
             <p className="rail-muted mt-2">{membershipLabel}</p>
           </div>
           <button type="button" onClick={() => setShowMembershipModal(true)} className="rail-button-secondary shrink-0">{testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}<ChevronRight size={16} /></button>
@@ -639,7 +640,7 @@ export default function Profile() {
         <div className="rail-surface overflow-hidden">
           <SettingToggle icon={<Moon size={18} />} title="背景音乐" checked={settings.bgmEnabled} onChange={() => toggleSetting('bgmEnabled')} />
           <SettingToggle icon={<Vibrate size={18} />} title="触觉反馈" checked={settings.hapticsEnabled} onChange={() => toggleSetting('hapticsEnabled')} />
-          <SettingItem title="关于星轨" hasBorder={false} onClick={() => navigate('/app/about')} />
+          <SettingItem title="关于塔罗少女" hasBorder={false} onClick={() => navigate('/app/about')} />
         </div>
       </section>
       </div>

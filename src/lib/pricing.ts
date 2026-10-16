@@ -40,7 +40,7 @@ export const SHOP_PLANS: ProductPlan[] = [
   {
     id: 'daily_fortune_deep',
     label: '今日深解',
-    paymentName: '星轨今日运势深解',
+    paymentName: '塔罗少女今日运势深解',
     price: '1.9',
     amount: '1.90',
     badge: '今日加深',
@@ -60,7 +60,7 @@ export const SHOP_PLANS: ProductPlan[] = [
   {
     id: 'tarot_deep_report',
     label: '深度牌阵报告',
-    paymentName: '星轨深度牌阵报告',
+    paymentName: '塔罗少女深度牌阵报告',
     price: '3.9',
     amount: '3.90',
     badge: '轻量入门',
@@ -79,12 +79,12 @@ export const SHOP_PLANS: ProductPlan[] = [
   },
   {
     id: 'plus_monthly',
-    label: '星轨 Plus',
-    paymentName: '星轨 Plus 月卡',
+    label: '塔罗少女 Plus',
+    paymentName: '塔罗少女 Plus 月卡',
     price: '9.9',
     amount: '9.90',
     badge: '长期记忆',
-    title: '让星轨真正记得你',
+    title: '让塔罗少女真正记得你',
     desc: '适合会反复问同一段关系、工作或选择的人。Plus 会把牌迹、日记和守护回访接成长期档案。',
     bullets: ['7 日复盘整理反复主题和行动建议', '更多牌迹长期保存，适合连续追问', '守护回访会回应最近真实线索'],
     description: '长期记忆、每周复盘、无限追问当前牌面与陪伴成长',
