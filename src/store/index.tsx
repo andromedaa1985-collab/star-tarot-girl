@@ -1,3 +1,4 @@
+import type { TarotPosition } from '../lib/tarotRandom';
 import { ENTITLEMENT_UPDATED_EVENT } from '../lib/aiClient';
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import {
@@ -53,6 +54,7 @@ export interface Message {
   readingId?: string;
   cardImage?: string;
   cardImages?: string[];
+  cardPositions?: TarotPosition[];
   generationId?: string;
   generationKind?: GenerationKind;
   generatedAt?: string;
@@ -87,6 +89,7 @@ export interface TarotReading {
   summary: string;
   cardImage?: string;
   cardImages?: string[];
+  cardPositions?: TarotPosition[];
   generationId?: string;
   generationKind?: GenerationKind;
   generatedAt?: string;
