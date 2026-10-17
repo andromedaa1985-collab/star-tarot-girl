@@ -98,7 +98,8 @@ function requireAccountTransition() {
 
 export function saveAccountWorkspace(ownerId: string | null) {
   if (!hasCurrentAppData()) return null;
-  const backup = createAppBackup();
+  const session = getStoredAccountSession();
+  const backup = { ...createAppBackup(), cloudBaseRevision: session?.user.id === ownerId ? session.archiveBaseRevision ?? null : null };
   localStorage.setItem(workspaceKey(ownerId), JSON.stringify(backup));
   return backup;
 }
@@ -113,16 +114,18 @@ export async function activateAccountWorkspace(
 
   let result: AccountActivationResult = { source: 'same' };
   let target: AppBackup | null = null;
-  let committedSession = nextSession;
+  let committedSession = { ...nextSession, archiveBaseRevision: previousUserId === nextUserId ? previousSession?.archiveBaseRevision ?? null : null };
   if (previousUserId !== nextUserId) {
     target = readWorkspace(nextUserId);
     if (target) {
+      committedSession.archiveBaseRevision = (target as AppBackup & { cloudBaseRevision?: string }).cloudBaseRevision ?? null;
       result = { source: 'local' };
     } else if (nextSession.user.archiveUpdatedAt) {
       const cloud = await downloadCloudArchive(nextSession);
       target = validateWorkspace(cloud.archive);
       committedSession = {
         ...nextSession,
+        archiveBaseRevision: cloud.archiveRevision ?? null,
         user: { ...nextSession.user, archiveUpdatedAt: cloud.archiveUpdatedAt, archiveRecordCount: cloud.archiveRecordCount },
       };
       result = { source: 'cloud', recordCount: cloud.archiveRecordCount };
@@ -153,6 +156,7 @@ export async function activateAccountWorkspace(
     saveAccountWorkspace(nextUserId);
     // Commit identity last, when all active records already belong to this user.
     storeAccountSession(committedSession);
+    saveAccountWorkspace(nextUserId);
     commitAccountTransition(nextUserId);
   } catch (error) {
     rollbackWorkspace(snapshot, originalSession);
@@ -192,7 +196,7 @@ export async function restoreActiveWorkspaceBackup(backup: AppBackup, updatedSes
   try {
     const result = importAppBackup(backup);
     saveAccountWorkspace(session?.user.id || null);
-    if (updatedSession) storeAccountSession(updatedSession);
+    if (updatedSession) { storeAccountSession(updatedSession); saveAccountWorkspace(session?.user.id || null); }
     commitAccountTransition(session?.user.id || null);
     return result;
   } catch (error) {

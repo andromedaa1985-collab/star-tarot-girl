@@ -287,7 +287,8 @@ test('a slow legacy entitlement GET cannot overwrite an order granted while its 
     let storageWrites = 0;
     globalThis.fetch = async (input, init) => {
       assert.equal(String(input), redisUrl, 'All fixture storage requests must use the local stub.');
-      const [command, key, value] = JSON.parse(String(init?.body));
+      const args = JSON.parse(String(init?.body));
+      const [command, key, value] = args;
       if (command === 'GET') {
         if (key === oldOrderKey && !delayedOldRead) {
           delayedOldRead = true;
@@ -296,10 +297,11 @@ test('a slow legacy entitlement GET cannot overwrite an order granted while its 
         }
         return new Response(JSON.stringify({ result: values.get(key) ?? null }), { status: 200 });
       }
-      assert.equal(command, 'SET');
-      storageWrites += 1;
-      values.set(key, value);
-      return new Response(JSON.stringify({ result: 'OK' }), { status: 200 });
+      assert.equal(command, 'EVAL');
+      const [, , , target, kind, expected, next] = args;
+      const matches = kind === 'missing' ? !values.has(target) : values.get(target) === expected;
+      if (matches) { storageWrites += 1; values.set(target, next); }
+      return new Response(JSON.stringify({ result: matches ? 1 : 0 }), { status: 200 });
     };
     const app = express();
     app.use(express.json());

@@ -74,9 +74,11 @@ export interface AccountUser {
   createdAt: string;
   archiveUpdatedAt: string | null;
   archiveRecordCount: number;
+  archiveRevision?: string | null;
 }
 
 export interface AccountSession {
+  archiveBaseRevision?: string | null;
   token: string;
   user: AccountUser;
 }
@@ -250,9 +252,13 @@ export async function refreshAccountSession(session: AccountSession) {
     cache: 'no-store',
   }) as { user: AccountUser };
   if (data.user?.id !== session.user.id) throw new Error('账户信息不一致，请重新登录。');
-  const nextSession = { ...session, user: data.user };
+  let nextSession = { ...session, user: data.user };
   await tryWithAccountWorkspaceLock('shared', () => {
-    if (!isAccountTransitioning() && isCurrentAccountSession(session)) storeAccountSession(nextSession);
+    if (!isAccountTransitioning() && isCurrentAccountSession(session)) {
+      // A concurrent confirmed upload may have advanced the local base already.
+      nextSession = { ...getStoredAccountSession()!, user: data.user };
+      storeAccountSession(nextSession);
+    }
   });
   return nextSession;
 }
@@ -267,12 +273,14 @@ export async function uploadCloudArchive(session: AccountSession, archive: AppBa
       'Content-Type': 'application/json',
       ...authHeaders(session.token),
     },
-    body: JSON.stringify({ archive }),
-  }) as Pick<AccountUser, 'archiveUpdatedAt' | 'archiveRecordCount'>;
+    body: JSON.stringify({ archive, baseRevision: session.archiveBaseRevision ?? null }),
+  }) as Pick<AccountUser, 'archiveUpdatedAt' | 'archiveRecordCount' | 'archiveRevision'>;
   const nextSession = {
     ...session,
+    archiveBaseRevision: data.archiveRevision ?? null,
     user: {
       ...session.user,
+      archiveRevision: data.archiveRevision ?? null,
       archiveUpdatedAt: data.archiveUpdatedAt,
       archiveRecordCount: data.archiveRecordCount,
     },
@@ -289,6 +297,7 @@ export async function downloadCloudArchive(session: AccountSession) {
     cache: 'no-store',
   }) as {
     archive: AppBackup;
+    archiveRevision: string;
     archiveUpdatedAt: string;
     archiveRecordCount: number;
   };

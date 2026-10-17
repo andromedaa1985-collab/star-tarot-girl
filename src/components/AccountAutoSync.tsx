@@ -1,3 +1,4 @@
+import { reportCloudSyncStatus } from '../lib/cloudSyncStatus';
 import React from 'react';
 import { createAppBackup } from '../lib/appBackup';
 import { getStoredAccountSession, isAccountTransitioning, isCurrentAccountSession, uploadCloudArchive } from '../lib/accountClient';
@@ -32,7 +33,14 @@ export async function autoSyncAccountArchive() {
   });
   if (!started) return;
   const { session, signature, key } = started;
-  await started.uploading;
+  try {
+    await started.uploading;
+    if (isCurrentAccountSession(session)) reportCloudSyncStatus(session.user.id, null);
+  } catch (error: any) {
+    if (isCurrentAccountSession(session)) reportCloudSyncStatus(session.user.id,
+      error?.code === 'ARCHIVE_CONFLICT' ? '云端有其他设备的新记录。本机内容已保留，请到设置下载并合并后再同步。' : '本机内容已保存，云端同步暂未完成。可到设置查看并重试。');
+    throw error;
+  }
   // An upload started before switching may finish afterwards. Its payload and
   // token still belong to the old owner; it must not mark the new workspace synced.
   await tryWithAccountWorkspaceLock('shared', () => {

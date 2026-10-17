@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import type express from "express";
-import { readStoreJson, writeStoreJson } from "./jsonStore.js";
+import { readStoreJson, updateStoreJson } from "./jsonStore.js";
 import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing.js";
-import { getOptionalUser } from "./authRoutes.js";
+import { requireUser } from "./authRoutes.js";
 
 type PaymentOrder = {
   id: string;
@@ -17,7 +17,6 @@ type PaymentOrder = {
   paidAt?: string;
 };
 
-const memoryPaymentOrders = new Map<string, PaymentOrder>();
 const PAYMENT_ORDER_STORE_NAME = "astro-payment-orders";
 const PAYMENT_ORDER_LOCAL_DIR = ".data/payment-orders";
 
@@ -61,8 +60,8 @@ export function registerPaymentRoutes(app: express.Express) {
         });
       }
 
-      const user = await getOptionalUser(req);
-      const orderId = await createOrder(plan, "xorpay", user?.id);
+      const user = await requireUser(req);
+      const orderId = await createOrder(plan, "xorpay", user.id);
       const payType = req.body.payType === "wechat" ? "native" : "alipay";
       const params = {
         name: plan.name,
@@ -71,7 +70,7 @@ export function registerPaymentRoutes(app: express.Express) {
         order_id: orderId,
         notify_url: config.notifyUrl,
         return_url: config.returnUrl,
-        order_uid: user?.id || req.body.userId || "astro_guest",
+        order_uid: user.id,
         more: plan.description,
         sign: signXorPayPay(
           { name: plan.name, payType, price: plan.amount, orderId, notifyUrl: config.notifyUrl },
@@ -83,6 +82,7 @@ export function registerPaymentRoutes(app: express.Express) {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams(params).toString(),
+        signal: AbortSignal.timeout(10_000),
       });
       const data = await response.json();
       if (!response.ok || data.status !== "ok") {
@@ -99,11 +99,10 @@ export function registerPaymentRoutes(app: express.Express) {
         plan,
         provider: "xorpay",
         payUrl: data?.info?.qr || data?.url || data?.qrcode,
-        providerResponse: data,
       });
     } catch (error: any) {
       console.error("XorPay Create Error:", error);
-      res.status(500).json({ error: { message: error.message || "XorPay 下单失败" } });
+      res.status(Number(error?.status) || 500).json({ error: { message: error.message || "XorPay 下单失败" } });
     }
   });
 
@@ -118,8 +117,8 @@ export function registerPaymentRoutes(app: express.Express) {
         });
       }
 
-      const user = await getOptionalUser(req);
-      const orderId = await createOrder(plan, "xunhupay", user?.id);
+      const user = await requireUser(req);
+      const orderId = await createOrder(plan, "xunhupay", user.id);
       const tradeType = req.body.payType === "wechat" ? "WAP" : "WAP_ALIPAY";
       const params: Record<string, any> = {
         version: "1.1",
@@ -140,6 +139,7 @@ export function registerPaymentRoutes(app: express.Express) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
+        signal: AbortSignal.timeout(10_000),
       });
       const data = await response.json();
       if (!response.ok || data.errcode !== 0) {
@@ -157,11 +157,10 @@ export function registerPaymentRoutes(app: express.Express) {
         provider: "xunhupay",
         payUrl: data.url || data.url_qrcode,
         qrUrl: data.url_qrcode,
-        providerResponse: data,
       });
     } catch (error: any) {
       console.error("XunhuPay Create Error:", error);
-      res.status(500).json({ error: { message: error.message || "虎皮椒下单失败" } });
+      res.status(Number(error?.status) || 500).json({ error: { message: error.message || "虎皮椒下单失败" } });
     }
   });
 
@@ -180,8 +179,8 @@ export function registerPaymentRoutes(app: express.Express) {
 
       const plan = getPlan(req.body.planId);
       const channel = req.body.channel === "wap" ? "wap" : "page";
-      const user = await getOptionalUser(req);
-      const orderId = await createOrder(plan, "alipay", user?.id);
+      const user = await requireUser(req);
+      const orderId = await createOrder(plan, "alipay", user.id);
       const method = channel === "wap" ? "alipay.trade.wap.pay" : "alipay.trade.page.pay";
       const bizContent: Record<string, any> = {
         out_trade_no: orderId,
@@ -218,7 +217,7 @@ export function registerPaymentRoutes(app: express.Express) {
       });
     } catch (error: any) {
       console.error("Alipay Create Error:", error);
-      res.status(500).json({ error: { message: error.message || "支付宝下单失败" } });
+      res.status(Number(error?.status) || 500).json({ error: { message: error.message || "支付宝下单失败" } });
     }
   });
 
@@ -227,14 +226,14 @@ export function registerPaymentRoutes(app: express.Express) {
       const config = getXorPayConfig(req);
       const params = { ...req.body, ...req.query } as Record<string, string>;
       const order = await getPaymentOrder(params.order_id);
-      if (!order || !config.secret) return res.send("fail");
+      if (!order || order.provider !== "xorpay" || !config.secret) return res.send("fail");
 
       const expected = md5(`${params.aoid || ""}${params.order_id || ""}${params.pay_price || ""}${params.pay_time || ""}${config.secret}`);
-      const amountMatches = String(order.amount) === String(params.pay_price);
+      const amountMatches = moneyMatches(order.amount, params.pay_price);
       if (!params.sign || params.sign !== expected) return res.send("fail");
       if (!amountMatches) return res.send("fail");
 
-      await patchPaymentOrder(params.order_id, {
+      await confirmPaidOrder(params.order_id, {
         status: "paid",
         providerOrderId: params.aoid,
         paidAt: new Date().toISOString(),
@@ -243,7 +242,7 @@ export function registerPaymentRoutes(app: express.Express) {
       res.send("success");
     } catch (error) {
       console.error("XorPay Notify Error:", error);
-      res.send("fail");
+      res.status(503).send("fail");
     }
   });
 
@@ -253,14 +252,14 @@ export function registerPaymentRoutes(app: express.Express) {
       const params = { ...req.body } as Record<string, any>;
       const orderId = params.trade_order_id;
       const order = await getPaymentOrder(orderId);
-      if (!order || !config.appSecret) return res.send("fail");
+      if (!order || order.provider !== "xunhupay" || !config.appSecret) return res.send("fail");
 
       const expected = signXunhuPay(params, config.appSecret);
-      const amountMatches = String(order.amount) === String(params.total_fee);
+      const amountMatches = moneyMatches(order.amount, params.total_fee);
       if (!params.hash || params.hash !== expected) return res.send("fail");
       if (!amountMatches) return res.send("fail");
 
-      await patchPaymentOrder(orderId, {
+      await confirmPaidOrder(orderId, {
         status: "paid",
         providerOrderId: params.open_order_id,
         paidAt: new Date().toISOString(),
@@ -269,7 +268,7 @@ export function registerPaymentRoutes(app: express.Express) {
       res.send("success");
     } catch (error) {
       console.error("XunhuPay Notify Error:", error);
-      res.send("fail");
+      res.status(503).send("fail");
     }
   });
 
@@ -280,7 +279,7 @@ export function registerPaymentRoutes(app: express.Express) {
       const params = { ...req.body };
       const isValid = verifyAlipayNotify(params, config.publicKey);
       const order = await getPaymentOrder(params.out_trade_no);
-      const amountMatches = order && String(order.amount) === String(params.total_amount);
+      const amountMatches = order && order.provider === "alipay" && moneyMatches(order.amount, params.total_amount);
       const appMatches = !config.appId || params.app_id === config.appId;
 
       if (!isValid || !amountMatches || !appMatches) {
@@ -289,7 +288,7 @@ export function registerPaymentRoutes(app: express.Express) {
       }
 
       if (params.trade_status === "TRADE_SUCCESS" || params.trade_status === "TRADE_FINISHED") {
-        await patchPaymentOrder(params.out_trade_no, {
+        await confirmPaidOrder(params.out_trade_no, {
           status: "paid",
           providerOrderId: params.trade_no,
           paidAt: new Date().toISOString(),
@@ -300,7 +299,7 @@ export function registerPaymentRoutes(app: express.Express) {
       res.send("success");
     } catch (error) {
       console.error("Alipay Notify Error:", error);
-      res.send("fail");
+      res.status(503).send("fail");
     }
   });
 
@@ -309,23 +308,19 @@ export function registerPaymentRoutes(app: express.Express) {
     res.redirect(`/app/profile?payment=alipay&order=${encodeURIComponent(orderId)}`);
   });
 
-  app.get("/api/payments/alipay/orders/:orderId", async (req, res) => {
-    const order = await getPaymentOrder(req.params.orderId);
-    if (!order) {
-      return res.status(404).json({ error: { message: "订单不存在或服务已重启，请重新下单。" } });
-    }
-    res.setHeader("Cache-Control", "no-store");
-    res.json({ order });
-  });
-
-  app.get("/api/payments/orders/:orderId", async (req, res) => {
-    const order = await getPaymentOrder(req.params.orderId);
-    if (!order) {
-      return res.status(404).json({ error: { message: "订单不存在或服务已重启，请重新下单。" } });
-    }
-    res.setHeader("Cache-Control", "no-store");
-    res.json({ order });
-  });
+  const readOrder: express.RequestHandler = async (req, res) => {
+    try {
+      const user = await requireUser(req);
+      if (!/^AR[A-Za-z0-9-]{6,80}$/.test(req.params.orderId)) return res.status(400).json({ error: { message: "订单号无效。" } });
+      const order = await getPaymentOrder(req.params.orderId);
+      if (!order) return res.status(404).json({ error: { message: "订单不存在。" } });
+      if (order.userId !== user.id) return res.status(403).json({ error: { message: "这笔订单不属于当前账户。" } });
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ order: { id: order.id, provider: order.provider, planId: order.planId, amount: order.amount, status: order.status, createdAt: order.createdAt, paidAt: order.paidAt } });
+    } catch (error: any) { res.status(Number(error?.status) || 503).json({ error: { message: "订单暂时无法读取，请稍后重试。" } }); }
+  };
+  app.get("/api/payments/alipay/orders/:orderId", readOrder);
+  app.get("/api/payments/orders/:orderId", readOrder);
 }
 
 function normalizePem(value?: string) {
@@ -341,7 +336,9 @@ function escapeHtml(value: string) {
 }
 
 function getPlan(planId?: string) {
-  return PAYMENT_PLANS.find((item) => item.id === planId) || PAYMENT_PLANS[0];
+  const plan = PAYMENT_PLANS.find((item) => item.id === planId);
+  if (!plan) throw Object.assign(new Error("无效的商品。"), { status: 400 });
+  return plan;
 }
 
 function getPublicBaseUrl(req: express.Request) {
@@ -350,40 +347,55 @@ function getPublicBaseUrl(req: express.Request) {
   return process.env.PUBLIC_BASE_URL || `${forwardedProto || req.protocol}://${forwardedHost || req.get("host")}`;
 }
 
+function moneyMatches(expected: unknown, paid: unknown) {
+  const cents = (value: unknown) => {
+    const text = String(value ?? "");
+    if (!/^\d+(?:\.\d{1,2})?$/.test(text)) return null;
+    const [whole, fraction = ""] = text.split(".");
+    const result = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+    return Number.isSafeInteger(result) && result > 0 ? result : null;
+  };
+  const amount = cents(expected);
+  return amount !== null && amount === cents(paid);
+}
+
 function md5(value: string) {
   return crypto.createHash("md5").update(value, "utf8").digest("hex");
 }
 
 async function savePaymentOrder(order: PaymentOrder) {
-  memoryPaymentOrders.set(order.id, order);
-  try {
-    await writeStoreJson(PAYMENT_ORDER_STORE_NAME, order.id, order, PAYMENT_ORDER_LOCAL_DIR);
-  } catch (error) {
-    console.warn("Payment order save skipped:", error);
-  }
+  await updateStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, order.id, PAYMENT_ORDER_LOCAL_DIR, current => {
+    if (current) throw Object.assign(new Error("订单已存在，请重新下单。"), { status: 409 });
+    return order;
+  });
 }
 
 export async function getPaymentOrder(orderId?: string): Promise<PaymentOrder | null> {
   if (!orderId) return null;
-  try {
-    const order = await readStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, orderId, PAYMENT_ORDER_LOCAL_DIR);
-    if (order) return order;
-  } catch (error) {
-    console.warn("Payment order read skipped:", error);
-  }
-  return memoryPaymentOrders.get(orderId) || null;
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(orderId)) return null;
+  return readStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, orderId, PAYMENT_ORDER_LOCAL_DIR);
 }
 
 async function patchPaymentOrder(orderId: string, patch: Partial<PaymentOrder>) {
-  const current = await getPaymentOrder(orderId);
-  if (!current) return null;
-  const next = { ...current, ...patch };
-  await savePaymentOrder(next);
-  return next;
+  return updateStoreJson<PaymentOrder>(PAYMENT_ORDER_STORE_NAME, orderId, PAYMENT_ORDER_LOCAL_DIR, current => {
+    if (!current) throw Object.assign(new Error("订单不存在。"), { status: 404 });
+    // A repeated callback must not reset payment time or downgrade paid orders.
+    return current.status === "paid" ? current : { ...current, ...patch };
+  });
+}
+
+async function confirmPaidOrder(orderId: string, patch: Partial<PaymentOrder>) {
+  const order = await patchPaymentOrder(orderId, patch);
+  if (order.userId) {
+    // Callback retries and browser returns share the same durable grant ledger.
+    const { grantPaidOrderEntitlement } = await import("./entitlementRoutes.js");
+    await grantPaidOrderEntitlement(order);
+  }
+  return order;
 }
 
 async function createOrder(plan: PaymentPlan, provider: string, userId?: string) {
-  const orderId = `AR${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const orderId = `AR${Date.now()}${crypto.randomBytes(12).toString("hex").toUpperCase()}`;
   await savePaymentOrder({
     id: orderId,
     provider,

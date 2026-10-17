@@ -4,6 +4,7 @@ import { Sparkles, User, Compass, Book, Moon, Sun, Settings } from 'lucide-react
 import clsx from 'clsx';
 import { LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import { useAppContext } from '../store';
+import { CloudSyncNotice } from './CloudSyncNotice';
 import { WorkspaceStorageNotice } from './WorkspaceStorageNotice';
 import RouteTransition from './ui/RouteTransition';
 import { MOTION_DURATION, MOTION_EASE } from '../lib/uiMotion';
@@ -41,7 +42,7 @@ export default function Layout() {
           </button>
         </div>
       </motion.aside>
-      <main className="rail-main" id="app-main"><WorkspaceStorageNotice /><RouteTransition><Outlet /></RouteTransition></main>
+      <main className="rail-main" id="app-main"><WorkspaceStorageNotice /><CloudSyncNotice /><RouteTransition><Outlet /></RouteTransition></main>
       <LayoutGroup id="rail-mobile-navigation"><motion.nav layoutRoot className="rail-mobile-nav" aria-label="主导航">
         {navItems.map(item => <React.Fragment key={item.to}><NavItem {...item} /></React.Fragment>)}
       </motion.nav></LayoutGroup>

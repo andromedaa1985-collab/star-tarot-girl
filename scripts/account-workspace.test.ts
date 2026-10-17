@@ -1,3 +1,7 @@
+import { applyEntitlementSnapshot } from '../src/lib/entitlementClient';
+import { normalizeMembership } from '../src/lib/membership';
+import { getCloudSyncNotice } from '../src/lib/cloudSyncStatus';
+import { aiFetch, ENTITLEMENT_UPDATED_EVENT } from '../src/lib/aiClient';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { autoSyncAccountArchive } from '../src/components/AccountAutoSync';
@@ -690,4 +694,92 @@ test('a fresh committed page hydrates once, then reloads for a later same-accoun
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else Reflect.deleteProperty(globalThis, 'window');
   }
+});
+
+
+test('metadata refresh never advances the local archive base and conflicting autosync preserves local records', async () => {
+  const current = { ...session('revision-conflict'), archiveBaseRevision: 'base-one' };
+  storeAccountSession(current);
+  storage.setItem('diaryEntries', JSON.stringify(backup('local').data.diaryEntries));
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith('/me')) return json({ user: { ...current.user, archiveRevision: 'remote-two' } });
+    assert.equal(JSON.parse(String(init?.body)).baseRevision, 'base-one');
+    return new Response(JSON.stringify({ error: { code: 'ARCHIVE_CONFLICT', message: '云端已有更新，本机内容已保留。' } }), { status: 409 });
+  };
+  await refreshAccountSession(current);
+  assert.equal(getStoredAccountSession()?.archiveBaseRevision, 'base-one');
+  await assert.rejects(autoSyncAccountArchive(), (error: any) => error.code === 'ARCHIVE_CONFLICT');
+  assert.deepEqual(storedRecordIds(), ['local-diary']);
+  assert.equal(getStoredAccountSession()?.archiveBaseRevision, 'base-one');
+  assert.equal(storage.getItem('astroRailLastAutoSyncSignature:revision-conflict'), null);
+  assert.equal(getCloudSyncNotice()?.ownerId, 'revision-conflict');
+});
+
+test('a confirmed upload advances the archive base and its account vault preserves it across logout/login', async () => {
+  const current = { ...session('revision-roundtrip'), archiveBaseRevision: 'base-one' };
+  storeAccountSession(current);
+  storage.setItem('diaryEntries', JSON.stringify(backup('local').data.diaryEntries));
+  globalThis.fetch = async (_input, init) => {
+    assert.equal(JSON.parse(String(init?.body)).baseRevision, 'base-one');
+    return json({ archiveRevision: 'base-two', archiveUpdatedAt: '2026-10-18T00:00:00Z', archiveRecordCount: 1 });
+  };
+  await autoSyncAccountArchive();
+  assert.equal(getStoredAccountSession()?.archiveBaseRevision, 'base-two');
+  activateLock();
+  await logoutAccountWorkspace();
+  await releaseTransition!();
+  await getPageAccountTransition().initializeFreshPage();
+  activateLock();
+  await activateAccountWorkspace(session('revision-roundtrip'), null);
+  assert.equal(getStoredAccountSession()?.archiveBaseRevision, 'base-two');
+  assert.deepEqual(storedRecordIds(), ['local-diary']);
+});
+
+test('late entitlement snapshots cannot visually undo a newer purchase', () => {
+  storeAccountSession(session('snapshot-monotonic'));
+  let membership: any;
+  let energy = 0;
+  const setters: any = { setMembership: (value: any) => { membership = value; }, setEnergy: (value: number) => { energy = value; } };
+  applyEntitlementSnapshot({ membership: normalizeMembership({ plan: 'plus' }), energy: 20, revision: 3, updatedAt: 'fixture' }, setters);
+  applyEntitlementSnapshot({ membership: normalizeMembership({ plan: 'free' }), energy: 4, revision: 2, updatedAt: 'fixture' }, setters);
+  assert.equal(membership.plan, 'plus'); assert.equal(energy, 20);
+});
+
+test('AI feature requests carry account authorization and late responses cannot update a different owner', async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const events = new EventTarget();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: events });
+  let updates = 0;
+  events.addEventListener(ENTITLEMENT_UPDATED_EVENT, () => { updates++; });
+  try {
+    storeAccountSession(session('ai-owner'));
+    const pending = deferred<Response>();
+    globalThis.fetch = async (_input, init) => {
+      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer fixture-token-ai-owner');
+      assert.equal(JSON.parse(String(init?.body)).entitlement.type, 'bazi');
+      return pending.promise;
+    };
+    const response = aiFetch('bazi', { method: 'POST', body: JSON.stringify({ messages: [] }) });
+    storeAccountSession(session('different-owner'));
+    pending.resolve(json({ entitlement: { membership: { plan: 'plus' }, energy: 20 } }));
+    await response;
+    assert.equal(updates, 0);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+
+test('a late same-owner metadata refresh preserves the base advanced by a confirmed upload', async () => {
+  const current = { ...session('late-base-refresh'), archiveBaseRevision: 'base-one' };
+  storeAccountSession(current);
+  storage.setItem('diaryEntries', JSON.stringify(backup('local').data.diaryEntries));
+  const metadata = deferred<Response>();
+  globalThis.fetch = async (input) => String(input).endsWith('/me') ? metadata.promise : json({ archiveRevision: 'base-two', archiveUpdatedAt: '2026-10-18T00:00:00Z', archiveRecordCount: 1 });
+  const refreshing = refreshAccountSession(current);
+  await autoSyncAccountArchive();
+  metadata.resolve(json({ user: { ...current.user, archiveRevision: 'base-one' } }));
+  await refreshing;
+  assert.equal(getStoredAccountSession()?.archiveBaseRevision, 'base-two');
 });

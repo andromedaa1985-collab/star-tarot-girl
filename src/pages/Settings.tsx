@@ -220,6 +220,7 @@ export default function Settings() {
       const data = await downloadCloudArchive(accountSession);
       const nextSession = {
         ...accountSession,
+        archiveBaseRevision: data.archiveRevision ?? null,
         user: {
           ...accountSession.user,
           archiveUpdatedAt: data.archiveUpdatedAt,

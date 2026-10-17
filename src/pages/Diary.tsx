@@ -1,3 +1,4 @@
+import { aiFetch } from '../lib/aiClient';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
@@ -394,7 +395,7 @@ ${JSON.stringify(scopedDiaryEntries.map(e => ({ date: e.date, mood: e.mood, cont
 
       let aiText = "";
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('diary_review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

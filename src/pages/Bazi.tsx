@@ -1,3 +1,5 @@
+import { authHeaders } from '../lib/accountClient';
+import { aiFetch } from '../lib/aiClient';
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Compass, Calendar, Clock, User, Sparkles, MapPin, RefreshCw, Loader2, Star, Heart, Briefcase, Zap, Leaf, Flame, Mountain, Gem, Waves, Library, LockKeyhole, Link2, Check, ChevronDown, Search, Plus, Pencil } from 'lucide-react';
@@ -700,6 +702,7 @@ export default function Bazi() {
         ? '再补一份 TA 的资料，就能做双人合盘。'
         : '情侣、暧昧、前任复盘都可以从这里开始。';
   const handleCopyRelationshipLink = async () => {
+    if (!getStoredAccountSession()) { navigate('/auth?next=/app/bazi'); return; }
     const sourceProfile = matchA || profiles.find(profile => profile.id === activeProfileId) || profiles[0];
     if (!sourceProfile) {
       setRelationshipShareStatus('先保存一个档案，再生成邀请链接。');
@@ -711,11 +714,11 @@ export default function Bazi() {
     try {
       const response = await apiFetch('/api/relationship/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(getStoredAccountSession()?.token) },
         body: JSON.stringify({ profile: pickShareProfile(sourceProfile) }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error('邀请链接生成失败，请稍后再试。');
+      if (!response.ok) throw new Error(data.error?.message || '邀请链接生成失败，请稍后再试。');
       const inviteUrl = data.inviteUrl || `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(data.token)}`;
 
       if (isLocalUrl(inviteUrl)) {
@@ -944,9 +947,7 @@ export default function Bazi() {
     setIsCalculating(true);
     setBaziResult(null);
     setBaziMessages([]);
-    if (!plusActive) {
-      setEnergy(prev => prev - 1);
-    }
+
 
     try {
       const [yearStr, monthStr, dayStr] = validation.value.birthDate.split('-');
@@ -1064,7 +1065,7 @@ ${exactBaziStr}
       let usedPartialBaziFallback = false;
 
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('bazi', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1202,7 +1203,7 @@ ${recentFortuneContext}
 
       let aiText = "";
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('bazi', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

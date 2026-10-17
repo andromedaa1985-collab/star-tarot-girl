@@ -1,7 +1,8 @@
+import { consumeRequestLimit, requestNetworkKey } from "./requestLimits.js";
 import type express from "express";
 import crypto from "crypto";
 import { requireUser } from "./authRoutes.js";
-import { readStoreJson, writeStoreJson } from "./jsonStore.js";
+import { readStoreJson, updateStoreJson } from "./jsonStore.js";
 import { getPaymentOrder } from "./paymentRoutes.js";
 import { PAYMENT_PLANS, type PaymentPlan } from "../src/lib/pricing.js";
 import {
@@ -13,6 +14,9 @@ import {
   consumeDailyFortuneDeepCredit,
   defaultMembership,
   hasDailyFortuneDeepAccess,
+  hasFeatureAccess,
+  getDailyCheckInEnergy,
+  getDailyMissionEnergy,
   isPlusActive,
   isTesterActive,
   normalizeMembership,
@@ -30,6 +34,12 @@ type EntitlementRecord = {
   relationshipEntitlementsVersion?: 1;
   createdAt: string;
   updatedAt: string;
+  pendingCharges?: { id: string; resource: "energy" | "deep" | "none"; amount: number; expiresAt: number; activity?: string }[];
+  rewardDays?: Record<string, string>;
+  activity?: { date: string; tarot?: boolean; simulator?: boolean };
+  activeDates?: string[];
+  checkInStreak?: number;
+  revision?: number;
 };
 
 const ENTITLEMENT_STORE_NAME = "astro-entitlements";
@@ -39,13 +49,17 @@ const BUILTIN_TESTER_REDEEM_CODE_HASHES = [
   "8a6fa05a5c3f6c71b18b47fbf268b2e18cef6a7fa73f8820a9703ab65d2c70d1",
 ];
 
-type ChatEntitlementType = "tarot_message" | "daily_deep";
+type ChatEntitlementType = "tarot_message" | "daily_deep" | "bazi" | "guardian" | "simulator" | "diary_review";
 
 export function registerEntitlementRoutes(app: express.Express) {
   app.get("/api/entitlements/me", async (req, res) => {
     try {
       const user = await requireUser(req);
-      const record = await readEntitlementRecord(user.id);
+      let record = await readEntitlementRecord(user.id);
+      if (record.pendingCharges?.some(item => item.expiresAt <= Date.now())) {
+        await mutateEntitlement(user.id, () => {});
+        record = await readEntitlementRecord(user.id);
+      }
       res.setHeader("Cache-Control", "no-store");
       res.json(toEntitlementSnapshot(record));
     } catch (error: any) {
@@ -56,16 +70,12 @@ export function registerEntitlementRoutes(app: express.Express) {
   app.post("/api/entitlements/trial", async (req, res) => {
     try {
       const user = await requireUser(req);
-      const record = await readEntitlementRecord(user.id);
-      const before = record.membership;
-      const nextMembership = startPlusTrial(before);
-      if (nextMembership === before || nextMembership.source !== "trial") {
-        return res.status(409).json({ error: { message: "Plus 试用已经使用过了。" } });
-      }
-
-      record.membership = nextMembership;
-      record.energy = Math.max(record.energy, 12);
-      await saveEntitlementRecord(record);
+      const record = await mutateEntitlement(user.id, record => {
+        const nextMembership = startPlusTrial(record.membership);
+        if (nextMembership === record.membership || nextMembership.source !== "trial") throw entitlementError("Plus 试用已经使用过了。", 409);
+        record.membership = nextMembership;
+        record.energy = Math.max(record.energy, 12);
+      });
       res.setHeader("Cache-Control", "no-store");
       res.json({
         ...toEntitlementSnapshot(record),
@@ -90,13 +100,11 @@ export function registerEntitlementRoutes(app: express.Express) {
         return res.status(400).json({ error: { message: "兑换码无效，请检查后再试。" } });
       }
 
-      const record = await readEntitlementRecord(user.id);
-      if (!record.redeemedCodeHashes.includes(codeHash)) {
-        record.redeemedCodeHashes.push(codeHash);
-      }
-      record.membership = activateTesterAccess();
-      record.energy = 999999;
-      await saveEntitlementRecord(record);
+      const record = await mutateEntitlement(user.id, record => {
+        if (!record.redeemedCodeHashes.includes(codeHash)) record.redeemedCodeHashes.push(codeHash);
+        record.membership = activateTesterAccess();
+        record.energy = 999999;
+      });
       res.setHeader("Cache-Control", "no-store");
       res.json({
         ...toEntitlementSnapshot(record),
@@ -105,6 +113,36 @@ export function registerEntitlementRoutes(app: express.Express) {
     } catch (error: any) {
       sendError(res, error);
     }
+  });
+
+  app.post("/api/entitlements/rewards", async (req, res) => {
+    try {
+      const user = await requireUser(req);
+      const kind = req.body?.kind;
+      if (!["checkin", "mission", "return"].includes(kind)) throw entitlementError("奖励类型无效。", 400);
+      const today = appDateKey();
+      let diaryToday = false;
+      if (kind === "mission") {
+        const cloud = await readStoreJson<any>("astro-rail-accounts", `archives/${user.id}`, ".data/accounts");
+        diaryToday = Array.isArray(cloud?.archive?.data?.diaryEntries) && cloud.archive.data.diaryEntries.some((entry: any) => typeof entry.date === "string" && entry.date.slice(0, 10) === today && typeof entry.content === "string" && entry.content.trim());
+      }
+      const record = await mutateEntitlement(user.id, record => {
+        if (record.rewardDays![kind] === today) return;
+        if (kind === "mission" && !(diaryToday && record.activity?.date === today && record.activity.tarot && record.activity.simulator)) throw entitlementError("完成今天的抽牌、日记同步和沙盘后再来领奖。", 409);
+        if (kind === "return" && !record.activeDates!.some(date => date < today)) throw entitlementError("持续使用两天后可领取回访奖励。", 409);
+        const plus = isPlusActive(record.membership);
+        const amount = kind === "checkin" ? getDailyCheckInEnergy(record.membership) : kind === "mission" ? getDailyMissionEnergy(record.membership) : plus ? 3 : 2;
+        if (kind === "checkin") {
+          const yesterday = appDateKey(new Date(Date.now() - 86_400_000));
+          record.checkInStreak = record.rewardDays!.checkin === yesterday ? (record.checkInStreak || 0) + 1 : 1;
+        }
+        record.energy += amount;
+        record.rewardDays![kind] = today;
+        record.activeDates = [...new Set([...record.activeDates!, today])].slice(-30);
+      });
+      res.setHeader("Cache-Control", "no-store");
+      res.json(toEntitlementSnapshot(record));
+    } catch (error: any) { sendError(res, error); }
   });
 
   app.post("/api/entitlements/apply-order", async (req, res) => {
@@ -117,26 +155,20 @@ export function registerEntitlementRoutes(app: express.Express) {
       if (!order) {
         return res.status(404).json({ error: { message: "订单不存在或服务已重启，请重新下单。" } });
       }
-      if (order.userId && order.userId !== user.id) {
+      if (order.userId !== user.id) {
         return res.status(403).json({ error: { message: "这笔订单不属于当前登录账号。" } });
       }
       if (order.status !== "paid") {
         res.setHeader("Cache-Control", "no-store");
-        return res.status(202).json({ status: "waiting", order });
+        return res.status(202).json({ status: "waiting", order: publicOrder(order) });
       }
 
-      const record = await readEntitlementRecord(user.id);
-      if (!record.grantedOrderIds.includes(order.id)) {
-        const plan = getPlan(order.planId);
-        applyPlanEntitlement(record, plan);
-        record.grantedOrderIds.push(order.id);
-        await saveEntitlementRecord(record);
-      }
+      const record = await grantPaidOrderEntitlement(order);
 
       res.setHeader("Cache-Control", "no-store");
       res.json({
         status: "paid",
-        order,
+        order: publicOrder(order),
         ...toEntitlementSnapshot(record),
         message: "权益已经由后端确认入账。",
       });
@@ -146,45 +178,112 @@ export function registerEntitlementRoutes(app: express.Express) {
   });
 }
 
-export async function prepareChatEntitlementCharge(req: express.Request) {
-  const entitlement = req.body?.entitlement;
-  if (!entitlement) return null;
-
-  const type = entitlement.type as ChatEntitlementType;
-  if (type !== "tarot_message" && type !== "daily_deep") {
-    throw entitlementError("未知的权益校验类型。", 400);
-  }
-
-  const user = await requireUser(req);
-  const record = await readEntitlementRecord(user.id);
-  let shouldSave = false;
-
-  if (!isTesterActive(record.membership) && !isPlusActive(record.membership)) {
-    if (type === "daily_deep") {
-      if (!hasDailyFortuneDeepAccess(record.membership)) {
-        throw entitlementError("今日深解次数不足，请先解锁今日深解或开通 Plus。", 402);
-      }
-      record.membership = consumeDailyFortuneDeepCredit(record.membership);
-      shouldSave = true;
-    } else {
-      const energyCost = Math.min(20, Math.max(1, normalizeEnergy(entitlement.energyCost ?? 1)));
-      if (record.energy < energyCost) {
-        throw entitlementError("能量不足，请先补充能量或开通 Plus。", 402);
-      }
-      record.energy -= energyCost;
-      shouldSave = true;
+export async function grantPaidOrderEntitlement(order: { id: string; status: string; userId?: string; planId: string }) {
+  if (order.status !== "paid" || !order.userId) throw entitlementError("订单尚未确认或缺少账户归属，请联系客服核对。", 409);
+  return mutateEntitlement(order.userId, record => {
+    if (!record.grantedOrderIds.includes(order.id)) {
+      applyPlanEntitlement(record, getPlan(order.planId));
+      record.grantedOrderIds.push(order.id);
     }
-  }
+  });
+}
 
-  return {
-    async commit() {
-      if (shouldSave) {
-        await saveEntitlementRecord(record);
+// Reserve before calling the model; settle against the latest record, never an old snapshot.
+export async function prepareChatEntitlementCharge(req: express.Request) {
+  const type = (req.body?.entitlement?.type ?? "tarot_message") as ChatEntitlementType;
+  if (!["tarot_message", "daily_deep", "bazi", "guardian", "simulator", "diary_review"].includes(type)) throw entitlementError("未知的权益校验类型。", 400);
+  const authenticated = Boolean(req.get("authorization"));
+  if (!authenticated) {
+    if (type !== "tarot_message") throw entitlementError("请先登录账户再使用此功能。", 401);
+    await reserveRequestBudget(req);
+    return null;
+  }
+  const user = await requireUser(req);
+  const id = crypto.randomUUID();
+  await mutateEntitlement(user.id, async record => {
+    const premium = type === "bazi" || type === "guardian" || type === "simulator" ? type : null;
+    if (premium && !hasFeatureAccess(record.membership, premium)) {
+      const migrated = await readEntitlementRecord(user.id);
+      if (!hasFeatureAccess(migrated.membership, premium)) throw entitlementError("请先解锁此功能。", 402);
+      record.membership.featureExpiresAt = { ...migrated.membership.featureExpiresAt, ...record.membership.featureExpiresAt };
+    }
+    if (record.pendingCharges!.length >= 50) throw entitlementError("当前进行中的请求较多，请稍后重试。", 429);
+    let resource: "energy" | "deep" | "none" = "none";
+    if (!isTesterActive(record.membership) && !isPlusActive(record.membership)) {
+      if (type === "daily_deep") {
+        if (!hasDailyFortuneDeepAccess(record.membership)) throw entitlementError("今日深解次数不足，请先解锁今日深解或开通 Plus。", 402);
+        record.membership = consumeDailyFortuneDeepCredit(record.membership);
+        resource = "deep";
+      } else {
+        if (record.energy < 1) throw entitlementError("能量不足，请先补充能量或开通 Plus。", 402);
+        record.energy -= 1;
+        resource = "energy";
       }
-      return toEntitlementSnapshot(record);
-    },
+    }
+    record.pendingCharges!.push({ id, resource, amount: resource === "none" ? 0 : 1, expiresAt: Date.now() + 120_000, activity: type });
+  });
+  try { await reserveRequestBudget(req, user.id); }
+  catch (error) { await settle(false); throw error; }
+  let committed = false;
+  async function settle(success: boolean) {
+    return mutateEntitlement(user.id, record => {
+      const pending = record.pendingCharges!.find(item => item.id === id);
+      if (!pending) return;
+      if (!success) refundCharge(record, pending);
+      if (success) {
+        const date = appDateKey();
+        if (record.activity?.date !== date) record.activity = { date };
+        if (pending.activity === "tarot_message") record.activity!.tarot = true;
+        if (pending.activity === "simulator") record.activity!.simulator = true;
+        record.activeDates = [...new Set([...(record.activeDates || []), date])].slice(-30);
+      }
+      record.pendingCharges = record.pendingCharges!.filter(item => item.id !== id);
+    });
+  }
+  return {
+    async commit() { const record = await settle(true); committed = true; return toEntitlementSnapshot(record); },
+    async release() { if (!committed) await settle(false); },
   };
 }
+
+const dateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+function appDateKey(date = new Date()) { return dateFormatter.format(date); }
+
+async function reserveRequestBudget(req: express.Request, userId?: string) {
+  const network = requestNetworkKey(req);
+  await consumeRequestLimit(`ai-network:${network}`, 60, 60_000);
+  const identity = userId || network;
+  const now = Date.now();
+  await updateStoreJson<any>("astro-ai-budgets", identity, ".data/ai-budgets", previous => {
+    const current = previous || {};
+    const minute = Math.floor(now / 60_000);
+    const date = appDateKey();
+    const count = current.minute === minute ? current.count || 0 : 0;
+    const daily = current.date === date ? current.daily || 0 : 0;
+    if (count >= (userId ? 20 : 5) || (!userId && daily >= 5)) throw entitlementError("请求过于频繁或今日体验次数已用完，请稍后重试或登录账户。", 429);
+    return { minute, count: count + 1, date, daily: daily + 1 };
+  });
+}
+
+function refundCharge(record: EntitlementRecord, pending: NonNullable<EntitlementRecord["pendingCharges"]>[number]) {
+  if (pending.resource === "energy") record.energy += pending.amount;
+  if (pending.resource === "deep") record.membership = addDailyFortuneDeepCredits(record.membership, pending.amount);
+}
+
+async function mutateEntitlement(userId: string, change: (record: EntitlementRecord) => void | Promise<void>) {
+  return updateStoreJson<EntitlementRecord>(ENTITLEMENT_STORE_NAME, entitlementKey(userId), ENTITLEMENT_LOCAL_DIR, async stored => {
+    const record = normalizeEntitlementRecord(userId, stored);
+    const now = Date.now();
+    for (const pending of record.pendingCharges!) if (pending.expiresAt <= now) refundCharge(record, pending);
+    record.pendingCharges = record.pendingCharges!.filter(item => item.expiresAt > now);
+    await change(record);
+    record.updatedAt = new Date().toISOString();
+    record.revision = (record.revision || 0) + 1;
+    return record;
+  });
+}
+
+function publicOrder(order: any) { return { id: order.id, planId: order.planId, status: order.status }; }
 
 async function readEntitlementRecord(userId: string) {
   const stored = await readStoreJson<EntitlementRecord>(
@@ -221,10 +320,6 @@ async function readEntitlementRecord(userId: string) {
   return record;
 }
 
-async function saveEntitlementRecord(record: EntitlementRecord) {
-  record.updatedAt = new Date().toISOString();
-  await writeStoreJson(ENTITLEMENT_STORE_NAME, entitlementKey(record.userId), record, ENTITLEMENT_LOCAL_DIR);
-}
 
 function normalizeEntitlementRecord(userId: string, record: EntitlementRecord | null): EntitlementRecord {
   const now = new Date().toISOString();
@@ -237,6 +332,12 @@ function normalizeEntitlementRecord(userId: string, record: EntitlementRecord | 
     relationshipEntitlementsVersion: record?.relationshipEntitlementsVersion === 1 ? 1 : undefined,
     createdAt: typeof record?.createdAt === "string" ? record.createdAt : now,
     updatedAt: typeof record?.updatedAt === "string" ? record.updatedAt : now,
+    pendingCharges: Array.isArray(record?.pendingCharges) ? record.pendingCharges : [],
+    rewardDays: record?.rewardDays || {},
+    activity: record?.activity,
+    activeDates: Array.isArray(record?.activeDates) ? record.activeDates : [],
+    checkInStreak: record?.checkInStreak || 0,
+    revision: record?.revision || 0,
   };
 }
 
@@ -251,7 +352,9 @@ function entitlementKey(userId: string) {
 }
 
 function getPlan(planId?: string) {
-  return PAYMENT_PLANS.find((item) => item.id === planId) || PAYMENT_PLANS[0];
+  const plan = PAYMENT_PLANS.find((item) => item.id === planId);
+  if (!plan) throw entitlementError("订单商品不存在，请联系客服核对。", 400);
+  return plan;
 }
 
 export function applyPlanEntitlement(record: EntitlementRecord, plan: PaymentPlan, now = new Date()) {
@@ -334,6 +437,8 @@ function toEntitlementSnapshot(record: EntitlementRecord) {
     membership: record.membership,
     energy: record.energy,
     updatedAt: record.updatedAt,
+    revision: record.revision || 0,
+    rewards: { ...record.rewardDays, checkInStreak: record.checkInStreak },
   };
 }
 

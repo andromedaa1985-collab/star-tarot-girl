@@ -1,3 +1,4 @@
+import { aiFetch } from '../lib/aiClient';
 import React, { useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import {
@@ -513,7 +514,7 @@ ${requestDraft.decisionCriteria?.length ? `用户补充的比较标准（仅是�
       let aiText = '';
       let usedFallbackSimulation = false;
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('simulator', {
           method: 'POST',
           signal: controller.signal,
           headers: {

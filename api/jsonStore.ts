@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import crypto from "node:crypto";
 import { getStore, type Store } from "@netlify/blobs";
 import { RequestDeadlineError, runStorageOperation } from "./_requestDeadline.js";
 
@@ -85,7 +86,7 @@ async function upstashCommand(command: string, ...args: string[]) {
   } catch (error) {
     // A cancelled/timed-out SET may already have reached Redis. Do not retry
     // the mutation, or tell the user that a debit definitely did not happen.
-    if (command === "SET" && submitted) {
+    if ((command === "SET" || command === "EVAL") && submitted) {
       throw new RequestDeadlineError(503, "账户变更结果尚未确认，请刷新账户核对权益后再操作。", "STORE_WRITE_UNCONFIRMED");
     }
     if (error instanceof RequestDeadlineError) throw error;
@@ -125,7 +126,7 @@ async function withNetlifyStore<T>(
         try {
           const response = await fetch(input, { ...init, signal });
           const body = await response.arrayBuffer();
-          if (!response.ok && response.status !== 404) {
+          if (!response.ok && response.status !== 404 && response.status !== 412) {
             fetchFailure = new RequestDeadlineError(503, "云端存储暂时不可用，请稍后重试。", "STORE_UPSTREAM_ERROR");
             return new Response(null, { status: 400 });
           }
@@ -158,7 +159,10 @@ async function withNetlifyStore<T>(
 }
 
 function localPath(localDir: string, key: string) {
-  return path.join(process.cwd(), localDir, `${key}.json`);
+  const root = path.resolve(process.cwd(), localDir);
+  const target = path.resolve(root, `${key}.json`);
+  if (!target.startsWith(root + path.sep)) throw new Error("无效的存储键。");
+  return target;
 }
 
 async function readLocalJson<T>(localDir: string, key: string): Promise<T | null> {
@@ -222,4 +226,84 @@ export async function writeStoreJson(storeName: string, key: string, value: unkn
   }
 
   await writeLocalJson(localDir, key, value);
+}
+
+
+// Keep existing JSON records unchanged; use provider versions for atomic updates.
+export type VersionedJson<T> = { value: T | null; version: string | null };
+
+function netlifyStoreConfig() {
+  return isNetlifyRuntime() ? undefined : getExplicitNetlifyConfig() ?? undefined;
+}
+
+export async function readVersionedStoreJson<T>(storeName: string, key: string, localDir: string): Promise<VersionedJson<T>> {
+  const config = netlifyStoreConfig();
+  if (isNetlifyRuntime() || config) {
+    const result = await withNetlifyStore(storeName, false, store => store.getWithMetadata(key, { type: "json" }), config);
+    if (!result) return { value: null, version: null };
+    if (!result.etag) throw new RequestDeadlineError(503, "存储版本未确认，请稍后重试。", "STORE_VERSION_MISSING");
+    return { value: result.data as T, version: result.etag };
+  }
+  if (hasUpstashConfig()) {
+    const raw = await upstashCommand("GET", scopedKey(storeName, key));
+    return raw == null ? { value: null, version: null } : { value: JSON.parse(raw) as T, version: raw };
+  }
+  if (isVercelRuntime()) assertPersistentStoreOnVercel();
+  try {
+    const raw = await fs.readFile(localPath(localDir, key), "utf8");
+    return { value: JSON.parse(raw), version: raw };
+  } catch (error: any) {
+    if (error.code === "ENOENT") return { value: null, version: null };
+    throw error;
+  }
+}
+
+const localWrites = new Map<string, Promise<void>>();
+
+const CAS_SCRIPT = "local current = redis.call('GET', KEYS[1]); if (ARGV[1] == 'missing' and current == false) or (ARGV[1] == 'exists' and current == ARGV[2]) then redis.call('SET', KEYS[1], ARGV[3]); return 1 else return 0 end";
+
+export async function compareAndSetStoreJson(storeName: string, key: string, value: unknown, version: string | null, localDir: string): Promise<boolean> {
+  const config = netlifyStoreConfig();
+  if (isNetlifyRuntime() || config) {
+    // SDK 10.7.6 setJSON drops conditions on the wire; set forwards them correctly.
+    const result = await withNetlifyStore(storeName, true, store => store.set(key, JSON.stringify(value), version === null ? { onlyIfNew: true } : { onlyIfMatch: version }), config);
+    return result.modified;
+  }
+  if (hasUpstashConfig()) {
+    const result = await upstashCommand("EVAL", CAS_SCRIPT, "1", scopedKey(storeName, key), version === null ? "missing" : "exists", version ?? "", JSON.stringify(value));
+    if (result !== 0 && result !== 1) throw new RequestDeadlineError(503, "账户变更结果尚未确认，请刷新账户核对后重试。", "STORE_WRITE_UNCONFIRMED");
+    return result === 1;
+  }
+  if (isVercelRuntime()) assertPersistentStoreOnVercel();
+  const target = localPath(localDir, key);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  // Local development runs in one Node process. Distributed production updates
+  // use the provider CAS above; a process crash cannot leave a permanent lock.
+  const previous = localWrites.get(target) || Promise.resolve();
+  let release: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const queued = previous.then(() => held);
+  localWrites.set(target, queued);
+  await previous;
+  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+  try {
+    const latest = await readVersionedStoreJson(storeName, key, localDir);
+    if (latest.version !== version) return false;
+    await fs.writeFile(temporary, JSON.stringify(value), "utf8");
+    await fs.rename(temporary, target);
+    return true;
+  } finally {
+    await fs.rm(temporary, { force: true });
+    release!();
+    if (localWrites.get(target) === queued) localWrites.delete(target);
+  }
+}
+
+export async function updateStoreJson<T>(storeName: string, key: string, localDir: string, update: (value: T | null) => T | Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await readVersionedStoreJson<T>(storeName, key, localDir);
+    const next = await update(current.value);
+    if (await compareAndSetStoreJson(storeName, key, next, current.version, localDir)) return next;
+  }
+  throw new RequestDeadlineError(409, "数据已被其他请求更新，请刷新后重试。", "STORE_CONFLICT");
 }
