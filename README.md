@@ -31,6 +31,12 @@ npm start
 
 `server.ts` 与 Vercel、Netlify 使用同一套 `api/index.ts` 路由，保证接口状态码、CORS 和权益校验一致。Vercel 配置见 `vercel.json`，Netlify 配置见 `netlify.toml`。
 
+## 离线缓存与更新
+
+生产版 Service Worker 保存公共页面入口和实际访问过的静态资源。已下载的带哈希 JS/CSS 与版本化塔罗图片直接复用缓存；未版本化的图片和字体在后台更新。页面入口和应用清单优先联网，失败时使用当前缓存。新部署通过新资源哈希及缓存版本切换更新。
+
+断网时只能打开资源已缓存的页面，未访问过的懒加载模块仍需联网。AI 解读、登录、支付和云同步需要网络；`/api` 及其子路径均不进入离线缓存。错误响应、错误资源类型、重定向和标记为 private/no-store 的响应不会写入缓存，缓存不可用时仍保留正常网络加载。
+
 ## Vercel 部署与 API
 
 导入整个 Git 仓库并将生产分支设为 `main`，使用 Vite 预设、构建命令 `npm run build`、输出目录 `dist`。不要仅上传 `dist`；仓库里的 `api/` 同时部署为 Node.js Functions。Web 前端默认向同一域名的 `/api` 请求，通常不需要设置 `VITE_API_BASE_URL`；只有确实使用独立后端时才设置它，不能填写 localhost。
