@@ -1,6 +1,8 @@
+import { extractTarotPositions, getCardPositions, tarotImageRotation, isDailyFortuneQuestion, getTodaysDailyReading, drawWithTarotOrientation } from '../lib/tarotPresentation';
 import { autoSyncAccountArchive } from '../components/AccountAutoSync';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import TarotAtmosphere from '../components/TarotDeckArtwork';
+import TarotCardMessage from '../components/TarotCardMessage';
 import { TAROT_CARDS, TAROT_CARD_BACK, TAROT_CARD_INDEX_BY_IMAGE, resolveTarotArtwork } from '../lib/tarotDeck';
 import { createPortal } from 'react-dom';
 import {
@@ -190,9 +192,6 @@ const getLocalDateKey = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-const extractTarotPositions = (cardsText = '') =>
-  (cardsText.match(/正位|逆位/g) || []) as TarotPosition[];
-
 const getRecentTarotPositions = (readings: TarotReading[], limit = 12) => {
   const newestFirst = readings.flatMap((reading) => extractTarotPositions(reading.cards)).slice(0, limit);
   return newestFirst.reverse();
@@ -349,24 +348,6 @@ const isCasualChatQuestion = (question: string) => {
   if (!normalized) return false;
   if (normalized.length <= 18 && includesKeyword(normalized, CASUAL_CHAT_KEYWORDS)) return true;
   return /^(hi|hello|hey|test|ok|thanks|thank you)[!.。！ ]*$/i.test(normalized);
-};
-
-const DAILY_FORTUNE_KEYWORDS = [
-  '今日运势',
-  '每日运势',
-  '今天运势',
-  '今天的运势',
-  '今日牌',
-  '每日牌',
-  '今日指引',
-  '每日指引',
-  '今天怎么样',
-  '今天如何',
-];
-
-const isDailyFortuneQuestion = (question: string) => {
-  const normalized = question.trim();
-  return normalized === '运势' || includesKeyword(normalized, DAILY_FORTUNE_KEYWORDS);
 };
 
 const DAILY_DEEP_STRONG_KEYWORDS = ['今日深解', '深解', '深度解读', '深度分析', '完整解读', '完整分析'];
@@ -1445,7 +1426,8 @@ export default function Home() {
 
   const [inputText, setInputText, clearInputDraft] = usePersistentDraft('draft:home:input', '');
   const [isThinking, setIsThinking] = useState(false);
-  const [conversationOpen, setConversationOpen] = useState(false);
+  const todayReading = getTodaysDailyReading(tarotReadings);
+  const [conversationOpen, setConversationOpen] = useState(() => Boolean(todayReading));
   const conversationOpenRef = useRef(conversationOpen);
   conversationOpenRef.current = conversationOpen;
   const homeToolsRef = useRef<HTMLDetailsElement>(null);
@@ -1474,9 +1456,14 @@ export default function Home() {
   const [rewardNotice, setRewardNotice] = useState<string | null>(null);
   const rewardBusy = useRef(false);
   const [historyQuotaNotice, setHistoryQuotaNotice] = useState(false);
-  const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(null);
+  const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(() => todayReading?.id || null);
   const [requestedArchiveId, setRequestedArchiveId] = useState<string | null>(null);
   const closeReadingLog = () => { setShowReadingLog(false); setRequestedArchiveId(null); };
+  useEffect(() => {
+    if (!todayReading) return;
+    setConversationOpen(true);
+    setFollowUpReadingId(todayReading.id);
+  }, [todayReading?.id]);
 
   useEffect(() => {
     if (searchParams.get('history') !== '1' && !searchParams.get('reading')) return;
@@ -1617,7 +1604,6 @@ export default function Home() {
       setShowPetMenu((value) => !value);
     }
   };
-  const isTarotImage = (image?: string) => Boolean(image && image.startsWith('/tarot/'));
   const weekReadings = useMemo(
     () => tarotReadings.filter((reading) => Date.now() - new Date(reading.date).getTime() < 7 * 86400000),
     [tarotReadings],
@@ -2017,6 +2003,7 @@ export default function Home() {
       timestamp: Date.now(),
       cardImage: sourceMessage.cardImage || linkedReading?.cardImage,
       cardImages: sourceMessage.cardImages || linkedReading?.cardImages,
+      cardPositions: sourceMessage.cardPositions || getCardPositions(linkedReading),
       sourceQuestion: userMessage.text,
       replyToMessageId: userMessage.id,
       readingId: linkedReading?.id,
@@ -2238,7 +2225,7 @@ export default function Home() {
       replyToMessageId: options.regeneration ? options.regeneration.message.replyToMessageId : userMessage.id,
       readingId: shouldDraw ? undefined : currentReading?.id,
       ...answerTrace,
-      ...(shouldReadDraw ? { cardImage: image, cardImages: images } : {}),
+      ...(shouldReadDraw ? { cardImage: image, cardImages: images, cardPositions: cards.map(card => card.position) } : {}),
     };
 
     const newReadingId = shouldDraw ? crypto.randomUUID() : undefined;
@@ -2260,6 +2247,7 @@ export default function Home() {
             summary: answer.trim(),
             cardImage: image,
             cardImages: images,
+            cardPositions: cards.map(card => card.position),
             ...answerTrace,
           }, readingLimit));
       setAppEvents((events) => recordAppEvent(events, 'tarot_draw', {
@@ -2441,7 +2429,7 @@ export default function Home() {
       image.src = resolveTarotArtwork(shareReading.cardImage);
     });
 
-    if (loaded) ctx.drawImage(image, 92, 230, 360, 560);
+    if (loaded) drawWithTarotOrientation(ctx, getCardPositions(shareReading)[0], 92, 230, 360, 560, () => ctx.drawImage(image, 92, 230, 360, 560));
     ctx.fillStyle = '#F4CF83';
     ctx.font = '800 24px sans-serif';
     ctx.fillText('提问', 500, 268);
@@ -2666,7 +2654,7 @@ export default function Home() {
       if (loaded) {
         ctx.save();
         clipRoundRect(cardX, cardY, cardWidth, cardHeight, 24);
-        drawImageCover(image, cardX, cardY, cardWidth, cardHeight);
+        drawWithTarotOrientation(ctx, getCardPositions(shareReading)[0], cardX, cardY, cardWidth, cardHeight, () => drawImageCover(image, cardX, cardY, cardWidth, cardHeight));
         ctx.restore();
       } else {
         const cardPlaceholder = ctx.createLinearGradient(cardX, cardY, cardX + cardWidth, cardY + cardHeight);
@@ -3140,8 +3128,9 @@ export default function Home() {
                 const source = message.role === 'ai' ? getRegenerationSource(messages, tarotReadings, message.id) : null;
                 const canRegenerate = Boolean(source && (message.model !== DEEPSEEK_TAROT_DEEP_MODEL || source.reading));
                 return (
+                <React.Fragment key={message.id}>
+                {message.role === 'ai' && <TarotCardMessage message={message} reading={source?.reading} />}
                 <motion.div
-                  key={message.id}
                   initial={reducedMotion ? false : { opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: reducedMotion ? 0 : MOTION_DURATION.standard, ease: MOTION_EASE }}
@@ -3163,51 +3152,6 @@ export default function Home() {
                         {message.usedFallback ? '本地参考解读 · 连接恢复后可重试' : source?.originalDraw ? '这张牌的解读' : '沿着你的问题，继续聊'}
                       </p>
                     )}
-                    {message.role === 'ai' &&
-                      (() => {
-                        const messageCardImages = (
-                          message.cardImages?.length
-                            ? message.cardImages
-                            : message.cardImage
-                              ? [message.cardImage]
-                              : []
-                        )
-                          .filter(isTarotImage)
-                          .slice(0, 5);
-                        if (messageCardImages.length === 0) return null;
-                        return (
-                          <div
-                            className={clsx(
-                              'mb-3',
-                              messageCardImages.length === 1
-                                ? 'w-20'
-                                : 'grid max-w-[260px] gap-1.5 sm:max-w-[300px]',
-                            )}
-                            style={
-                              messageCardImages.length > 1
-                                ? {
-                                    gridTemplateColumns: `repeat(${messageCardImages.length}, minmax(0, 1fr))`,
-                                  }
-                                : undefined
-                            }
-                          >
-                            {messageCardImages.map((src, index) => (
-                              <img
-                                key={`${src}-${index}`}
-                                src={resolveTarotArtwork(src, 320)}
-                                loading="lazy" decoding="async"
-                                alt="抽到的塔罗牌"
-                                className={clsx(
-                                  'object-cover object-top shadow-[0_12px_28px_rgba(0,0,0,0.22)] ring-1 ring-black/5 dark:ring-white/10',
-                                  messageCardImages.length === 1
-                                    ? 'h-28 w-20 rounded-[18px]'
-                                    : 'aspect-[2/3] w-full rounded-[14px]',
-                                )}
-                              />
-                            ))}
-                          </div>
-                        );
-                      })()}
                     {message.role === 'ai' ? (
                       <div className="rail-reader space-y-5">
                         {(() => {
@@ -3246,6 +3190,7 @@ export default function Home() {
                   </div>
                   {renderDailyDeepCta(message, index, visibleMessages)}
                 </motion.div>
+                </React.Fragment>
               );
               })}
               <div ref={endRef} className="h-8 shrink-0" />
@@ -3681,6 +3626,7 @@ function DrawCardAnimation({
                     src={resolveTarotArtwork(cardSrc, 640)}
                     decoding="async"
                     alt={`${card.name}${card.position}`}
+                    style={{ rotate: tarotImageRotation(card.position) }}
                     animate={{ opacity: [0, 0, 1, 1], scaleX: [0.18, 0.18, 1, 1] }}
                     transition={{ duration: 2.9, delay: index * 0.14, times: [0, 0.38, 0.56, 1], ease: 'easeInOut' }}
                     className={clsx(
@@ -4287,7 +4233,7 @@ function ReadingLog({
                       <div key={reading.id} id={`archive-reading-${reading.id}`} className={clsx('rounded-2xl border bg-apple-surface-hover p-3', initialReadingId === reading.id ? 'border-apple-gold' : 'border-apple-border')}>
                         <div className="flex gap-3">
                           {reading.cardImage && (
-                            <img src={resolveTarotArtwork(reading.cardImage, 320)} loading="lazy" decoding="async" alt="牌面" className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
+                            <img src={resolveTarotArtwork(reading.cardImage, 320)} loading="lazy" decoding="async" alt={`牌面${getCardPositions(reading)[0] || ''}`} style={{ transform: `rotate(${tarotImageRotation(getCardPositions(reading)[0])}deg)` }} className="h-20 w-14 shrink-0 rounded-[16px] object-cover" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
