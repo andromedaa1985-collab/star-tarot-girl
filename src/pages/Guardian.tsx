@@ -1,3 +1,4 @@
+import { aiFetch } from '../lib/aiClient';
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Moon, Send, Sparkles, Mail, Loader2, History, ScrollText } from 'lucide-react';
@@ -187,7 +188,7 @@ export default function Guardian() {
       let aiText = "";
       let usedFallback = false;
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('guardian', {
           method: 'POST',
           signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
@@ -294,7 +295,7 @@ export default function Guardian() {
 
       let aiText = "";
       try {
-        const res = await apiFetch('/api/deepseek/chat', {
+        const res = await aiFetch('guardian', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

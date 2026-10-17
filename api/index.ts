@@ -3,10 +3,11 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import { search } from "duck-duck-scrape";
 import { registerAnalyticsRoutes } from "./analyticsRoutes.js";
-import { registerAuthRoutes } from "./authRoutes.js";
+import { requireUser, registerAuthRoutes } from "./authRoutes.js";
 import { registerPaymentRoutes } from "./paymentRoutes.js";
 import { prepareChatEntitlementCharge, registerEntitlementRoutes } from "./entitlementRoutes.js";
 import { CHAT_UPSTREAM_TIMEOUT_MS, requestChatCompletion, runOptionalSearchWithDeadline } from "./_chatProxy.js";
+import { readStoreJson, updateStoreJson } from "./jsonStore.js";
 import { CHAT_REQUEST_TOTAL_TIMEOUT_MS, runWithRequestDeadline } from "./_requestDeadline.js";
 
 dotenv.config();
@@ -49,7 +50,7 @@ registerPaymentRoutes(app);
 registerEntitlementRoutes(app);
 registerAnalyticsRoutes(app);
 
-const relationshipInvites = new Map<string, { profile: any; createdAt: string; expiresAt: number }>();
+type RelationshipInvite = { profile: any; ownerId: string; createdAt: string; expiresAt: number };
 const RELATIONSHIP_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 app.get("/api/health", (_req, res) => {
@@ -66,9 +67,9 @@ app.get("/api/time", (_req, res) => {
   });
 });
 
-app.post("/api/relationship/invites", (req, res) => {
+app.post("/api/relationship/invites", async (req, res) => {
   try {
-    pruneRelationshipInvites();
+    const user = await requireUser(req);
     const profile = sanitizeRelationshipProfile(req.body?.profile);
     if (!profile) {
       return res.status(400).json({ error: { message: "请先保存一份完整档案，再生成邀请链接。" } });
@@ -76,11 +77,13 @@ app.post("/api/relationship/invites", (req, res) => {
 
     const token = crypto.randomBytes(18).toString("base64url");
     const expiresAt = Date.now() + RELATIONSHIP_INVITE_TTL_MS;
-    relationshipInvites.set(token, {
-      profile,
-      createdAt: new Date().toISOString(),
-      expiresAt,
+    await updateStoreJson<any>("astro-invite-budgets", user.id, ".data/invite-budgets", current => {
+      const date = new Date().toISOString().slice(0, 10);
+      const count = current?.date === date ? current.count : 0;
+      if (count >= 10) throw Object.assign(new Error("今天创建的邀请较多，请明天再试。"), { status: 429 });
+      return { date, count: count + 1 };
     });
+    await updateStoreJson<RelationshipInvite>("astro-relationship-invites", token, ".data/relationship-invites", () => ({ profile, ownerId: user.id, createdAt: new Date().toISOString(), expiresAt }));
 
     res.setHeader("Cache-Control", "no-store");
     res.json({
@@ -93,14 +96,15 @@ app.post("/api/relationship/invites", (req, res) => {
   }
 });
 
-app.get("/api/relationship/invites/:token", (req, res) => {
-  pruneRelationshipInvites();
-  const invite = relationshipInvites.get(req.params.token);
+app.get("/api/relationship/invites/:token", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  if (!invite) {
-    return res.status(404).json({ error: { message: "邀请链接已失效，请让对方重新生成一次。" } });
-  }
-  res.json({ profile: invite.profile, expiresAt: new Date(invite.expiresAt).toISOString() });
+  try {
+    const token = req.params.token;
+    if (!/^[A-Za-z0-9_-]{24}$/.test(token)) return res.status(404).json({ error: { message: "邀请链接无效。" } });
+    const invite = await readStoreJson<RelationshipInvite>("astro-relationship-invites", token, ".data/relationship-invites");
+    if (!invite || invite.expiresAt <= Date.now()) return res.status(404).json({ error: { message: "邀请链接已失效，请让对方重新生成一次。" } });
+    res.json({ profile: invite.profile, expiresAt: new Date(invite.expiresAt).toISOString() });
+  } catch (error: any) { sendApiError(res, error); }
 });
 
 app.post("/api/deepseek/chat", async (req, res) => {
@@ -113,6 +117,13 @@ app.post("/api/deepseek/chat", async (req, res) => {
   req.once("aborted", cancelAbortedRequest);
   res.once("close", cancelDisconnectedResponse);
   return runWithRequestDeadline({ expiresAt: requestStartedAt + CHAT_REQUEST_TOTAL_TIMEOUT_MS, signal: controller.signal }, async () => {
+  let entitlementCharge: Awaited<ReturnType<typeof prepareChatEntitlementCharge>>;
+  const releaseCharge = async () => {
+    if (!entitlementCharge) return;
+    const charge = entitlementCharge;
+    await runWithRequestDeadline({ expiresAt: Math.min(requestStartedAt + CHAT_REQUEST_TOTAL_TIMEOUT_MS, Date.now() + 3000) }, () => charge.release());
+    entitlementCharge = null;
+  };
   try {
     const apiKey = requireEnv("DEEPSEEK_API_KEY", "DeepSeek API Key");
     if (isDailyDeepBypassRequest(req)) {
@@ -122,7 +133,8 @@ app.post("/api/deepseek/chat", async (req, res) => {
         },
       });
     }
-    const entitlementCharge = await prepareChatEntitlementCharge(req);
+    const validatedPayload = validateChatPayload(req.body);
+    entitlementCharge = await prepareChatEntitlementCharge(req);
     const messages = [...(req.body.messages ?? [])];
     if (req.body.isInternetMode) {
       const lastUserMsg = messages[messages.length - 1];
@@ -148,12 +160,11 @@ app.post("/api/deepseek/chat", async (req, res) => {
       }
     }
     const bodyPayload = {
-      ...req.body,
-      thinking: req.body.thinking ?? { type: "disabled" },
+      ...validatedPayload,
+      thinking: { type: "disabled" },
       messages,
     };
-    delete bodyPayload.isInternetMode;
-    delete bodyPayload.entitlement;
+
     if (controller.signal.aborted) return;
     const { status, data } = await requestChatCompletion(bodyPayload, apiKey, {
       signal: controller.signal,
@@ -162,11 +173,17 @@ app.post("/api/deepseek/chat", async (req, res) => {
     if (controller.signal.aborted) return;
     if (status >= 200 && status < 300 && !data?.error && entitlementCharge) {
       data.entitlement = await entitlementCharge.commit();
-    }
+      entitlementCharge = null;
+    } else { await releaseCharge(); }
     if (!controller.signal.aborted) res.status(status).json(data);
   } catch (error: any) {
+    try { await releaseCharge(); } catch (cleanupError) { error = cleanupError; }
     if (!controller.signal.aborted && !res.destroyed) sendApiError(res, error);
   } finally {
+    if (entitlementCharge) {
+      try { await releaseCharge(); }
+      catch (error) { console.error("AI reservation cleanup deferred until expiry", error); }
+    }
     req.removeListener("aborted", cancelAbortedRequest);
     res.removeListener("close", cancelDisconnectedResponse);
   }
@@ -232,6 +249,26 @@ function isDailyDeepBypassRequest(req: express.Request) {
   return getClientUserIntents(messages).some(isDailyDeepIntent);
 }
 
+function validateChatPayload(body: any) {
+  if (!Array.isArray(body?.messages) || body.messages.length > 60) throw Object.assign(new Error("消息格式无效或消息过多。"), { status: 400 });
+  if (JSON.stringify(body.messages).length > 60_000) throw Object.assign(new Error("消息过长，请缩短后重试。"), { status: 413 });
+  for (const message of body.messages) {
+    if (!message || !["system", "user", "assistant"].includes(message.role) || typeof message.content !== "string") throw Object.assign(new Error("消息格式无效。"), { status: 400 });
+  }
+  const operation = body.entitlement?.type || "tarot_message";
+  const limits: Record<string, number> = { tarot_message: 760, daily_deep: 1400, bazi: 1400, guardian: 420, simulator: 1100, diary_review: 760 };
+  const model = operation === "tarot_message" ? "deepseek-v4-flash" : "deepseek-v4-pro";
+  const maximum = limits[operation] || 760;
+  const maxTokens = Number(body.max_tokens);
+  return {
+    model,
+    messages: body.messages,
+    max_tokens: Number.isFinite(maxTokens) ? Math.min(maximum, Math.max(1, Math.floor(maxTokens))) : maximum,
+    temperature: Math.min(1.5, Math.max(0, Number(body.temperature) || 0.7)),
+    ...(body.response_format?.type === "json_object" ? { response_format: { type: "json_object" } } : {}),
+  };
+}
+
 function requireEnv(name: string, label: string) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -249,13 +286,6 @@ function getPublicBaseUrl(req: express.Request) {
 function buildRelationshipInviteUrl(req: express.Request, token: string) {
   const baseUrl = getPublicBaseUrl(req).replace(/\/$/, "");
   return `${baseUrl}/app/bazi?invite=${encodeURIComponent(token)}`;
-}
-
-function pruneRelationshipInvites() {
-  const now = Date.now();
-  for (const [token, invite] of relationshipInvites.entries()) {
-    if (invite.expiresAt <= now) relationshipInvites.delete(token);
-  }
 }
 
 function sanitizeRelationshipProfile(input: any) {

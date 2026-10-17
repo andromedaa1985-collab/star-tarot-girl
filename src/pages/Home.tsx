@@ -1,3 +1,4 @@
+import { autoSyncAccountArchive } from '../components/AccountAutoSync';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import TarotAtmosphere from '../components/TarotDeckArtwork';
 import { TAROT_CARDS, TAROT_CARD_BACK, TAROT_CARD_INDEX_BY_IMAGE, resolveTarotArtwork } from '../lib/tarotDeck';
@@ -64,7 +65,7 @@ import { createGenerationTrace } from '../lib/generationTrace';
 import { apiFetch } from '../lib/apiClient';
 import { shareImageWithNativeSheet } from '../lib/nativeShare';
 import { authHeaders, getStoredAccountSession, isAccountTransitioning, isCurrentAccountSession, isInvalidAccountSessionResponse } from '../lib/accountClient';
-import { applyEntitlementSnapshot, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
+import { applyEntitlementSnapshot, claimEnergyReward, startPlusTrialOnServer, type EntitlementSnapshot } from '../lib/entitlementClient';
 import { drawTarotCardIndices, drawTarotPositions, type TarotPosition } from '../lib/tarotRandom';
 import { preloadImages } from '../lib/preloadImages';
 import { shouldSubmitOnEnter } from '../lib/composerKeyboard';
@@ -1470,6 +1471,8 @@ export default function Home() {
   const [dailyDeepImpressionIds, setDailyDeepImpressionIds] = useState<Set<string>>(() => new Set());
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
   const [petExpressionOverride, setPetExpressionOverride] = useState<CompanionExpression | null>(null);
+  const [rewardNotice, setRewardNotice] = useState<string | null>(null);
+  const rewardBusy = useRef(false);
   const [historyQuotaNotice, setHistoryQuotaNotice] = useState(false);
   const [followUpReadingId, setFollowUpReadingId] = useState<string | null>(null);
   const [requestedArchiveId, setRequestedArchiveId] = useState<string | null>(null);
@@ -1796,8 +1799,7 @@ export default function Home() {
     }
     try {
       const snapshot = await startPlusTrialOnServer();
-      setMembership(snapshot.membership);
-      setEnergy(snapshot.energy);
+      applyServerEntitlements(snapshot);
       setShowUpgradePrompt(false);
       setAppEvents((events) => recordAppEvent(events, 'trial_start', { source: upgradeReason }));
       addExp(20);
@@ -1812,31 +1814,44 @@ export default function Home() {
     navigate('/app/profile?plus=1');
   };
 
-  const handleDailyCheckIn = () => {
-    if (hasCheckedInToday) return;
-    setCheckInStreak(lastCheckInDate === yesterdayKey ? checkInStreak + 1 : 1);
-    setLastCheckInDate(todayKey);
-    setEnergy((value) => value + dailyCheckInEnergy);
-    setAppEvents((events) => recordAppEvent(events, 'daily_check_in', { energy: dailyCheckInEnergy }));
-    addExp(15);
+  const claimReward = async (kind: 'checkin' | 'mission' | 'return') => {
+    if (rewardBusy.current) return;
+    const session = getStoredAccountSession();
+    rewardBusy.current = true;
+    setRewardNotice(null);
+    try {
+      if (session) {
+        if (kind === 'mission') await autoSyncAccountArchive();
+        const snapshot = await claimEnergyReward(kind);
+        if (!isCurrentAccountSession(session)) return;
+        applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
+        if (snapshot.rewards?.checkin) setLastCheckInDate(snapshot.rewards.checkin);
+        if (snapshot.rewards?.mission) setDailyRewardDate(snapshot.rewards.mission);
+        if (snapshot.rewards?.checkInStreak) setCheckInStreak(snapshot.rewards.checkInStreak);
+        if (snapshot.rewards?.return) setEngagement(value => ({ ...value, returnRewardDate: snapshot.rewards.return }));
+      } else {
+        // Guest rewards are local preview points; server AI has its own bounded trial.
+        if (kind === 'checkin') {
+          setCheckInStreak(lastCheckInDate === yesterdayKey ? checkInStreak + 1 : 1);
+          setLastCheckInDate(todayKey);
+          setEnergy(value => value + dailyCheckInEnergy);
+        } else if (kind === 'mission') {
+          setDailyRewardDate(todayKey);
+          setEnergy(value => value + dailyMissionEnergy);
+        } else {
+          setEngagement(value => ({ ...value, returnRewardDate: todayKey }));
+          setEnergy(value => value + (plusActive ? 3 : 2));
+        }
+      }
+      addExp(kind === 'checkin' ? 15 : kind === 'mission' ? 30 : 10);
+      setAppEvents(events => recordAppEvent(events, kind === 'checkin' ? 'daily_check_in' : kind === 'mission' ? 'daily_reward' : 'return_reward'));
+      setRewardNotice('奖励已领取。');
+    } catch (error: any) { setRewardNotice(error.message || '奖励暂时未领取，请稍后重试。'); }
+    finally { rewardBusy.current = false; }
   };
-
-  const handleClaimDailyReward = () => {
-    if (!canClaimDailyReward) return;
-    setDailyRewardDate(todayKey);
-    setEnergy((value) => value + dailyMissionEnergy);
-    setAppEvents((events) => recordAppEvent(events, 'daily_reward', { energy: dailyMissionEnergy }));
-    addExp(30);
-  };
-
-  const handleClaimReturnReward = () => {
-    if (!canClaimReturnReward) return;
-    const amount = plusActive ? 3 : 2;
-    setEngagement((current) => ({ ...current, returnRewardDate: todayKey }));
-    setEnergy((value) => value + amount);
-    setAppEvents((events) => recordAppEvent(events, 'return_reward', { energy: amount, activeDays: engagement.activeDays }));
-    addExp(10);
-  };
+  const handleDailyCheckIn = () => { if (!hasCheckedInToday) void claimReward('checkin'); };
+  const handleClaimDailyReward = () => { if (canClaimDailyReward) void claimReward('mission'); };
+  const handleClaimReturnReward = () => { if (canClaimReturnReward) void claimReward('return'); };
 
   const handleMemoryRecallAction = () => {
     if (memoryRecall.prompt) {
@@ -2177,6 +2192,7 @@ export default function Home() {
         handled.handledEntitlementError = true;
         throw handled;
       }
+      if (response.status === 429) setRewardNotice(data?.error?.message || '请求较多，请稍后再试或登录账户。');
       if (!response.ok || data?.error) throw new Error(data?.error?.message || '塔罗解读请求失败');
       const choice = data?.choices?.[0];
       const aiAnswer = choice?.message?.content;
@@ -3022,6 +3038,7 @@ export default function Home() {
 
       <div ref={scrollRef} onScroll={handleScroll} className={clsx('rail-home-scroll relative z-10 h-full overflow-x-hidden overflow-y-auto px-5 pt-[88px] sm:px-8', conversationOpen ? 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+180px)]' : 'pb-[calc(var(--rail-nav-height)+var(--app-safe-bottom)+32px)]')}>
         <div className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-5">
+          {rewardNotice && <p role="status" className="rail-panel p-3 text-sm">{rewardNotice}</p>}
           {!conversationOpen && (
             <motion.div className="rail-home-focus"
               initial={reducedMotion ? false : { opacity: 0.65, x: routeDirection * 16 }}

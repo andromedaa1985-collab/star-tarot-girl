@@ -7,7 +7,9 @@ export interface EntitlementSnapshot {
   membership: MembershipState;
   energy: number;
   updatedAt: string;
+  revision?: number;
   message?: string;
+  rewards?: { checkin?: string; mission?: string; return?: string; checkInStreak?: number };
 }
 
 export interface ApplyOrderResult {
@@ -38,6 +40,8 @@ function normalizeSnapshot(data: any): EntitlementSnapshot {
     membership: normalizeMembership(data?.membership),
     energy: Math.max(0, Math.floor(Number(data?.energy) || 0)),
     updatedAt: typeof data?.updatedAt === 'string' ? data.updatedAt : new Date().toISOString(),
+    revision: typeof data?.revision === 'number' ? data.revision : undefined,
+    rewards: data?.rewards,
     message: typeof data?.message === 'string' ? data.message : undefined,
   };
 }
@@ -98,6 +102,8 @@ export async function applyPaidOrderEntitlement(orderId: string): Promise<ApplyO
   };
 }
 
+const appliedRevisions = new Map<string, number>();
+
 export function applyEntitlementSnapshot(
   snapshot: EntitlementSnapshot,
   setters: {
@@ -105,6 +111,20 @@ export function applyEntitlementSnapshot(
     setEnergy: Dispatch<SetStateAction<number>>;
   },
 ) {
-  setters.setMembership(snapshot.membership);
+  const owner = getStoredAccountSession()?.user.id || 'guest';
+  const previous = appliedRevisions.get(owner) ?? -1;
+  if (typeof snapshot.revision === 'number') {
+    if (snapshot.revision < previous) return;
+    appliedRevisions.set(owner, snapshot.revision);
+  }
+  setters.setMembership(normalizeMembership(snapshot.membership));
   setters.setEnergy(snapshot.energy);
+}
+
+export async function claimEnergyReward(kind: 'checkin' | 'mission' | 'return') {
+  const response = await apiFetch('/api/entitlements/rewards', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(requireAccountToken()) },
+    body: JSON.stringify({ kind }),
+  });
+  return normalizeSnapshot(await readJsonResponse(response));
 }

@@ -3,7 +3,7 @@ import { after, afterEach, before, test } from "node:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { NETLIFY_STORAGE_TIMEOUT_MS, readStoreJson, writeStoreJson } from "../api/jsonStore.js";
+import { NETLIFY_STORAGE_TIMEOUT_MS, readStoreJson, writeStoreJson, readVersionedStoreJson, compareAndSetStoreJson, updateStoreJson } from "../api/jsonStore.js";
 import { PERSISTENT_STORE_TIMEOUT_MS, RequestDeadlineError, runWithRequestDeadline } from "../api/_requestDeadline.js";
 import { ACCOUNT_REQUEST_TIMEOUT_MS } from "../src/lib/accountClient.js";
 
@@ -169,4 +169,41 @@ test("failed and unconfirmed Netlify payload PUTs are never retried by the SDK",
     await assert.rejects(runWithRequestDeadline({ expiresAt: Date.now() + 30 }, () => writeStoreJson("astro-entitlements", "users/fixture-owner", { energy: 4 }, localDir)), expectedError(503, "STORE_WRITE_UNCONFIRMED"));
     assert.equal(payloadCalls, 1);
   }
+});
+
+
+test("Netlify conditional writes reject a stale ETag and preserve the latest value", async () => {
+  let value: any = null;
+  let etag = "";
+  let revision = 0;
+  globalThis.fetch = async (input, init) => {
+    if (isSigningRequest(input)) return signingResponse();
+    const headers = new Headers(init?.headers);
+    if (init?.method?.toUpperCase() === "PUT") {
+      const matches = value === null ? headers.get("if-none-match") === "*" : headers.get("if-match") === etag;
+      if (!matches) return new Response(null, { status: 412 });
+      value = JSON.parse(String(init.body)); etag = `fixture-${++revision}`;
+      return new Response("", { headers: { etag } });
+    }
+    return value === null ? new Response(null, { status: 404 }) : new Response(JSON.stringify(value), { headers: { etag } });
+  };
+  assert.equal(await compareAndSetStoreJson("fixture", "counter", { count: 0 }, null, localDir), true);
+  const old = await readVersionedStoreJson<any>("fixture", "counter", localDir);
+  await Promise.all([1, 2].map(() => updateStoreJson<any>("fixture", "counter", localDir, current => ({ count: current.count + 1 }))));
+  assert.equal(value.count, 2);
+  assert.equal(await compareAndSetStoreJson("fixture", "counter", { count: -1 }, old.version, localDir), false);
+  assert.equal(value.count, 2);
+});
+
+test("Netlify refuses versionless existing records and never retries an uncertain conditional PUT", async () => {
+  let writes = 0;
+  globalThis.fetch = async (input, init) => {
+    if (isSigningRequest(input)) return signingResponse();
+    if (init?.method?.toUpperCase() === "PUT") { writes++; return new Response("failure", { status: 503 }); }
+    return new Response('{"count":1}');
+  };
+  await assert.rejects(readVersionedStoreJson("fixture", "counter", localDir), expectedError(503, "STORE_VERSION_MISSING"));
+  assert.equal(writes, 0);
+  await assert.rejects(compareAndSetStoreJson("fixture", "counter", { count: 2 }, "fixture-etag", localDir), expectedError(503, "STORE_WRITE_UNCONFIRMED"));
+  assert.equal(writes, 1);
 });

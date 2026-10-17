@@ -29,7 +29,7 @@ before(async () => {
     process.chdir(scratchDirectory);
     ({ app } = await import("../api/index.js"));
   } finally {
-    process.chdir(previousCwd);
+    process.chdir(scratchDirectory);
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -41,8 +41,10 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${address.port}`;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = realFetch;
+  await rm(path.join(scratchDirectory, ".data/ai-budgets"), { recursive: true, force: true });
+  await rm(path.join(scratchDirectory, ".data/request-limits"), { recursive: true, force: true });
 });
 
 after(async () => {
@@ -53,6 +55,7 @@ after(async () => {
     });
   }
   if (scratchDirectory) {
+    process.chdir(projectRoot);
     const allowedRoot = path.resolve(projectRoot, "work") + path.sep;
     assert.ok(path.resolve(scratchDirectory).startsWith(allowedRoot));
     await rm(scratchDirectory, { recursive: true, force: true });
@@ -291,7 +294,7 @@ test("a stalled account lookup during entitlement prepare returns a bounded acco
   } finally { process.env.UPSTASH_REDIS_REST_URL = ""; process.env.UPSTASH_REDIS_REST_TOKEN = ""; }
 });
 
-test("a stalled entitlement commit reports an uncertain debit instead of retrying it", async () => {
+test("a stalled entitlement reservation reports an uncertain debit without calling AI or retrying it", async () => {
   process.env.UPSTASH_REDIS_REST_URL = "https://store-fixture.example.invalid";
   process.env.UPSTASH_REDIS_REST_TOKEN = "api-tests-store-placeholder";
   const fixtureId = "commit-fixture";
@@ -301,10 +304,11 @@ test("a stalled entitlement commit reports an uncertain debit instead of retryin
   globalThis.fetch = async (input, init) => {
     if (input === "https://api.deepseek.com/chat/completions") return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Fixture complete" } }] }), { headers: { "Content-Type": "application/json" } });
     assert.equal(input, "https://store-fixture.example.invalid");
-    const [command, key, value] = JSON.parse(String(init?.body));
-    if (command === "SET") {
+    const args = JSON.parse(String(init?.body));
+    const [command, key] = args;
+    if (command === "EVAL") {
       writes += 1;
-      fixtureRecord = JSON.parse(value);
+      fixtureRecord = JSON.parse(args[6]);
       return new Promise<Response>(() => {});
     }
     const result = String(key).startsWith("astro-rail-accounts:") ? { id: fixtureId, email: "fixture@example.invalid", displayName: "Fixture", createdAt: now, updatedAt: now } : fixtureRecord;

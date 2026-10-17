@@ -1,3 +1,4 @@
+import { ENTITLEMENT_UPDATED_EVENT } from '../lib/aiClient';
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import {
   defaultMembership,
@@ -15,7 +16,7 @@ import {
 import { saveAutoRecoveryPoint } from '../lib/appBackup';
 import { normalizeGeneratedStorageValue, type GenerationKind } from '../lib/generationTrace';
 import { trackAnalyticsEvent } from '../lib/analyticsClient';
-import { fetchCurrentEntitlements } from '../lib/entitlementClient';
+import { applyEntitlementSnapshot, fetchCurrentEntitlements } from '../lib/entitlementClient';
 import { getStoredAccountSession } from '../lib/accountClient';
 import { canPersistWorkspace, writeWorkspaceStorage } from '../lib/workspacePersistence';
 import { appendConversationCardDrop, normalizeCollectionDrops, type CollectionDropEvent, type ConversationCardCompletion, type NewCollectionCardDrop } from '../lib/collectionCards';
@@ -365,6 +366,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   React.useEffect(() => {
+    const update = (event: Event) => {
+      const { userId, snapshot } = (event as CustomEvent).detail || {};
+      if (userId !== getStoredAccountSession()?.user.id || !canPersistWorkspace(workspaceOwner.current)) return;
+      applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
+    };
+    window.addEventListener(ENTITLEMENT_UPDATED_EVENT, update);
+    return () => window.removeEventListener(ENTITLEMENT_UPDATED_EVENT, update);
+  }, []);
+
+  React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     // Trial/order return owns the next entitlement snapshot. An older initial
     // GET must not arrive afterwards and overwrite its newly granted rights.
@@ -372,8 +383,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     fetchCurrentEntitlements()
       .then((snapshot) => {
         if (!canPersistWorkspace(workspaceOwner.current)) return;
-        setMembership(snapshot.membership);
-        setEnergy(snapshot.energy);
+        applyEntitlementSnapshot(snapshot, { setMembership, setEnergy });
+        if (snapshot.rewards?.checkin) setLastCheckInDate(snapshot.rewards.checkin);
+        if (snapshot.rewards?.mission) setDailyRewardDate(snapshot.rewards.mission);
+        if (snapshot.rewards?.checkInStreak) setCheckInStreak(snapshot.rewards.checkInStreak);
+        if (snapshot.rewards?.return) setEngagement(value => ({ ...value, returnRewardDate: snapshot.rewards.return }));
       })
       .catch(() => undefined);
   }, []);

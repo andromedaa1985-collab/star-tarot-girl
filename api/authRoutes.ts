@@ -1,6 +1,7 @@
+import { consumeRequestLimit, requestNetworkKey } from "./requestLimits.js";
 import type { Express, Request, Response } from "express";
 import crypto from "crypto";
-import { readStoreJson, writeStoreJson } from "./jsonStore.js";
+import { readStoreJson, writeStoreJson, updateStoreJson } from "./jsonStore.js";
 
 const ACCOUNT_STORE_NAME = "astro-rail-accounts";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -25,6 +26,7 @@ type CloudArchive = {
   archive: any;
   updatedAt: string;
   recordCount: number;
+  revision?: string;
 };
 
 type TokenPayload = {
@@ -131,6 +133,7 @@ function publicUser(user: UserRecord, archive?: CloudArchive | null) {
     createdAt: user.createdAt,
     archiveUpdatedAt: archive?.updatedAt || null,
     archiveRecordCount: archive?.recordCount || 0,
+    archiveRevision: archive ? archiveRevision(archive) : null,
   };
 }
 
@@ -176,6 +179,8 @@ function emailIndexKey(email: string) {
 function userKey(userId: string) {
   return `users/${userId}`;
 }
+
+function archiveRevision(record: CloudArchive) { return record.revision || sha256(JSON.stringify(record.archive)); }
 
 function archiveKey(userId: string) {
   return `archives/${userId}`;
@@ -228,7 +233,7 @@ function getArchiveRecordCount(archive: any) {
 }
 
 function validateArchive(archive: any) {
-  if (!archive || typeof archive !== "object" || archive.format !== "astro-rail-local-archive" || typeof archive.data !== "object") {
+  if (!archive || typeof archive !== "object" || archive.format !== "astro-rail-local-archive" || archive.version !== 1 || !archive.data || typeof archive.data !== "object" || Array.isArray(archive.data)) {
     throw new Error("云端存档格式不正确。");
   }
   return archive;
@@ -243,12 +248,18 @@ function sendError(res: Response, error: any, status = 400) {
   });
 }
 
+async function enforceAuthLimit(req: Request, operation: "login" | "register") {
+  try { await consumeRequestLimit(`auth:${operation}:${requestNetworkKey(req)}`, operation === "register" ? 5 : 15, operation === "register" ? 3_600_000 : 60_000); }
+  catch (error: any) { if (error?.status === 429) throw error; throw accountServiceError(); }
+}
+
 export function registerAuthRoutes(app: Express) {
   app.post("/api/auth/register", async (req, res) => {
     try {
       const email = normalizeEmail(req.body?.email);
       validateEmail(email);
       const password = validatePassword(req.body?.password);
+      await enforceAuthLimit(req, "register");
       const existing = await findUserByEmail(email);
       if (existing) throw new Error("这个邮箱已经注册过了，请直接登录。");
 
@@ -266,7 +277,12 @@ export function registerAuthRoutes(app: Express) {
       };
 
       await writeJson(userKey(userId), user);
-      await writeJson(emailIndexKey(email), { userId });
+      try {
+        await updateStoreJson<EmailIndex>(ACCOUNT_STORE_NAME, emailIndexKey(email), LOCAL_STORE_DIR, current => {
+          if (current) throw Object.assign(new Error("这个邮箱已经注册过了，请直接登录。"), { status: 409 });
+          return { userId };
+        });
+      } catch (error: any) { if (error?.status === 409) throw error; throw accountServiceError(); }
 
       res.json({
         token: createSession(user),
@@ -283,6 +299,7 @@ export function registerAuthRoutes(app: Express) {
       validateEmail(email);
       // Verify existing credentials as entered; new-password policy belongs to registration.
       const password = validatePassword(req.body?.password, 1);
+      await enforceAuthLimit(req, "login");
       const user = await findUserByEmail(email);
       if (!user || !(await verifyPassword(password, user))) {
         throw new Error("邮箱或密码不正确。");
@@ -313,14 +330,14 @@ export function registerAuthRoutes(app: Express) {
     try {
       const user = await requireUser(req);
       const archive = validateArchive(req.body?.archive);
-      const record: CloudArchive = {
-        userId: user.id,
-        archive,
-        updatedAt: new Date().toISOString(),
-        recordCount: getArchiveRecordCount(archive),
-      };
-      await writeJson(archiveKey(user.id), record);
+      const baseRevision = req.body?.baseRevision;
+      if (baseRevision !== null && typeof baseRevision !== "string") throw Object.assign(new Error("请先下载并合并云端存档，再重新同步。本机内容已保留。"), { status: 409, code: "ARCHIVE_CONFLICT" });
+      const record = await updateStoreJson<CloudArchive>(ACCOUNT_STORE_NAME, archiveKey(user.id), LOCAL_STORE_DIR, current => {
+        if ((current ? archiveRevision(current) : null) !== baseRevision) throw Object.assign(new Error("云端已有其他设备的新记录。请在设置中下载并合并后重新同步，本机内容已保留。"), { status: 409, code: "ARCHIVE_CONFLICT" });
+        return { userId: user.id, archive, updatedAt: new Date().toISOString(), recordCount: getArchiveRecordCount(archive), revision: crypto.randomUUID() };
+      });
       res.json({
+        archiveRevision: archiveRevision(record),
         archiveUpdatedAt: record.updatedAt,
         archiveRecordCount: record.recordCount,
       });
@@ -338,6 +355,7 @@ export function registerAuthRoutes(app: Express) {
         return res.status(404).json({ error: { message: "这个账户还没有云端存档。" } });
       }
       res.json({
+        archiveRevision: archiveRevision(archive),
         archive: archive.archive,
         archiveUpdatedAt: archive.updatedAt,
         archiveRecordCount: archive.recordCount,
