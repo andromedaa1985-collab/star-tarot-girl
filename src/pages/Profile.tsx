@@ -12,7 +12,9 @@ import {
   getPlusDaysLeft,
   isPlusActive,
   isTesterActive,
+  TESTER_ACCESS_DAYS,
 } from '../lib/membership';
+import { formatAppDateTime, getTrustedNow, useTrustedTime } from '../lib/trustedTime';
 import { getUserSegment } from '../lib/engagement';
 import { normalizeUserAddress } from '../lib/aiPrompting';
 import { VISIBLE_SHOP_PLANS } from '../lib/pricing';
@@ -42,6 +44,7 @@ const PAY_METHODS = [
   { id: 'alipay', label: '支付宝', desc: '支持支付宝余额、银行卡等常用方式' },
   { id: 'wechat', label: '微信支付', desc: '支持微信扫码或手机支付' },
 ] as const;
+const REDEEM_DRAFT_KEY = 'tarot:redeemDraft';
 
 
 type PayMethodId = (typeof PAY_METHODS)[number]['id'];
@@ -52,6 +55,7 @@ const PLAN_REDIRECTS: Record<string, string> = {
 };
 
 export default function Profile() {
+  useTrustedTime();
   const { bondExp, bondLevel, energy, setEnergy, collectionDrops, messages, diaryEntries, tarotReadings, simulationHistory, guardianMessages, settings, setSettings, userName, setUserName, preferredAddress, setPreferredAddress, setPreferredAddressPromptDismissed, userAvatar, setUserAvatar, profiles, setProfiles, activeProfileId, setActiveProfileId, setBaziFormData, setBaziMessages, checkInStreak, lastCheckInDate, membership, setMembership, engagement, appEvents } = useAppContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -70,7 +74,10 @@ export default function Profile() {
   const [redeemBusy, setRedeemBusy] = useState(false);
   const [redeemNotice, setRedeemNotice] = useState<{ error: boolean; message: string } | null>(null);
   const trialResumeAttempted = useRef(false);
-  const [redeemCode, setRedeemCode] = useState('');
+  const [redeemCode, setRedeemCode] = useState(() => {
+    try { return sessionStorage.getItem(REDEEM_DRAFT_KEY) || ''; } catch { return ''; }
+  });
+  const redeemInputRef = useRef<HTMLInputElement>(null);
   const [editName, setEditName] = useState(userName);
   const [editPreferredAddress, setEditPreferredAddress] = useState(preferredAddress);
   const [editAvatar, setEditAvatar] = useState(userAvatar);
@@ -97,11 +104,12 @@ export default function Profile() {
   const progressPercent = Math.min(100, (bondExp / nextLevelExp) * 100);
   const userQuestionCount = messages.filter(msg => msg.role === 'user').length;
   const lastCheckInLabel = lastCheckInDate ? lastCheckInDate.replace(/-/g, '.') : '还没开始';
-  const plusActive = isPlusActive(membership);
-  const testerActive = isTesterActive(membership);
-  const trialAvailable = canStartPlusTrial(membership);
-  const membershipLabel = getMembershipLabel(membership);
-  const plusDaysLeft = getPlusDaysLeft(membership);
+  const trustedNow = getTrustedNow();
+  const plusActive = isPlusActive(membership, trustedNow);
+  const testerActive = isTesterActive(membership, trustedNow);
+  const trialAvailable = canStartPlusTrial(membership, trustedNow);
+  const membershipLabel = getMembershipLabel(membership, trustedNow);
+  const plusDaysLeft = getPlusDaysLeft(membership, trustedNow);
   const paymentOrderId = searchParams.get('order') || '';
   const paymentReturnType = searchParams.get('payment') || '';
   const plusParam = searchParams.get('plus') || '';
@@ -163,7 +171,8 @@ export default function Profile() {
       return;
     }
     if (!getStoredAccountSession()) {
-      setRedeemNotice({ error: true, message: '请先在设置中登录账户，再回来兑换。' });
+      try { sessionStorage.setItem(REDEEM_DRAFT_KEY, normalizedCode); } catch { /* The code can be entered again after login. */ }
+      navigate(`/auth?${new URLSearchParams({ next: '/app/profile?redeem=1' }).toString()}`);
       return;
     }
     setRedeemBusy(true);
@@ -172,6 +181,7 @@ export default function Profile() {
       const snapshot = await redeemEntitlementCode(normalizedCode);
       applyServerEntitlements(snapshot);
       setRedeemCode('');
+      try { sessionStorage.removeItem(REDEEM_DRAFT_KEY); } catch { /* The server remains the redemption authority. */ }
       setRedeemNotice({ error: false, message: snapshot.message || '兑换成功，权益已生效。' });
     } catch (error: any) {
       setRedeemNotice({ error: true, message: error.message || '兑换失败，请稍后再试。' });
@@ -179,6 +189,14 @@ export default function Profile() {
       setRedeemBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (searchParams.get('redeem') !== '1') return;
+    redeemInputRef.current?.focus();
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('redeem');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams]);
 
   const checkPaymentOrder = async (orderId: string) => {
     if (!orderId) return;
@@ -546,14 +564,7 @@ export default function Profile() {
             <button type="button" onClick={() => setShowMembershipModal(false)} className="mt-3 w-full py-2 text-sm text-apple-text-muted hover:text-apple-text">暂时不用</button>
           </div>
 
-          <details className="border-t border-apple-border pt-4">
-            <summary className="cursor-pointer py-2 text-sm font-medium">有兑换码？</summary>
-            <div className="mt-3 flex gap-2">
-              <input aria-label="兑换码" value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} placeholder="输入兑换码" className="rail-field min-w-0 flex-1" />
-              <button type="button" onClick={handleRedeemTesterCode} disabled={redeemBusy} className="rail-button-secondary shrink-0">{redeemBusy ? '兑换中' : '兑换'}</button>
-            </div>
-            {redeemNotice && <ActionNotice {...redeemNotice} />}
-          </details>
+          <button type="button" onClick={() => { setShowMembershipModal(false); requestAnimationFrame(() => redeemInputRef.current?.focus()); }} className="w-full border-t border-apple-border pt-4 text-sm text-apple-text-muted">有兑换码？前往兑换体验</button>
         </div>
       </ProfileDialog>
 
@@ -571,11 +582,22 @@ export default function Profile() {
       <section className="rail-panel mb-8" aria-labelledby="membership-heading">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0 max-w-[56ch]">
-            <h2 id="membership-heading" className="flex items-center gap-2 text-base font-medium"><Crown size={17} className="text-apple-gold" />{testerActive ? '完整功能已解锁' : plusActive ? `Plus 会员 · 约 ${plusDaysLeft} 天` : '塔罗少女 Plus'}</h2>
+            <h2 id="membership-heading" className="flex items-center gap-2 text-base font-medium"><Crown size={17} className="text-apple-gold" />{testerActive ? membership.testerExpiresAt ? `${TESTER_ACCESS_DAYS} 天全功能体验` : '完整功能已解锁' : plusActive ? `Plus 会员 · 约 ${plusDaysLeft} 天` : '塔罗少女 Plus'}</h2>
             <p className="rail-muted mt-2">{membershipLabel}</p>
+            {membership.testerExpiresAt && <p className="rail-muted mt-2">体验截止：{formatAppDateTime(new Date(membership.testerExpiresAt))}（北京时间）。{testerActive ? '到期自动结束，已有记录保留。' : '已购权益仍按原有效期使用。'}</p>}
           </div>
           <button type="button" onClick={() => setShowMembershipModal(true)} className="rail-button-secondary shrink-0">{testerActive ? '查看权益' : plusActive ? '管理权益' : '查看付费方案'}<ChevronRight size={16} /></button>
         </div>
+      </section>
+
+      <section className="rail-panel mb-8" aria-labelledby="redeem-heading">
+        <h2 id="redeem-heading" className="flex items-center gap-2 text-base font-medium"><Gift size={17} className="text-apple-gold" />兑换体验码</h2>
+        <p className="rail-muted mt-2">免费体验全部功能 {TESTER_ACCESS_DAYS} 天，从兑换成功时起计时。每个账户限领一次，无需付款，不自动续费。</p>
+        <form className="mt-4 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void handleRedeemTesterCode(); }}>
+          <input id="tester-code" ref={redeemInputRef} aria-label="兑换码" value={redeemCode} onChange={(event) => setRedeemCode(event.target.value)} maxLength={64} autoCapitalize="characters" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="输入体验兑换码" className="rail-field min-w-0 flex-1 basis-44" />
+          <button type="submit" disabled={redeemBusy} className="rail-button-secondary shrink-0">{redeemBusy ? '兑换中' : session ? '兑换体验' : '登录后兑换'}</button>
+        </form>
+        {redeemNotice && <ActionNotice {...redeemNotice} />}
       </section>
 
       <details className="mb-8 border-y border-apple-border py-1">

@@ -351,6 +351,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return normalizeMembership(defaultMembership);
     }
   });
+  React.useEffect(() => {
+    // Refresh every gated view at expiry, even when the current page stays open.
+    const now = Date.now();
+    const deadlines = [membership.expiresAt, membership.testerExpiresAt, ...Object.values(membership.featureExpiresAt)]
+      .map(value => Date.parse(value || '')).filter(value => Number.isFinite(value) && value > now);
+    if (!deadlines.length) return;
+    const refresh = () => setMembership(current => ({ ...current }));
+    const timer = window.setTimeout(refresh, Math.min(Math.min(...deadlines) - now + 25, 2_147_483_647));
+    window.addEventListener('focus', refresh);
+    return () => { window.clearTimeout(timer); window.removeEventListener('focus', refresh); };
+  }, [membership]);
   const [engagement, setEngagement] = useState<EngagementState>(() => {
     const saved = localStorage.getItem('engagement');
     if (!saved) return defaultEngagement;

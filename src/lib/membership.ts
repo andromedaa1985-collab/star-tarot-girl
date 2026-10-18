@@ -5,6 +5,7 @@ export type PremiumFeature = 'bazi' | 'simulator' | 'guardian' | 'tarot_deep_rep
 export interface MembershipState {
   plan: MembershipPlan;
   expiresAt: string | null;
+  testerExpiresAt: string | null;
   trialUsed: boolean;
   activatedAt: string | null;
   source: MembershipSource | null;
@@ -17,6 +18,7 @@ export const FREE_READING_LIMIT = 30;
 export const PLUS_READING_LIMIT = 200;
 export const PLUS_MONTHLY_DAYS = 31;
 export const PLUS_TRIAL_HOURS = 24;
+export const TESTER_ACCESS_DAYS = 3;
 export const PLUS_TRIAL_LEDGER_KEY = 'starrail:plusTrialLedger';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -27,6 +29,7 @@ const PLUS_INCLUDED_FEATURES: PremiumFeature[] = ['simulator', 'guardian'];
 export const defaultMembership: MembershipState = {
   plan: 'free',
   expiresAt: null,
+  testerExpiresAt: null,
   trialUsed: false,
   activatedAt: null,
   source: null,
@@ -74,6 +77,8 @@ export function normalizeMembership(value: unknown): MembershipState {
   return {
     plan: input.plan === 'plus' || input.plan === 'tester' ? input.plan : 'free',
     expiresAt: typeof input.expiresAt === 'string' ? input.expiresAt : null,
+    testerExpiresAt: typeof input.testerExpiresAt === 'string' && Number.isFinite(Date.parse(input.testerExpiresAt))
+      ? new Date(input.testerExpiresAt).toISOString() : null,
     trialUsed: Boolean(input.trialUsed) || trialUsedByLedger,
     activatedAt: typeof input.activatedAt === 'string' ? input.activatedAt : null,
     source:
@@ -87,14 +92,17 @@ export function normalizeMembership(value: unknown): MembershipState {
 }
 
 export function isPlusActive(membership: MembershipState, now = new Date()) {
-  if (membership.plan === 'tester') return true;
+  if (isTesterActive(membership, now)) return true;
   if (membership.plan !== 'plus') return false;
   if (!membership.expiresAt) return true;
   return new Date(membership.expiresAt).getTime() > now.getTime();
 }
 
-export function isTesterActive(membership: MembershipState) {
-  return membership.plan === 'tester';
+export function isTesterActive(membership: MembershipState, now = new Date()) {
+  if (membership.testerExpiresAt) return Date.parse(membership.testerExpiresAt) > now.getTime();
+  // Preserve historical admin accounts; new codes always grant a finite window
+  // separately from the user's existing paid/free plan.
+  return membership.plan === 'tester' && (!membership.expiresAt || Date.parse(membership.expiresAt) > now.getTime());
 }
 
 export function canStartPlusTrial(membership: MembershipState, now = new Date()) {
@@ -102,7 +110,7 @@ export function canStartPlusTrial(membership: MembershipState, now = new Date())
 }
 
 export function hasFeatureAccess(membership: MembershipState, feature: PremiumFeature, now = new Date()) {
-  if (membership.plan === 'tester') return true;
+  if (isTesterActive(membership, now)) return true;
   const unlocks = normalizeUnlocks(membership.unlocks);
   if (unlocks.includes(feature)) return true;
   const featureExpiry = membership.featureExpiresAt?.[feature];
@@ -111,24 +119,27 @@ export function hasFeatureAccess(membership: MembershipState, feature: PremiumFe
 }
 
 export function getPlusDaysLeft(membership: MembershipState, now = new Date()) {
-  if (membership.plan === 'tester') return 9999;
+  if (isTesterActive(membership, now)) {
+    const expiry = membership.testerExpiresAt || membership.expiresAt;
+    return expiry ? Math.max(1, Math.ceil((Date.parse(expiry) - now.getTime()) / DAY_MS)) : 9999;
+  }
   if (!isPlusActive(membership, now) || !membership.expiresAt) return 0;
   const diff = new Date(membership.expiresAt).getTime() - now.getTime();
   return Math.max(1, Math.ceil(diff / DAY_MS));
 }
 
 export function getReadingLimit(membership: MembershipState) {
-  if (membership.plan === 'tester') return 999999;
+  if (membership.plan === 'tester' && isTesterActive(membership)) return 999999;
   return isPlusActive(membership) ? PLUS_READING_LIMIT : FREE_READING_LIMIT;
 }
 
 export function getDailyCheckInEnergy(membership: MembershipState) {
-  if (membership.plan === 'tester') return 99;
+  if (membership.plan === 'tester' && isTesterActive(membership)) return 99;
   return isPlusActive(membership) ? 2 : 1;
 }
 
 export function getDailyMissionEnergy(membership: MembershipState) {
-  if (membership.plan === 'tester') return 99;
+  if (membership.plan === 'tester' && isTesterActive(membership)) return 99;
   return isPlusActive(membership) ? 6 : 3;
 }
 
@@ -165,6 +176,7 @@ export function startPlusTrial(membership: MembershipState, now = new Date()): M
   return {
     plan: 'plus',
     expiresAt: new Date(now.getTime() + PLUS_TRIAL_HOURS * HOUR_MS).toISOString(),
+    testerExpiresAt: membership.testerExpiresAt || null,
     trialUsed: true,
     activatedAt: now.toISOString(),
     source: 'trial',
@@ -181,6 +193,7 @@ export function activatePlusDays(membership: MembershipState, days = PLUS_MONTHL
   return {
     plan: 'plus',
     expiresAt: new Date(startAt + days * DAY_MS).toISOString(),
+    testerExpiresAt: membership.testerExpiresAt || null,
     trialUsed: membership.trialUsed,
     activatedAt: membership.activatedAt || now.toISOString(),
     source: 'payment',
@@ -190,16 +203,11 @@ export function activatePlusDays(membership: MembershipState, days = PLUS_MONTHL
   };
 }
 
-export function activateTesterAccess(now = new Date()): MembershipState {
+export function activateTesterAccess(membership: MembershipState, now = new Date()): MembershipState {
   return {
-    plan: 'tester',
-    expiresAt: null,
+    ...membership,
+    testerExpiresAt: new Date(now.getTime() + TESTER_ACCESS_DAYS * DAY_MS).toISOString(),
     trialUsed: true,
-    activatedAt: now.toISOString(),
-    source: 'tester',
-    unlocks: ['bazi', 'simulator', 'guardian', 'tarot_deep_report', 'relationship_report', 'relationship_weekly'],
-    featureExpiresAt: {},
-    dailyFortuneDeepCredits: 999999,
   };
 }
 
@@ -227,10 +235,11 @@ export function activateFeatureDays(
   return { ...membership, featureExpiresAt };
 }
 
-export function getMembershipLabel(membership: MembershipState) {
-  if (membership.plan === 'tester') return '全部功能已解锁';
-  if (!isPlusActive(membership)) return '免费版';
-  const daysLeft = getPlusDaysLeft(membership);
+export function getMembershipLabel(membership: MembershipState, now = new Date()) {
+  if (isTesterActive(membership, now)) return membership.testerExpiresAt
+    ? `全功能体验中，剩余约 ${getPlusDaysLeft(membership, now)} 天` : '全部功能已解锁';
+  if (!isPlusActive(membership, now)) return membership.testerExpiresAt ? '测试体验已结束 · 免费版' : '免费版';
+  const daysLeft = getPlusDaysLeft(membership, now);
   if (membership.source === 'trial') return `Plus 试用中，约 ${daysLeft} 天后结束`;
   return `Plus 生效中，剩余约 ${daysLeft} 天`;
 }
