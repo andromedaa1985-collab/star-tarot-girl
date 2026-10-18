@@ -21,6 +21,7 @@ import {
   isTesterActive,
   normalizeMembership,
   startPlusTrial,
+  TESTER_ACCESS_DAYS,
   type MembershipState,
   type PremiumFeature,
 } from "../src/lib/membership.js";
@@ -31,6 +32,7 @@ type EntitlementRecord = {
   energy: number;
   grantedOrderIds: string[];
   redeemedCodeHashes: string[];
+  testerRedeemedAt?: string;
   relationshipEntitlementsVersion?: 1;
   createdAt: string;
   updatedAt: string;
@@ -47,6 +49,7 @@ const ENTITLEMENT_LOCAL_DIR = ".data/entitlements";
 const DEFAULT_ENERGY = 5;
 const BUILTIN_TESTER_REDEEM_CODE_HASHES = [
   "8a6fa05a5c3f6c71b18b47fbf268b2e18cef6a7fa73f8820a9703ab65d2c70d1",
+  "e1cf97804c26919d75045fb964fe67ba0ab928cb2cb31620fe5c60e569d312c1",
 ];
 
 type ChatEntitlementType = "tarot_message" | "daily_deep" | "bazi" | "guardian" | "simulator" | "diary_review";
@@ -91,6 +94,9 @@ export function registerEntitlementRoutes(app: express.Express) {
       const user = await requireUser(req);
       const code = normalizeRedeemCode(req.body?.code);
       if (!code) return res.status(400).json({ error: { message: "请输入兑换码。" } });
+      if (code.length > 64) throw entitlementError("兑换码无效，请检查后再试。", 400);
+      await consumeRequestLimit(`redeem-user:${user.id}`, 10, 60_000);
+      await consumeRequestLimit(`redeem-network:${requestNetworkKey(req)}`, 30, 60_000);
 
       const codeHash = hashCode(code);
       if (!hasTesterRedeemCodes()) {
@@ -101,14 +107,18 @@ export function registerEntitlementRoutes(app: express.Express) {
       }
 
       const record = await mutateEntitlement(user.id, record => {
-        if (!record.redeemedCodeHashes.includes(codeHash)) record.redeemedCodeHashes.push(codeHash);
-        record.membership = activateTesterAccess();
-        record.energy = 999999;
+        if (record.testerRedeemedAt || record.redeemedCodeHashes.length || record.membership.testerExpiresAt || record.membership.plan === "tester") {
+          throw entitlementError(`每个账户只能领取一次 ${TESTER_ACCESS_DAYS} 天测试体验。`, 409);
+        }
+        const now = new Date();
+        record.redeemedCodeHashes.push(codeHash);
+        record.testerRedeemedAt = now.toISOString();
+        record.membership = activateTesterAccess(record.membership, now);
       });
       res.setHeader("Cache-Control", "no-store");
       res.json({
         ...toEntitlementSnapshot(record),
-        message: "兑换成功：测试权限和能量已经由后端入账。",
+        message: `兑换成功：${TESTER_ACCESS_DAYS} 天全功能体验已生效，72 小时后自动结束，不自动续费。`,
       });
     } catch (error: any) {
       sendError(res, error);
@@ -329,6 +339,7 @@ function normalizeEntitlementRecord(userId: string, record: EntitlementRecord | 
     energy: normalizeEnergy(record?.energy),
     grantedOrderIds: Array.isArray(record?.grantedOrderIds) ? record.grantedOrderIds.filter(Boolean) : [],
     redeemedCodeHashes: Array.isArray(record?.redeemedCodeHashes) ? record.redeemedCodeHashes.filter(Boolean) : [],
+    testerRedeemedAt: typeof record?.testerRedeemedAt === "string" ? record.testerRedeemedAt : undefined,
     relationshipEntitlementsVersion: record?.relationshipEntitlementsVersion === 1 ? 1 : undefined,
     createdAt: typeof record?.createdAt === "string" ? record.createdAt : now,
     updatedAt: typeof record?.updatedAt === "string" ? record.updatedAt : now,
