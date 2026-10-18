@@ -31,6 +31,8 @@ npm start
 
 `server.ts` 与 Vercel、Netlify 使用同一套 `api/index.ts` 路由，保证接口状态码、CORS 和权益校验一致。Vercel 配置见 `vercel.json`，Netlify 配置见 `netlify.toml`。
 
+Netlify 入口使用现代 Functions 默认导出，通过官方 `@netlify/aws-lambda-compat` 桥接 Express，保留平台自动注入的 Blobs 完整上下文。不要在此入口调用旧版 `connectLambda`：它会丢弃强一致读取所需的 `uncachedEdgeURL`，让登录、限流、权益和 AI 请求一起返回存储服务不可用。`/api/health` 只表示 HTTP 路由存活，不代表账户存储或 AI 上游可用。
+
 ## 离线缓存与更新
 
 生产版 Service Worker 保存公共页面入口和实际访问过的静态资源。已下载的带哈希 JS/CSS 与版本化塔罗图片直接复用缓存；未版本化的图片和字体在后台更新。页面入口和应用清单优先联网，失败时使用当前缓存。新部署通过新资源哈希及缓存版本切换更新。

@@ -1,12 +1,12 @@
 import serverless from "serverless-http";
-import { connectLambda } from "@netlify/blobs";
+import { withLambda, type HandlerResponse } from "@netlify/aws-lambda-compat";
 import app from "../../api/index";
 
 const serverlessHandler = serverless(app);
 
-export const handler = (event: any, context: any) => {
-  connectLambda(event);
-
+// Keep Netlify's modern runtime context intact. connectLambda replaces it with
+// legacy credentials that omit uncachedEdgeURL, breaking every strong read.
+export default withLambda(async (event, context) => {
   const path = event.path || "";
   let normalizedPath = path;
 
@@ -18,12 +18,16 @@ export const handler = (event: any, context: any) => {
     normalizedPath = `/api${path.startsWith("/") ? path : `/${path}`}`;
   }
 
-  return serverlessHandler(
+  const response = await serverlessHandler(
     {
       ...event,
       path: normalizedPath,
       rawPath: normalizedPath,
     },
     context,
-  );
-};
+  ) as HandlerResponse;
+  // Express represents an empty response as ""; the web Response constructor
+  // requires an absent body for these status codes, including CORS preflights.
+  if ([204, 205, 304].includes(response.statusCode)) delete response.body;
+  return response;
+});
